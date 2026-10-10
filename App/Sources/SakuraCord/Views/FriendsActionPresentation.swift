@@ -11,7 +11,7 @@ struct FriendsActionPresentation: ViewModifier {
         content
         .modifier(HumanCaptchaPresentation(store: friends.captcha))
         .onDisappear { friends.captcha.cancel() }
-        .onChange(of: model.selectedChannel?.id, initial: true) { model.reconcileIgnoredGroupWarning() }
+        .onChange(of: model.selectedChannel, initial: true) { model.reconcileIgnoredGroupWarning() }
         .onChange(of: model.ignoredUsers.ignoredUserIDs) { model.reconcileIgnoredGroupWarning() }
         .alert("An ignored account is in this group", isPresented: Binding(
             get: { model.ignoredUsers.groupWarning != nil },

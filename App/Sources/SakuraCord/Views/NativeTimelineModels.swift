@@ -445,7 +445,9 @@ enum NativeMessageTimelineItem: Equatable {
     }
 
     func containsMessage(_ id: MessageID) -> Bool {
-        if case let .ignoredMessages(group) = self { return group.messageIDs.contains(id) }
+        if case let .ignoredMessages(group) = self {
+            return !group.isRevealed && group.messageIDs.contains(id)
+        }
         return messageID == id
     }
 

@@ -391,11 +391,7 @@ extension NativeTimelineCanvasView {
         let header = makeMessageAccessibilityHeader(for: row, rowFrame: rowFrame)
         let element = header.element
         element.setAccessibilityCustomActions(
-            accessibilityMessageActions(
-                row,
-                rowFrame: rowFrame,
-                rowIndex: rowIndex
-            ).map { action in
+            accessibilityMessageActions(row, rowIndex: rowIndex).map { action in
                 let handler = action.handler
                 action.handler = { [weak self] in
                     guard let self, !self.sendTransitionBlocksInteractions else { return false }
@@ -824,6 +820,48 @@ extension NativeTimelineCanvasView {
             gallery.setAccessibilityChildren(attachmentChildren)
             children.append(gallery)
         }
+        if let region = layout.voiceMessageRegion {
+            children.append(voiceMessageAccessibilityElement(region, rowIndex: rowIndex, parent: parent))
+        }
+    }
+
+    private func voiceMessageAccessibilityElement(
+        _ region: NativeTimelineVoiceMessageRegion,
+        rowIndex: Int,
+        parent: Any?
+    ) -> NSAccessibilityElement {
+        let element = accessibilityElement(
+            role: .button,
+            label: "Voice message, \(VoiceMessageDurationFormat.string(region.duration))",
+            help: "Plays or pauses the voice message",
+            frame: accessibilityChildFrame(region.frame, rowIndex: rowIndex),
+            parent: parent
+        ) { [weak self] in
+            guard let playback = self?.model?.voiceMessagePlayback else { return false }
+            playback.toggle(region.playbackID, source: region.source, duration: region.duration)
+            return true
+        }
+        element.setAccessibilityCustomActions([
+            NSAccessibilityCustomAction(name: "Change Playback Speed") { [weak self] in
+                guard let playback = self?.model?.voiceMessagePlayback else { return false }
+                playback.cycleSpeed()
+                return true
+            },
+        ] + [-10.0, 10.0].map { offset in
+            NSAccessibilityCustomAction(name: offset < 0 ? "Skip Back 10 Seconds" : "Skip Forward 10 Seconds") { [weak self] in
+                guard let playback = self?.model?.voiceMessagePlayback else { return false }
+                let duration = playback.duration(of: region.playbackID) ?? region.duration
+                guard duration > 0 else { return false }
+                playback.seek(
+                    region.playbackID,
+                    source: region.source,
+                    duration: duration,
+                    fraction: (playback.position(of: region.playbackID) + offset) / duration
+                )
+                return true
+            }
+        })
+        return element
     }
 
     private func appendMessageRichContentAccessibility(
@@ -929,7 +967,7 @@ extension NativeTimelineCanvasView {
                         dx: 0,
                         dy: self.displayedRowOrigin(at: rowIndex)
                     ),
-                    preferredEdge: .maxX
+                    presentation: .inline
                 )
                 return true
             })

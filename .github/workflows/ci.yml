@@ -32,13 +32,13 @@ jobs:
     outputs:
       reused: ${{ steps.validation.outputs.reused }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
       - name: Check out current release-control files
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: release-control
           ref: ${{ github.workflow_sha }}
@@ -60,13 +60,13 @@ jobs:
     env:
       SAKURACORD_STABLE_MTIMES: 1
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
       - name: Check out current release-control files
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: release-control
           ref: ${{ github.workflow_sha }}
@@ -75,7 +75,7 @@ jobs:
           xcodebuild -downloadComponent MetalToolchain
           xcrun --sdk macosx metal --version
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .codex-runtime/swiftpm-cache
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-${{ matrix.suite }}-${{ hashFiles('App/Package.resolved', 'App/Package.swift', 'Packages/**/Package.swift') }}
@@ -92,6 +92,24 @@ jobs:
       - name: Build and test
         timeout-minutes: 30
         run: ./script/ci.sh ${{ matrix.suite }}
+      - name: Package downloadable pull request app and matching symbols
+        if: github.event_name == 'pull_request' && matrix.suite == 'app'
+        env:
+          # Public verification key; fork PRs cannot read repository variables.
+          SPARKLE_ED_PUBLIC_KEY: 'F2ZNDWO+vOWTt4PAfz69IFPpxJXfMn0AhG85Xx8m/k0='
+        run: ./script/package_pr_build.sh
+      - name: Upload pull request build
+        if: github.event_name == 'pull_request' && matrix.suite == 'app'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/pr-build/SakuraCord.app.zip
+            dist/pr-build/SakuraCord.dSYM.zip
+            dist/pr-build/build.json
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
       - name: Upload test diagnostics
         if: failure() || cancelled()
         uses: actions/upload-artifact@v7
@@ -124,13 +142,13 @@ jobs:
     outputs:
       published: ${{ steps.existing_release.outputs.published }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
       - name: Check out current release-control files
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: release-control
           ref: ${{ github.workflow_sha }}
@@ -149,7 +167,7 @@ jobs:
             --notes-output dist/release-notes.md
       - name: Cache SwiftPM dependencies
         if: steps.existing_release.outputs.published != 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .codex-runtime/swiftpm-cache
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-xcode-27-${{ hashFiles('App/Package.resolved', 'App/Package.swift', 'Packages/**/Package.swift') }}
@@ -251,13 +269,13 @@ jobs:
       contents: write
       actions: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
       - name: Check out current release-control files
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: release-control
           ref: ${{ github.workflow_sha }}

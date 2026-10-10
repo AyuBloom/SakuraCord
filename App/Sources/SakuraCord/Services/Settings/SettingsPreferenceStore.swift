@@ -315,6 +315,10 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
             storage: .appWide(key: "settings.features.fakeNitroStreamQuality"), defaultValue: .bool(true)
         ),
         SettingsPreferenceRegistration(
+            id: .voiceMessageRecording, page: .features,
+            storage: .appWide(key: "settings.features.voiceMessageRecording"), defaultValue: .bool(true)
+        ),
+        SettingsPreferenceRegistration(
             id: .attachmentCompactionPrompt, page: .features,
             storage: .appWide(key: "settings.attachments.attachmentCompactionPrompt"), defaultValue: .string(AttachmentHandlingPolicy.ask.rawValue)
         ),
@@ -740,7 +744,7 @@ final class SettingsPreferenceStore {
 
     init(
         registry: SettingsPreferenceRegistry = .foundation,
-        defaults: any PreferenceStoring = UserDefaults.standard
+        defaults: any PreferenceStoring = PRBuildProfile.defaults
     ) {
         self.registry = registry
         self.defaults = defaults

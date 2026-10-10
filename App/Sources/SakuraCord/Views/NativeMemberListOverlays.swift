@@ -437,7 +437,7 @@ extension NativeMemberListCanvasView {
                 self?.dismissProfile(ifCurrent: presentation.requestID)
             },
             presentationIdentity: AnyHashable(presentation.member.id),
-            content: AnyView(ProfilePresentationContent(presentation: presentation, openProfile: openProfile)
+            content: AnyView(ProfilePresentationContent(presentation: presentation, openProfile: openProfile, userMenu: { [weak self] in self?.rowMenu?(presentation.member) })
                 .environment(\.profileCosmeticPolicy, cosmeticPolicy)
                 .environment(\.serverTagCardModel, serverTagCardModel))
         )

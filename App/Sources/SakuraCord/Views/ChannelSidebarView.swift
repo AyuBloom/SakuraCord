@@ -1029,6 +1029,7 @@ private struct CurrentUserCapsule: View {
                 maximumPopoverHeight: InterfaceScale.metric(720),
                 showsRoles: false,
                 openProfile: model.expandProfile,
+                userMenu: { UserContextMenu.make(for: presentation.member.user, context: .init(guildID: presentation.guildID), model: model) },
             footer: {
                 YouPopoverOptions(
                     currentStatus: currentStatus,

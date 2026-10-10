@@ -1122,6 +1122,9 @@ extension NativeTimelineCanvasView {
             x: point.x,
             y: point.y - displayedRowOrigin(at: index)
         )
+        if let menu = userContextMenu(for: row, index: index, localPoint: localPoint) {
+            return menu
+        }
         let imageItem = NativeTimelineImageContextMenuPlan.item(
             in: row.message,
             layout: layouts[index],
@@ -1244,38 +1247,34 @@ extension NativeTimelineCanvasView {
             )
         }
         appendApplicationCommandMenu(to: menu, row: row, index: index, point: point)
-        appendNicknameMenuItems(to: menu, row: row, index: index, point: point)
         return menu
     }
 
-    /// Discord's user actions for the author when its avatar or name was right-clicked.
-    private func appendNicknameMenuItems(
-        to menu: NSMenu,
-        row: MessageRowPresentation,
-        index: Int,
-        point: CGPoint
-    ) {
+    private func userContextMenu(
+        for row: MessageRowPresentation, index: Int, localPoint: CGPoint
+    ) -> NSMenu? {
+        guard let model, row.message.outboxState == .confirmed else { return nil }
         let message = row.message
-        guard let model, messageInteractionContext == .conversation,
-              message.outboxState == .confirmed, message.webhookID == nil,
-              !DiscordBuiltInCommands.isClydeMessage(message)
-        else { return }
-        let localPoint = CGPoint(x: point.x, y: point.y - displayedRowOrigin(at: index))
-        guard NativeTimelineAuthorProfileGeometry.hitFrame(
-            at: localPoint,
-            avatarFrame: layouts[index].avatarFrame,
-            authorFrame: layouts[index].authorFrame
-        ) != nil else { return }
-        let items = NicknameContextMenu.items(for: model.nicknameMenuActions(
-            for: message.author, in: model.messagePresentationGuildID(for: message)
-        ))
-        guard !items.isEmpty else { return }
-        // Discord lists these user items ahead of Apps and Mark Unread.
-        let insertion = menu.items.firstIndex { $0.title == "Apps" }
-            ?? menu.items.firstIndex { $0.title == "Mark Unread" } ?? menu.items.count
-        for (offset, item) in items.enumerated() {
-            menu.insertItem(item, at: insertion + offset)
-        }
+        let textHit = textPointerHit(in: layouts[index], point: localPoint)
+        if let textHit, let spoilerRange = textHit.hit.spoilerRange,
+           let key = textSpoilerRevealKey(itemIdentifier: items[index].identifier,
+                                         region: textHit.region, rangeLocation: spoilerRange.location),
+           !spoilerRevealStore.isTextRevealed(key) { return nil }
+        let user: User?
+        if NativeTimelineAuthorProfileGeometry.hitFrame(at: localPoint,
+            avatarFrame: layouts[index].avatarFrame, authorFrame: layouts[index].authorFrame) != nil {
+            user = message.author
+        } else if let mention = textHit?.hit.mention,
+                  mention.isInteractive, case let .user(userID) = mention.target {
+            user = model.systemMessageUser(userID: userID, sourceMessage: message)
+        } else if let url = textHit?.hit.url,
+                  url.scheme == "sakuracord-action", url.host == "profile", let userID = UserID(url.lastPathComponent) {
+            user = model.systemMessageUser(userID: userID, sourceMessage: message)
+        } else { return nil }
+        guard let user else { return nil }
+        return UserContextMenu.make(for: user,
+            context: .init(guildID: model.messagePresentationGuildID(for: message), channelID: message.channelID,
+                           isLocalIdentity: user.id == message.author.id && (message.webhookID != nil || DiscordBuiltInCommands.isClydeMessage(message))), model: model)
     }
 
     /// Discord's Apps submenu: message commands for the message, or user

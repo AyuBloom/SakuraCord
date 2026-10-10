@@ -213,6 +213,7 @@ private struct ChatWorkspaceSupplementaryContent: View {
     let toolbarSearchFieldMetrics: ToolbarSearchFieldMetrics
 
     var body: some View {
+        let userContext = UserMenuContext(guildID: model.selectedGuildID, channelID: model.selectedChannelID)
         switch content {
         case .thread:
             ThreadConversationView(model: model)
@@ -246,7 +247,8 @@ private struct ChatWorkspaceSupplementaryContent: View {
                         roleColorDisplay: model.accessibilitySettings.roleColorDisplay
                     ),
                     openProfile: model.expandProfile,
-                    nicknameActions: { model.nicknameMenuActions(for: $0.user, in: model.selectedGuildID) },
+                    userMenu: { UserContextMenu.make(for: $0.user, context: userContext, model: model) },
+                    userAccessibilityActions: { UserContextMenu.accessibilityActions(for: $0.user, context: userContext, model: model) },
                     updateViewport: model.updateMemberListViewport
                 )
                 .frame(width: ChatChromeMetrics.memberListWidth)
@@ -274,7 +276,8 @@ private struct DirectMessageProfileInspector: View {
                 ProfilePresentationContent(
                     presentation: presentation,
                     layout: .inspector,
-                    openProfile: model.expandProfile
+                    openProfile: model.expandProfile,
+                    userMenu: { UserContextMenu.make(for: presentation.member.user, context: .init(guildID: presentation.guildID), model: model) }
                 )
             } else {
                 ProgressView("Loading profile…")

@@ -17,6 +17,7 @@ struct RootView: View {
                     model: model,
                     toolbarSearchFieldMetrics: toolbarSearchFieldMetrics
                 )
+                .modifier(FriendsActionPresentation(model: model))
                 .windowModal(
                     item: Binding(
                         get: { model.issueReports.presentation },

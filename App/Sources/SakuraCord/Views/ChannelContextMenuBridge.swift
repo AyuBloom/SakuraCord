@@ -148,7 +148,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
     var pinAction: ChannelPinMenuAction = .unavailable
     /// Recipient actions for a direct message, such as a friend nickname.
     /// Resolved when the menu opens so rows don't observe relationship state.
-    var userActions: () -> [NicknameMenuAction] = { [] }
+    var userMenu: () -> NSMenu? = { nil }
     var usesCustomSelectionBackground = false
 
     func makeCoordinator() -> Coordinator {
@@ -197,7 +197,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
         private var copyChannelID: () -> Void
         private var copyLink: () -> Void
         private var pinAction: ChannelPinMenuAction
-        private var userActions: () -> [NicknameMenuAction]
+        private var userMenu: () -> NSMenu?
 
         init(from bridge: ChannelContextMenuBridge) {
             subject = bridge.subject
@@ -214,7 +214,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
             copyChannelID = bridge.copyChannelID
             copyLink = bridge.copyLink
             pinAction = bridge.pinAction
-            userActions = bridge.userActions
+            userMenu = bridge.userMenu
         }
 
         func update(from bridge: ChannelContextMenuBridge) {
@@ -232,7 +232,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
             copyChannelID = bridge.copyChannelID
             copyLink = bridge.copyLink
             pinAction = bridge.pinAction
-            userActions = bridge.userActions
+            userMenu = bridge.userMenu
         }
 
         func makeMenu() -> NSMenu {
@@ -261,7 +261,12 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
                 menu.addItem(.separator())
             }
 
-            let userItems = NicknameContextMenu.items(for: userActions())
+            let personItems = detachedUserMenuItems()
+            let copyIdentifier = "user-\(UserMenuAction.Group.copy.rawValue)"
+            let destructiveIdentifier = "user-\(UserMenuAction.Group.destructive.rawValue)"
+            let userItems = personItems.filter {
+                !$0.isSeparatorItem && $0.identifier?.rawValue != copyIdentifier && $0.identifier?.rawValue != destructiveIdentifier
+            }
             if !userItems.isEmpty {
                 userItems.forEach(menu.addItem)
                 menu.addItem(.separator())
@@ -318,6 +323,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
             menu.addItem(notificationItem)
 
             menu.addItem(.separator())
+            personItems.filter { $0.identifier?.rawValue == copyIdentifier }.forEach(menu.addItem)
             menu.addItem(
                 menuItem(
                     subject.copyIDTitle,
@@ -334,7 +340,15 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
                     )
                 )
             }
+            UserContextMenu.append(personItems.filter { $0.identifier?.rawValue == destructiveIdentifier }, to: menu)
             return menu
+        }
+
+        private func detachedUserMenuItems() -> [NSMenuItem] {
+            let menu = userMenu()
+            let items = menu?.items ?? []
+            menu?.removeAllItems()
+            return items
         }
 
         private var isDirectlyMuted: Bool {

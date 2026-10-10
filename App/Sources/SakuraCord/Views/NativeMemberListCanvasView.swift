@@ -205,7 +205,6 @@ final class NativeMemberListCanvasView: NSView, WindowModalInputParticipant {
     var isProfilePresented = false
     var dismissProfile: () -> Void = {}
     var selectMember: (Member) -> Void = { _ in }
-    var nicknameActions: (Member) -> [NicknameMenuAction] = { _ in [] }
     /// Trailing controls hosted only on the hovered row.
     var rowAccessory: ((Member) -> AnyView)?
     var rowMenu: ((Member) -> NSMenu?)?
@@ -381,7 +380,7 @@ final class NativeMemberListCanvasView: NSView, WindowModalInputParticipant {
         guard let index = index(at: point),
               case .member(let member, _) = items[index]
         else { return nil }
-        return rowMenu?(member) ?? NicknameContextMenu.menu(for: nicknameActions(member))
+        return rowMenu?(member)
     }
 
 }

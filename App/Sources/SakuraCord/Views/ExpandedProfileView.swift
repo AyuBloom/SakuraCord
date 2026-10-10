@@ -15,7 +15,9 @@ struct ExpandedProfileView: View {
 
     var body: some View {
         ProfileExpandedSurface(profile: presentation.profile, profileContent: {
-            ProfilePresentationContent(presentation: presentation, layout: .expanded, maximumPopoverHeight: InterfaceScale.metric(720))
+            ProfilePresentationContent(presentation: presentation, layout: .expanded, maximumPopoverHeight: InterfaceScale.metric(720), userMenu: {
+                UserContextMenu.make(for: presentation.member.user, context: .init(guildID: presentation.guildID), model: model)
+            })
         }, widgets: {
             widgetBoard
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -148,7 +148,6 @@ final class NativeMemberListCoordinator: NSObject {
         let serverTagModelChanged = canvas.serverTagCardModel !== parent.serverTagCardModel
         canvas.serverTagCardModel = parent.serverTagCardModel
         canvas.openProfile = parent.openProfile
-        canvas.nicknameActions = parent.nicknameActions
         canvas.rowAccessory = parent.rowAccessory
         canvas.rowMenu = parent.rowMenu
         canvas.rowAccessibilityActions = parent.rowAccessibilityActions

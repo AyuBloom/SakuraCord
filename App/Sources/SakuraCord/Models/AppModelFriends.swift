@@ -182,9 +182,15 @@ extension AppModel {
     func confirmFriendsAction(_ confirmation: FriendsConfirmation) {
         friends.confirmation = nil
         switch confirmation {
-        case .removeFriend(let user): removeRelationship(with: user, as: .removeFriend)
-        case .block(let user): blockUser(user)
-        case .acceptStranger(let user): acceptFriendRequest(from: user, confirmingStranger: true)
+        case .removeFriend(let user):
+            guard isFriend(user.id) else { return }
+            removeRelationship(with: user, as: .removeFriend)
+        case .block(let user):
+            guard relationships.first(where: { $0.id == user.id })?.type != .blocked else { return }
+            blockUser(user)
+        case .acceptStranger(let user):
+            guard relationships.first(where: { $0.id == user.id })?.type == .incomingRequest else { return }
+            acceptFriendRequest(from: user, confirmingStranger: true)
         }
     }
 
@@ -250,7 +256,7 @@ extension AppModel {
     }
 
     private func solveFriendsCaptcha(_ challenge: DiscordCaptchaChallenge, account: AppModelAccountSession) async throws -> String {
-        guard isCurrentAccountSession(account), isFriendsPresented else { throw CancellationError() }
+        guard isCurrentAccountSession(account), sessionState == .workspace else { throw CancellationError() }
         return try await friends.captcha.solution(for: challenge)
     }
 }

@@ -4,12 +4,11 @@ import SakuraCordModels
 import SwiftUI
 
 /// The Direct Messages home. Sections live in the window toolbar; this view
-/// owns the list, the Add Friend form and relationship confirmations.
+/// owns the list and Add Friend form. Relationship dialogs belong to the workspace.
 struct FriendsView: View {
     let model: AppModel
 
     var body: some View {
-        let friends = model.friends
         Group {
             if model.friendsSection == .addFriend {
                 ScrollView {
@@ -22,65 +21,7 @@ struct FriendsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .modifier(HumanCaptchaPresentation(store: friends.captcha))
         .onAppear { model.loadRelationshipsIfNeeded(for: model.friendsSection) }
-        .onDisappear { friends.captcha.cancel() }
-        .alert(
-            confirmationTitle(friends.confirmation),
-            isPresented: Binding(get: { friends.confirmation != nil }, set: { if !$0 { friends.confirmation = nil } }),
-            presenting: friends.confirmation
-        ) { confirmation in
-            Button(confirmationAction(confirmation), role: confirmationRole(confirmation)) {
-                model.confirmFriendsAction(confirmation)
-            }
-            Button("Cancel", role: .cancel) { friends.confirmation = nil }
-        } message: { confirmation in
-            Text(confirmationMessage(confirmation))
-        }
-        .alert(
-            "Something went wrong",
-            isPresented: Binding(get: { friends.actionError != nil }, set: { if !$0 { friends.actionError = nil } })
-        ) {
-            Button("OK", role: .cancel) { friends.actionError = nil }
-        } message: {
-            Text(friends.actionError ?? "")
-        }
-    }
-
-    // Official stable633029 copy for removal and blocking.
-    private func confirmationTitle(_ confirmation: FriendsConfirmation?) -> String {
-        switch confirmation {
-        case .removeFriend(let user): "Remove ‘\(model.friendDisplayName(user))’"
-        case .block(let user): "Block \(model.friendDisplayName(user))?"
-        case .acceptStranger: "Accept Friend Request?"
-        case nil: ""
-        }
-    }
-
-    private func confirmationMessage(_ confirmation: FriendsConfirmation) -> String {
-        switch confirmation {
-        case .removeFriend(let user):
-            "Are you sure you want to remove \(model.friendDisplayName(user)) from your friends?"
-        case .block(let user):
-            "Are you sure you want to block \(model.friendDisplayName(user))? Blocking this user will also remove them from your friends list."
-        case .acceptStranger(let user):
-            "Discord wants you to confirm that you know \(model.friendDisplayName(user)) before accepting their request."
-        }
-    }
-
-    private func confirmationAction(_ confirmation: FriendsConfirmation) -> String {
-        switch confirmation {
-        case .removeFriend: "Remove Friend"
-        case .block: "Block"
-        case .acceptStranger: "Accept"
-        }
-    }
-
-    private func confirmationRole(_ confirmation: FriendsConfirmation) -> ButtonRole? {
-        switch confirmation {
-        case .removeFriend, .block: .destructive
-        case .acceptStranger: nil
-        }
     }
 }
 
@@ -187,7 +128,7 @@ private struct FriendRowControls: View {
                     rowButton("Accept", systemImage: "checkmark", tint: .green) {
                         model.acceptFriendRequest(from: row.user)
                     }
-                    rowButton("Ignore", systemImage: "xmark") {
+                    rowButton("Decline Request", systemImage: "xmark") {
                         model.removeRelationship(with: row.user, as: .declineIncomingRequest)
                     }
                 case .outgoingRequest:
@@ -196,19 +137,10 @@ private struct FriendRowControls: View {
                     }
                 default:
                     rowButton("Message", systemImage: "bubble.left.fill") { model.openDirectMessage(with: row.user) }
-                    Menu {
-                        menuItems
-                    } label: {
-                        Label("More", systemImage: "ellipsis")
-                            .labelStyle(.iconOnly)
-                            .frame(width: InterfaceScale.metric(32), height: InterfaceScale.metric(32))
-                            .contentShape(Circle())
-                    }
-                    .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .help("More")
+                    UserContextMenuButton { nativeMenu() }
+                        .frame(width: InterfaceScale.metric(32), height: InterfaceScale.metric(32))
+                        .glassEffect(.regular.interactive(), in: Circle())
+                        .help("More")
                 }
             }
         }
@@ -228,51 +160,14 @@ private struct FriendRowControls: View {
         .help(title)
     }
 
-    private var menuActions: [NicknameMenuAction] {
-        var actions = [NicknameMenuAction(title: "Profile", systemImage: "person.crop.circle") { model.showFriendProfile(row) }]
-        if row.relationship.type == .friend {
-            actions.append(.init(title: "Message", systemImage: "bubble.left") { model.openDirectMessage(with: row.user) })
-            actions += model.nicknameMenuActions(for: row.user, in: nil)
-            actions.append(.init(title: "Remove Friend", systemImage: "person.badge.minus") { model.friends.confirmation = .removeFriend(row.user) })
-        } else if row.relationship.type == .incomingRequest {
-            if row.relationship.note != nil {
-                actions.append(.init(title: "View Request", systemImage: "text.bubble") { model.friends.revealRequest(row.id) })
-            }
-            actions.append(.init(title: "Accept", systemImage: "checkmark") { model.acceptFriendRequest(from: row.user) })
-            actions.append(.init(title: "Ignore", systemImage: "xmark") { model.removeRelationship(with: row.user, as: .declineIncomingRequest) })
-        } else if row.relationship.type == .outgoingRequest {
-            actions.append(.init(title: "Cancel Request", systemImage: "xmark") { model.removeRelationship(with: row.user, as: .cancelOutgoingRequest) })
-        }
-        actions.append(.init(title: "Block", systemImage: "hand.raised") { model.friends.confirmation = .block(row.user) })
-        actions.append(.init(title: "Copy User ID", systemImage: "doc.on.doc") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(row.user.id.description, forType: .string)
-        })
-        return actions
-    }
-
-    @ViewBuilder private var menuItems: some View {
-        ForEach(menuActions, id: \.title) { action in
-            Button(action.title, systemImage: action.systemImage, action: action.perform)
-                .disabled(isPending)
-        }
-    }
-
     func accessibilityActions() -> [NSAccessibilityCustomAction] {
-        menuActions.map { action in
-            NSAccessibilityCustomAction(name: action.title) {
-                guard !model.friends.pendingUserIDs.contains(row.id), model.isFriendsPresented else { return false }
-                action.perform()
-                return true
-            }
-        }
+        UserContextMenu.accessibilityActions(for: row.user, context: .init(), model: model)
     }
 
     func nativeMenu() -> NSMenu? {
-        let menu = NicknameContextMenu.menu(for: menuActions)
-        if isPending { menu?.items.forEach { $0.isEnabled = false } }
-        return menu
+        UserContextMenu.make(for: row.user, context: .init(), model: model)
     }
+
 }
 
 private struct AddFriendView: View {

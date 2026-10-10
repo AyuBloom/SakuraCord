@@ -15,6 +15,7 @@ struct ProfilePresentationContent<Footer: View>: View {
     var showsRoles = true
     let footer: Footer
     var openProfile: ((ProfilePresentationState) -> Void)?
+    var userMenu: (() -> NSMenu?)?
 
     init(
         presentation: ProfilePresentationState,
@@ -22,6 +23,7 @@ struct ProfilePresentationContent<Footer: View>: View {
         maximumPopoverHeight: CGFloat = InterfaceScale.metric(560),
         showsRoles: Bool = true,
         openProfile: ((ProfilePresentationState) -> Void)? = nil,
+        userMenu: (() -> NSMenu?)? = nil,
         @ViewBuilder footer: () -> Footer
     ) {
         self.presentation = presentation
@@ -30,6 +32,7 @@ struct ProfilePresentationContent<Footer: View>: View {
         self.showsRoles = showsRoles
         self.footer = footer()
         self.openProfile = openProfile
+        self.userMenu = userMenu
     }
 
     var body: some View {
@@ -46,7 +49,8 @@ struct ProfilePresentationContent<Footer: View>: View {
             maximumPopoverHeight: maximumPopoverHeight,
             showsRoles: showsRoles,
             footer: footer,
-            openProfile: openProfile.map { action in { action(presentation) } }
+            openProfile: openProfile.map { action in { action(presentation) } },
+            userMenu: userMenu
         )
         }
     }
@@ -58,14 +62,16 @@ extension ProfilePresentationContent where Footer == EmptyView {
         layout: ProfilePresentationLayout = .popover,
         maximumPopoverHeight: CGFloat = InterfaceScale.metric(560),
         showsRoles: Bool = true,
-        openProfile: ((ProfilePresentationState) -> Void)? = nil
+        openProfile: ((ProfilePresentationState) -> Void)? = nil,
+        userMenu: (() -> NSMenu?)? = nil
     ) {
         self.init(
             presentation: presentation,
             layout: layout,
             maximumPopoverHeight: maximumPopoverHeight,
             showsRoles: showsRoles,
-            openProfile: openProfile
+            openProfile: openProfile,
+            userMenu: userMenu
         ) {
             EmptyView()
         }
@@ -118,6 +124,7 @@ struct MemberProfilePopover<Footer: View>: View {
     var showsRoles = true
     let footer: Footer
     var openProfile: (() -> Void)?
+    var userMenu: (() -> NSMenu?)?
     var editor: ProfileEditorState?
     var openEditorPicker: ((ProfileEditorPicker) -> Void)?
     var showsDetails = true
@@ -231,6 +238,9 @@ struct MemberProfilePopover<Footer: View>: View {
                     editor: editor,
                     openEditorPicker: openEditorPicker
                 )
+                .overlay {
+                    if let userMenu, editor == nil { UserContextMenuBridge(makeMenu: userMenu) }
+                }
                 .overlay(alignment: .topTrailing) {
                     if openProfile != nil {
                         Button(action: expandProfile) {

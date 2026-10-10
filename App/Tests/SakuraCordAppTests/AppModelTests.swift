@@ -5829,6 +5829,30 @@ private actor MemberRoleRevocationTestProvider: ChatProvider {
     func disconnect() async {}
 }
 
+@MainActor
+@Test(arguments: [0, 1, 2])
+func `delayed DM creation respects newer navigation`(subsequentChoice: Int) async throws {
+    let provider = SuspendedAccountOperationTestProvider(suspendsOperations: true)
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    model.snapshot = try await provider.bootstrap()
+    let user = User(id: UserID(rawValue: 96_004), username: "recipient", displayName: "Recipient")
+    model.openDirectMessage(with: user)
+    let navigation = model.guildActivationTask
+    await provider.waitUntilPrivateChannelRequestStarts()
+    if subsequentChoice == 1 { model.openFriends() }
+    if subsequentChoice == 2 { model.channelSidebarSelection = provider.channelID }
+    await provider.releasePrivateChannelRequest()
+    await navigation?.value
+    if subsequentChoice == 0 {
+        #expect(model.selectedChannelID == ChannelID(rawValue: 96_004))
+    } else if subsequentChoice == 1 {
+        #expect(model.isFriendsPresented)
+        #expect(model.selectedChannelID == nil)
+    } else {
+        #expect(model.selectedChannelID == provider.channelID)
+    }
+}
+
 private actor SuspendedAccountOperationTestProvider: ChatProvider {
     nonisolated let channelID = ChannelID(rawValue: 96_001)
     nonisolated let threadID = ChannelID(rawValue: 96_002)
@@ -5862,6 +5886,23 @@ private actor SuspendedAccountOperationTestProvider: ChatProvider {
     private var sendContinuation: CheckedContinuation<Void, Never>?
     private var editContinuation: CheckedContinuation<Void, Never>?
     private var earlierContinuations: [CheckedContinuation<Void, Never>] = []
+    private let privateChannelStarts = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private var privateChannelContinuation: CheckedContinuation<Void, Never>?
+
+    func ensurePrivateChannel(for userID: UserID) async throws -> Channel {
+        privateChannelStarts.continuation.yield(())
+        await withCheckedContinuation { privateChannelContinuation = $0 }
+        return Channel(id: ChannelID(rawValue: 96_004), guildID: nil, name: "Recipient", kind: .directMessage)
+    }
+
+    func waitUntilPrivateChannelRequestStarts() async {
+        for await _ in privateChannelStarts.stream { return }
+    }
+
+    func releasePrivateChannelRequest() {
+        privateChannelContinuation?.resume()
+        privateChannelContinuation = nil
+    }
 
     init(suspendsOperations: Bool, failsSend: Bool = false) {
         self.suspendsOperations = suspendsOperations

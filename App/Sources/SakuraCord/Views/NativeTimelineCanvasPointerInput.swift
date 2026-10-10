@@ -67,6 +67,9 @@ extension NativeTimelineCanvasView {
             }
             if layouts.indices.contains(index) {
                 let rowOrigin = displayedRowOrigin(at: index)
+                if case .ignoredMessages = items[index] {
+                    addCursorRect(rowFrame(at: index), cursor: .pointingHand)
+                }
                 if case let .loader(isLoading, _) = items[index],
                    !isLoading,
                    let frame = layouts[index].loaderLayout?.controlFrame
@@ -734,6 +737,10 @@ extension NativeTimelineCanvasView {
             x: point.x,
             y: point.y - displayedRowOrigin(at: index)
         )
+        if case let .ignoredMessages(group) = item {
+            model?.toggleIgnoredMessages(group.messageIDs)
+            return
+        }
         if case let .loader(isLoading, _) = item {
             if !isLoading,
                layouts[index].loaderLayout?.controlFrame.contains(local)
@@ -1502,6 +1509,9 @@ extension NativeTimelineCanvasView {
             x: point.x,
             y: point.y - displayedRowOrigin(at: index)
         )
+        if case let .ignoredMessages(group) = item {
+            return .ignoredMessages(group.messageIDs[0])
+        }
         if case let .loader(isLoading, _) = item {
             guard !isLoading,
                   layout.loaderLayout?.controlFrame.contains(local) == true

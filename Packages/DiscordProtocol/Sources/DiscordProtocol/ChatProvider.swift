@@ -97,6 +97,8 @@ public protocol ChatProvider: Sendable {
     func setFriendNickname(_ nickname: String?, for userID: UserID) async throws -> String?
     /// Reads every relationship at most once per Gateway connection.
     func loadRelationships() async throws
+    func setUserIgnored(_ userID: UserID, ignored: Bool, location: IgnoreActionLocation) async throws
+    func dismissIgnoredGroupWarning(in channelID: ChannelID) async throws
     func sendFriendRequest(username: String, discriminator: Int?, note: String?, captchaHandler: DiscordCaptchaHandler?) async throws
     func acceptFriendRequest(from userID: UserID, confirmingStranger: Bool, captchaHandler: DiscordCaptchaHandler?) async throws
     func removeRelationship(with userID: UserID, as removal: RelationshipRemoval) async throws
@@ -469,6 +471,14 @@ public extension ChatProvider {
     }
 
     func loadRelationships() async throws {}
+
+    func dismissIgnoredGroupWarning(in channelID: ChannelID) async throws {
+        throw ChatProviderError.invalidRequest("Group warning dismissal is unavailable for this session.")
+    }
+
+    func setUserIgnored(_ userID: UserID, ignored: Bool, location: IgnoreActionLocation) async throws {
+        throw ChatProviderError.invalidRequest("This provider doesn’t support Ignore.")
+    }
 
     func sendFriendRequest(username: String, discriminator: Int?, note: String?, captchaHandler: DiscordCaptchaHandler?) async throws {
         throw RelationshipActionError.failed("Friend requests are unavailable for this session.")

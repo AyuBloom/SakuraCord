@@ -42,6 +42,7 @@ extension AppModel {
     }
 
     func openFriends() {
+        lastDirectMessageSelection = .friends
         cancelConversationNavigation()
         guard selectedGuildID == nil else {
             friends.isPresented = true
@@ -100,13 +101,23 @@ extension AppModel {
     func applyRelationships(_ relationships: [Relationship]) {
         guard var value = snapshot else { return }
         friends.replaceRelationships(relationships)
+        ignoredUsers.replaceRelationships(relationships)
         let previousBlocked = value.blockedOrIgnoredUserIDs
+        let previousIgnored = value.relationships.ignoredUserIDs
         value.relationships = relationships
         value.blockedOrIgnoredUserIDs = relationships.blockedOrIgnoredUserIDs
         value.friendUserIDs = relationships.friendUserIDs
         value.relationshipNicknamesByUserID = relationships.nicknamesByUserID
         snapshot = value
         if previousBlocked != value.blockedOrIgnoredUserIDs { reconcileInboxEligibility() }
+        if previousIgnored != relationships.ignoredUserIDs || previousBlocked != value.blockedOrIgnoredUserIDs {
+            ignoredUsers.revealedMessageIDs = []
+            ignoredUsers.revealedProfileRequests = []
+            timelinePresentationRevision &+= 1
+            typingState.clearAll()
+            reconcilePrivateCallSounds()
+            reconcileIgnoredVoiceParticipants()
+        }
         forwardSearchSourceRevision &+= 1
         let ids = Set(relationships.map(\.id))
         friends.pendingUserIDs.formIntersection(ids)
@@ -173,6 +184,22 @@ extension AppModel {
         }
     }
 
+    func setUserIgnored(_ user: User, ignored: Bool, location: IgnoreActionLocation = .contextMenu) {
+        guard user.id != currentUser?.id, !user.isWebhookIdentity, !user.isSystem,
+              relationships.first(where: { $0.id == user.id })?.type != .blocked,
+              isUserIgnored(user.id) != ignored else { return }
+        setUserIgnored(user.id, ignored: ignored, location: location)
+    }
+
+    func setUserIgnored(_ userID: UserID, ignored: Bool, location: IgnoreActionLocation) {
+        guard userID != currentUser?.id,
+              relationships.first(where: { $0.id == userID })?.type != .blocked,
+              isUserIgnored(userID) != ignored else { return }
+        performRelationshipAction(on: userID) { _, session in
+            try await session.provider.setUserIgnored(userID, ignored: ignored, location: location)
+        }
+    }
+
     func blockUser(_ user: User) {
         performRelationshipAction(on: user.id) { model, session in
             try await session.provider.blockUser(user.id, captchaHandler: model.friendsCaptchaHandler(account: session))
@@ -185,6 +212,8 @@ extension AppModel {
         case .removeFriend(let user):
             guard isFriend(user.id) else { return }
             removeRelationship(with: user, as: .removeFriend)
+        case .ignore(let user, let location):
+            setUserIgnored(user, ignored: true, location: location)
         case .block(let user):
             guard relationships.first(where: { $0.id == user.id })?.type != .blocked else { return }
             blockUser(user)
@@ -208,18 +237,21 @@ extension AppModel {
             navigate(to: channel.id)
             return
         }
-        let session = accountSession()
-        startAccountChildTask(account: session) { model, session in
+        startConversationNavigation { model, session in
             do {
                 let channel = try await session.provider.ensurePrivateChannel(for: user.id)
-                guard model.isCurrentAccountSession(session) else { return }
+                guard !Task.isCancelled, model.isCurrentAccountSession(session) else { return }
                 if model.snapshot?.channels.contains(where: { $0.id == channel.id }) == false {
                     model.snapshot?.channels.append(channel)
                     model.forwardSearchSourceRevision &+= 1
                 }
-                model.navigate(to: channel.id)
+                if model.selectedGuildID != nil { await model.activateGuild(nil, account: session) }
+                guard !Task.isCancelled, model.isCurrentAccountSession(session) else { return }
+                model.recordForwardDestinationVisit(channel.id)
+                model.closeThread()
+                model.selectedChannelID = channel.id
             } catch {
-                guard model.isCurrentAccountSession(session) else { return }
+                guard !Task.isCancelled, model.isCurrentAccountSession(session), !(error is CancellationError) else { return }
                 DiscordAPIDiagnosticStore.shared.recordClientFailure(error)
                 model.errorMessage = error.localizedDescription
             }

@@ -7,6 +7,7 @@ struct UserMenuContext {
     var guildID: GuildID?
     var channelID: ChannelID?
     var isLocalIdentity = false
+    var ignoreLocation: IgnoreActionLocation?
 }
 
 struct UserMenuAction: Identifiable {
@@ -73,11 +74,27 @@ extension AppModel {
         if !isSelf, !isLocalIdentity, !user.isBot {
             appendRelationshipMenuActions(for: user, relationship: relationship, pending: pending, add: add)
         }
+        if !isSelf, !isLocalIdentity, relationship?.type != .blocked {
+            let location = context.ignoreLocation ?? (context.guildID != nil ? .guildChannel : .contextMenu)
+            if relationship?.isIgnored == true {
+                add("unignore", "Unignore", "eye", .relationship, enabled: !pending) {
+                    $0.setUserIgnored(user, ignored: false, location: location)
+                }
+            } else {
+                add("ignore", "Ignore…", "eye.slash", .destructive, enabled: !pending) { model in
+                    guard !model.isUserIgnored(user.id), model.relationships.first(where: { $0.id == user.id })?.type != .blocked else { return }
+                    model.friends.confirmation = .ignore(user, location)
+                }
+            }
+        }
         if !user.username.isEmpty {
             add("copy-username", "Copy Username", "doc.on.doc", .copy) { _ in ChannelContextMenuValue.copy(user.tag) }
         }
         add("copy-user-id", "Copy User ID", "number", .copy) { _ in ChannelContextMenuValue.copy(user.id.description) }
-        return UserMenuAction.Group.allCases.flatMap { group in actions.filter { $0.group == group } }
+        return UserMenuAction.Group.allCases.flatMap { group in
+            let grouped = actions.filter { $0.group == group }
+            return group == .destructive ? grouped.filter { $0.id != "block" } + grouped.filter { $0.id == "block" } : grouped
+        }
     }
 
     private func appendRelationshipMenuActions(

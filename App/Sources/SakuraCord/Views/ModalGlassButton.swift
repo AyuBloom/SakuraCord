@@ -6,6 +6,8 @@ struct ModalGlassButton: View {
     let symbol: String
     let label: String
     var primary = false
+    /// Tints a primary button red for actions that need extra care.
+    var destructive = false
     /// Replaces the label with the interaction dots, keeping the button's size.
     var isLoading = false
     let action: () -> Void
@@ -21,7 +23,7 @@ struct ModalGlassButton: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .glassEffect(primary ? .regular.tint(SakuraCordAccentColor.color).interactive() : .regular.interactive(), in: Capsule())
+        .glassEffect(primary ? .regular.tint(destructive ? .red : SakuraCordAccentColor.color).interactive() : .regular.interactive(), in: Capsule())
         .help(label)
         .accessibilityLabel(label)
     }

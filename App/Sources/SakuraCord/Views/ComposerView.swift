@@ -791,9 +791,9 @@ struct ComposerView: View {
         case .member:
             return MentionAutocompleteSuggestionFactory.memberSuggestions(
                 query: context.query,
-                recentMessages: activeMessages,
-                localMembers: model.mentionAutocompleteMembers,
-                remoteMembers: model.mentionMemberResults,
+                recentMessages: activeMessages.filter { !model.isMessageSuppressed($0) },
+                localMembers: model.mentionAutocompleteMembers.filter { !model.isUserIgnored($0.id) },
+                remoteMembers: model.mentionMemberResults.filter { !model.isUserIgnored($0.id) },
                 roles: model.guildRoles,
                 canMentionNonMentionableRoles:
                 MentionAutocompleteSuggestionFactory.canMentionNonMentionableRoles(

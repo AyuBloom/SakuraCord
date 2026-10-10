@@ -2,6 +2,12 @@ import Foundation
 import SakuraCordModels
 
 public extension MockChatProvider {
+    func dismissIgnoredGroupWarning(in channelID: ChannelID) async throws {
+        guard let index = snapshot.channels.firstIndex(where: { $0.id == channelID }) else { return }
+        snapshot.channels[index].blockedUserWarningDismissed = true
+        continuation?.yield(.channelsChanged(guildID: nil, channels: snapshot.channels.filter { $0.guildID == nil }))
+    }
+
     func setMemberNickname(_ nickname: String, for userID: UserID, in guildID: GuildID) async throws -> String? {
         let value = nickname.isEmpty ? nil : nickname
         guard var members = membersByGuild[guildID], let index = members.firstIndex(where: { $0.id == userID }) else {
@@ -43,7 +49,9 @@ public extension MockChatProvider {
         if snapshot.relationships.contains(where: { $0.id == user.id && $0.type == .friend }) {
             throw RelationshipActionError.failed("You’re already friends with that user!")
         }
-        setRelationship(Relationship(id: user.id, type: .outgoingRequest, user: user, note: try FriendRequestNote.normalized(note)))
+        let ignored = snapshot.relationships.first { $0.id == user.id }?.isUserIgnored ?? false
+        setRelationship(Relationship(id: user.id, type: .outgoingRequest, user: user,
+                                     note: try FriendRequestNote.normalized(note), isUserIgnored: ignored))
     }
 
     func acceptFriendRequest(from userID: UserID, confirmingStranger: Bool, captchaHandler: DiscordCaptchaHandler?) async throws {
@@ -56,14 +64,36 @@ public extension MockChatProvider {
     }
 
     func removeRelationship(with userID: UserID, as removal: RelationshipRemoval) async throws {
-        snapshot.relationships.removeAll { $0.id == userID }
-        publishRelationships()
+        if var relationship = snapshot.relationships.first(where: { $0.id == userID }), relationship.isUserIgnored {
+            relationship.type = .none
+            relationship.nickname = nil
+            relationship.since = nil
+            relationship.note = nil
+            setRelationship(relationship)
+        } else {
+            snapshot.relationships.removeAll { $0.id == userID }
+            publishRelationships()
+        }
     }
 
     func blockUser(_ userID: UserID, captchaHandler: DiscordCaptchaHandler? = nil) async throws {
         let user = snapshot.relationships.first { $0.id == userID }?.user
             ?? snapshot.knownUsers.first { $0.id == userID }
-        setRelationship(Relationship(id: userID, type: .blocked, user: user))
+        let ignored = snapshot.relationships.first { $0.id == userID }?.isUserIgnored ?? false
+        setRelationship(Relationship(id: userID, type: .blocked, user: user, isUserIgnored: ignored))
+    }
+
+    func setUserIgnored(_ userID: UserID, ignored: Bool, location: IgnoreActionLocation) async throws {
+        guard userID != currentUser.id else { throw ChatProviderError.invalidRequest("You can’t ignore yourself.") }
+        var relationship = snapshot.relationships.first { $0.id == userID }
+            ?? Relationship(id: userID, type: .none, user: snapshot.knownUsers.first { $0.id == userID })
+        relationship.isUserIgnored = ignored
+        if relationship.type == .none, !ignored {
+            snapshot.relationships.removeAll { $0.id == userID }
+            publishRelationships()
+        } else {
+            setRelationship(relationship)
+        }
     }
 
     private func setRelationship(_ relationship: Relationship) {

@@ -7,7 +7,7 @@ import SwiftUI
 struct NativeMemberListView: NSViewRepresentable {
     @Environment(\.profileCosmeticPolicy) var cosmeticPolicy
     @Environment(\.serverTagCardModel) var serverTagCardModel
-    let sections: [MemberSection]
+    var sections: [MemberSection]
     let customEmojiURLsByID: CustomEmojiImageURLs
     let profilePresentation: ProfilePresentationState?
     let isProfilePresented: Bool
@@ -33,7 +33,25 @@ struct NativeMemberListView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.update(parent: self, scrollView: scrollView)
+        var parent = self
+        let ignored = serverTagCardModel?.ignoredUsers.ignoredUserIDs ?? []
+        parent.presentation.ignoredUserIDs = ignored
+        if !ignored.isEmpty {
+            parent.sections = sections.map { section in
+                let members = section.members.map { member in
+                    guard ignored.contains(member.id), !presentation.presenceHiddenUserIDs.contains(member.id) else { return member }
+                    var member = member
+                    member.activityText = "Ignored"
+                    member.customStatus = nil
+                    member.isListeningToMusic = false
+                    return member
+                }
+                return MemberSection(id: section.id, title: section.title, colorHex: section.colorHex,
+                                     totalCount: section.totalCount, members: members,
+                                     gatewayStartIndex: section.gatewayStartIndex, isLoadingSkeleton: section.isLoadingSkeleton)
+            }
+        }
+        context.coordinator.update(parent: parent, scrollView: scrollView)
     }
 
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {

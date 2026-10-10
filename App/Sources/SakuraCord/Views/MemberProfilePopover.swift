@@ -9,6 +9,7 @@ enum ProfilePresentationLayout {
 }
 
 struct ProfilePresentationContent<Footer: View>: View {
+    @Environment(\.serverTagCardModel) private var model
     let presentation: ProfilePresentationState
     var layout: ProfilePresentationLayout = .popover
     var maximumPopoverHeight: CGFloat = InterfaceScale.metric(560)
@@ -38,6 +39,9 @@ struct ProfilePresentationContent<Footer: View>: View {
     var body: some View {
         if presentation.isLocalIdentity {
             CompactIdentityProfilePopover(user: presentation.member.user, isClyde: presentation.isClyde)
+        } else if let model, model.shouldGateIgnoredProfile(presentation) {
+            IgnoredProfileGate(model: model, presentation: presentation)
+                .frame(width: layout == .popover ? MemberProfilePopover<EmptyView>.preferredWidth : nil)
         } else {
         MemberProfilePopover(
             member: presentation.member,

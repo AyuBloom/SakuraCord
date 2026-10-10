@@ -23,7 +23,7 @@ struct GatewayRelationshipDTO: Decodable {
     /// it; a snapshot row or an update replaces it, clearing absent values.
     func record(merging existing: RelationshipRecord?, replacing: Bool) -> RelationshipRecord? {
         guard let type = (type ?? existing?.type.rawValue).flatMap(RelationshipType.init(rawValue:)),
-              type != .none else { return nil }
+              type != .none || userIgnored == true || (!replacing && existing?.isUserIgnored == true) else { return nil }
         let nickname = DiscordRESTProvider.normalizedFriendNickname(nickname)
         let since = since.flatMap(DiscordDate.parse)
         return RelationshipRecord(
@@ -65,7 +65,11 @@ extension DiscordRESTProvider {
             var records = cachedRelationships
             switch name {
             case "RELATIONSHIP_REMOVE":
-                records[userID] = nil
+                // Ignore survives removal when Discord explicitly preserves it.
+                records[userID] = dto.userIgnored == true
+                    ? RelationshipRecord(type: .none, nickname: nil, since: nil, note: nil,
+                                         isSpamRequest: false, isUserIgnored: true)
+                    : nil
             case "RELATIONSHIP_UPDATE":
                 records[userID] = dto.record(merging: records[userID], replacing: true)
             default:
@@ -177,6 +181,22 @@ extension DiscordRESTProvider {
             "/users/@me/relationships/\(userID)", method: "PUT", body: ["type": .number(Double(RelationshipType.blocked.rawValue))],
             location: "ContextMenu", captchaHandler: captchaHandler,
             failure: { Self.relationshipUpdateFailureMessage(code: $0, status: $1) }
+        )
+    }
+
+    /// Ignore is independent of friendship, pending requests, and blocking.
+    /// Stable634304 sends an omitted body and reconciles through Gateway.
+    public func setUserIgnored(_ userID: UserID, ignored: Bool, location: IgnoreActionLocation) async throws {
+        guard userID != currentUser?.id else {
+            throw ChatProviderError.invalidRequest("You can’t ignore yourself.")
+        }
+        try await relationshipMutation(
+            "/users/@me/relationships/\(userID)/ignore", method: ignored ? "PUT" : "DELETE",
+            body: nil, location: location.rawValue, captchaHandler: nil,
+            failure: { _, status in
+                status == 429 ? "Discord is limiting relationship changes. Wait a moment before trying again."
+                    : "Discord couldn’t update Ignore. Try again."
+            }
         )
     }
 

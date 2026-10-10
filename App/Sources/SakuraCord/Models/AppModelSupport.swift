@@ -86,6 +86,8 @@ extension AppModel {
         accountSessionGeneration &+= 1
         serverInvites.reset()
         friends.reset()
+        lastDirectMessageSelection = nil
+        ignoredUsers.reset()
         serverTagCards.reset()
         issueReports.reset()
         nicknameEditor.reset()

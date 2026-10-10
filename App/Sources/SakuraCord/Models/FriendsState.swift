@@ -137,12 +137,14 @@ final class FriendsState {
 nonisolated enum FriendsConfirmation: Identifiable, Hashable, Sendable {
     case removeFriend(User)
     case block(User)
+    case ignore(User, IgnoreActionLocation)
     case acceptStranger(User)
 
     var id: String {
         switch self {
         case .removeFriend(let user): "remove-\(user.id)"
         case .block(let user): "block-\(user.id)"
+        case .ignore(let user, _): "ignore-\(user.id)"
         case .acceptStranger(let user): "stranger-\(user.id)"
         }
     }

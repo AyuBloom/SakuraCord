@@ -259,6 +259,7 @@ extension AppModel {
         AppPerformanceSignposts.measureSync("BootstrapSnapshotPublish") {
             snapshot = value
             friends.replaceRelationships(value.relationships)
+            ignoredUsers.replaceRelationships(value.relationships)
             onboarding.members = value.currentMembersByGuildID
             configureForwardDestinationHistoryScope(
                 credentialHandle?.accountID

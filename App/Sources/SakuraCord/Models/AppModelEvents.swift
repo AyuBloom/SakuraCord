@@ -323,6 +323,7 @@ extension AppModel {
              .voiceChannelEffect:
             consumeSoundboardEvent(event)
         case .typing(let channelID, let user):
+            guard !isUserIgnored(user.id), !ignoredUsers.blockedUserIDs.contains(user.id) else { return }
             typingState.receive(
                 channelID: channelID,
                 user: user,
@@ -554,7 +555,7 @@ extension AppModel {
         guard let currentUserID = snapshot?.currentUser.id else { return }
         let disposition = readState.receive(message, currentUserID: currentUserID)
         guard disposition.accepted else { return }
-        if message.author.id != currentUserID,
+        if message.author.id != currentUserID, !isMessageSuppressed(message),
            accessibilitySettings.announcesNewMessages
         {
             accessibilityMessageAnnouncer.enqueue()
@@ -896,6 +897,7 @@ extension AppModel {
         let previousAccessEvidence = readState.authoritativeAccessEvidenceChannelIDs()
         snapshot = value
         friends.replaceRelationships(value.relationships)
+        ignoredUsers.replaceRelationships(value.relationships)
         for (guildID, member) in value.currentMembersByGuildID {
             receiveOnboardingMember(member, guildID: guildID)
         }

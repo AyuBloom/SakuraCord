@@ -1,12 +1,6 @@
 import SakuraCordModels
 import SwiftUI
 
-/// The Direct Messages home destinations: Friends above every conversation.
-nonisolated enum DirectMessageSidebarSelection: Hashable, Sendable {
-    case friends
-    case channel(ChannelID)
-}
-
 struct DirectMessageInboxView: View {
     let model: AppModel
     let channels: [Channel]
@@ -30,16 +24,14 @@ struct DirectMessageInboxView: View {
             )
             .tag(DirectMessageSidebarSelection.friends)
             .pointerStyle(.link)
-            .listRowBackground(
-                RoundedRectangle(cornerRadius: InterfaceScale.metric(8))
-                    .fill(selection == .friends ? Color.primary.opacity(0.08) : .clear)
-            )
+            .overlay { ChannelRowHoverBridge(isSelected: selection == .friends, usesCustomSelectionBackground: true) }
 
             Section {
                 ForEach(directMessages) { channel in
                     DirectMessageInboxRow(
                         model: model,
                         channel: channel,
+                        isSelected: selection == .channel(channel.id),
                         isPinned: pinnedChannelIDs.contains(channel.id),
                         member: DirectMessageInboxPolicy.recipientMember(
                             for: channel,
@@ -50,10 +42,6 @@ struct DirectMessageInboxView: View {
                     )
                     .tag(DirectMessageSidebarSelection.channel(channel.id))
                     .pointerStyle(.link)
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: InterfaceScale.metric(8))
-                            .fill(selection == .channel(channel.id) ? Color.primary.opacity(0.08) : .clear)
-                    )
                 }
 
                 SidebarBottomScrollSpacer(height: bottomContentInset)
@@ -86,10 +74,9 @@ private struct FriendsSidebarRow: View {
     var body: some View {
         HStack(spacing: InterfaceScale.metric(10)) {
             Image(systemName: "person.2.fill")
-                .font(.interfaceSystem(size: 13, weight: .semibold))
+                .font(.interfaceSystem(size: 16, weight: .semibold))
                 .foregroundStyle(isSelected ? .primary : .secondary)
                 .frame(width: InterfaceScale.metric(32), height: InterfaceScale.metric(32))
-                .glassEffect(.regular, in: Circle())
             Text("Friends")
                 .fontWeight(isSelected ? .semibold : .regular)
                 .foregroundStyle(isSelected ? .primary : .secondary)
@@ -158,6 +145,7 @@ nonisolated enum DirectMessageInboxPolicy {
 private struct DirectMessageInboxRow: View {
     let model: AppModel
     let channel: Channel
+    let isSelected: Bool
     let isPinned: Bool
     let member: Member?
     let call: PrivateCall?
@@ -186,7 +174,10 @@ private struct DirectMessageInboxRow: View {
                     )
                     .foregroundStyle(nameColor)
                     .lineLimit(1)
-                if let callStatus =
+                if isIgnored {
+                    Label("Ignored", systemImage: "eye.slash")
+                        .font(.interface(.caption)).foregroundStyle(.secondary)
+                } else if let callStatus =
                     DirectMessageInboxPolicy.callStatus(for: call)
                 {
                     Label(callStatus, systemImage: "bell.fill")
@@ -245,7 +236,7 @@ private struct DirectMessageInboxRow: View {
         .onModalHover { isHovered = $0 }
         .overlay {
             ChannelContextMenuBridge(
-                isSelected: model.selectedChannelID == channel.id,
+                isSelected: isSelected,
                 isUnread: channel.unreadCount > 0,
                 isMutationPending:
                     model.isChannelNotificationMutationPending(channel.id),
@@ -285,11 +276,15 @@ private struct DirectMessageInboxRow: View {
                 }),
                 userMenu: {
                     guard channel.kind == .directMessage, let recipient = channel.recipients.first else { return nil }
-                    return UserContextMenu.make(for: recipient, context: .init(channelID: channel.id), model: model)
+                    return UserContextMenu.make(for: recipient, context: .init(channelID: channel.id, ignoreLocation: .directMessage), model: model)
                 },
                 usesCustomSelectionBackground: true
             )
         }
+    }
+
+    private var isIgnored: Bool {
+        channel.kind == .directMessage && channel.recipients.first.map { model.isUserIgnored($0.id) } == true
     }
 
     private var isMuted: Bool {
@@ -297,17 +292,17 @@ private struct DirectMessageInboxRow: View {
     }
 
     private var dimsMutedConversation: Bool {
-        isMuted && model.selectedChannelID != channel.id
+        (isMuted || isIgnored) && model.selectedChannelID != channel.id
     }
 
     private var nameColor: Color {
         if model.selectedChannelID == channel.id { return .primary }
-        if isMuted { return .primary.opacity(0.3) }
+        if isMuted || isIgnored { return .primary.opacity(0.3) }
         return channel.unreadCount > 0 ? .primary : .secondary
     }
 
     private var accessibilityValue: String {
-        var states: [String] = []
+        var states: [String] = isIgnored ? ["Ignored"] : []
         if channel.mentionCount > 0 {
             states.append(channel.mentionCount == 1
                 ? "1 unread mention"

@@ -304,7 +304,11 @@ extension NativeMemberListCanvasView {
                 if rowMenu != nil {
                     proxy.toolTip = [member.user.username, member.activityText].compactMap { $0 }.joined(separator: "\n")
                 }
-                proxy.setAccessibilityCustomActions(rowAccessibilityActions?(member) ?? [])
+            }
+            // Resolve the current relationship and channel when VoiceOver asks,
+            // even if this member's row did not otherwise need rebuilding.
+            proxy.customActions = { [weak self] member in
+                self?.rowAccessibilityActions?(member) ?? []
             }
             proxy.activation = { [weak self] member in
                 guard let self, !self.interactionsBlocked,

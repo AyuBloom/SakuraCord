@@ -7,6 +7,71 @@ import Testing
 struct RelationshipContractTests {
     private let fixture = RelationshipFixture()
 
+    @Test func `group warning dismissal preserves its empty contract and reload flag`() async throws {
+        let (provider, session) = await makeProvider()
+        defer { session.invalidateAndCancel() }
+        let dto = try JSONDecoder().decode(ChannelDTO.self, from: Data(#"{"id":"9","type":3,"blocked_user_warning_dismissed":true}"#.utf8))
+        #expect(try dto.domain(guildID: nil).blockedUserWarningDismissed)
+        try await provider.dismissIgnoredGroupWarning(in: .init(rawValue: 9))
+        let request = try #require(fixture.requests.withLock { $0.first })
+        #expect(request.request.httpMethod == "POST")
+        #expect(request.request.url?.path == "/api/v9/channels/9/blocked-user-warning-dismissal")
+        #expect(request.body == nil)
+        #expect(context(request.request) == nil)
+        #expect(fixture.requests.withLock { $0.count } == 1)
+        await provider.disconnect()
+    }
+
+    @Test(arguments: [400, 401, 403, 429, 500])
+    func `rejected ignore mutations never retry or synthesize a relationship`(status: Int) async throws {
+        let (provider, session) = await makeProvider()
+        defer { session.invalidateAndCancel() }
+        do {
+            try await provider.setUserIgnored(id(UInt64(status)), ignored: true, location: .contextMenu)
+            Issue.record("Expected rejection")
+        } catch {}
+        #expect(fixture.requests.withLock { $0.count } == 1)
+        #expect(await provider.cachedRelationships.isEmpty)
+        await provider.disconnect()
+    }
+
+    @Test func `ignore routes omit bodies and await authoritative relationship events`() async throws {
+        let (provider, session) = await makeProvider()
+        defer { session.invalidateAndCancel() }
+        try await provider.setUserIgnored(id(2), ignored: true, location: .directMessage)
+        try await provider.setUserIgnored(id(2), ignored: false, location: .settings)
+        let captured = fixture.requests.withLock { $0 }
+        #expect(captured.map { $0.request.httpMethod } == ["PUT", "DELETE"])
+        #expect(captured.allSatisfy { $0.request.url?.path == "/api/v9/users/@me/relationships/2/ignore" && $0.body == nil })
+        #expect(captured.map { context($0.request) } == ["DMUserContextMenu", "user settings"])
+        #expect(await provider.cachedRelationships.isEmpty)
+        await provider.disconnect()
+    }
+
+    @Test func `ignore survives nonfriend pending blocked and removal transitions`() async throws {
+        let (provider, session) = await makeProvider()
+        defer { session.invalidateAndCancel() }
+        await provider.handleGatewayDispatch(name: "READY", body: .object([
+            "user": user("1"), "users": .array([user("2")]),
+            "relationships": .array([row("2", type: 0, extra: ["user_ignored": .bool(true)])]),
+        ]))
+        #expect(await provider.cachedRelationships[id(2)]?.isUserIgnored == true)
+        for type in [4, 2, 0, 3, 1] {
+            await provider.handleGatewayDispatch(name: "RELATIONSHIP_UPDATE", body: row("2", type: type, extra: ["user_ignored": .bool(true)]))
+            let records = await provider.publishedRelationships()
+            #expect(records.first?.type.rawValue == type)
+            #expect(records.first?.isIgnored == (type != 2))
+            #expect(records.blockedOrIgnoredUserIDs == [id(2)])
+        }
+        await provider.handleGatewayDispatch(name: "RELATIONSHIP_REMOVE", body: row("2", type: 1, extra: ["user_ignored": .bool(true)]))
+        #expect(await provider.cachedRelationships[id(2)]?.type == RelationshipType.none)
+        #expect(await provider.cachedBlockedOrIgnoredUserIDs == [id(2)])
+        await provider.handleGatewayDispatch(name: "RELATIONSHIP_UPDATE", body: row("2", type: 0, extra: ["user_ignored": .bool(false)]))
+        #expect(await provider.cachedRelationships.isEmpty)
+        #expect(await provider.cachedBlockedOrIgnoredUserIDs.isEmpty)
+        await provider.disconnect()
+    }
+
     @Test func `READY, Gateway events and a racing full read reduce to one authoritative record set`() async throws {
         let credentials = RelationshipInterleavingCredentials()
         let (provider, session) = await makeProvider(credentials: credentials)
@@ -381,6 +446,9 @@ private final class RelationshipURLProtocol: URLProtocol, @unchecked Sendable {
         if case let .object(fields)? = body, case let .string(value)? = fields["username"] { username = value }
         let lastComponent = request.url!.lastPathComponent
         let (status, response): (Int, String) = switch (request.httpMethod!, username, lastComponent) {
+        case (_, _, "ignore") where ["400", "401", "403", "429", "500"].contains(request.url!.deletingLastPathComponent().lastPathComponent):
+            (Int(request.url!.deletingLastPathComponent().lastPathComponent)!, #"{"message":"Rejected","retry_after":0.01,"global":false}"#)
+        case ("POST", _, "blocked-user-warning-dismissal"): (200, "")
         case ("GET", _, _): (200, fixture.relationships.withLock { $0 })
         case (_, "already"?, _): (400, #"{"code":80007,"message":"You are already friends with that user."}"#)
         case (_, "closed"?, _): (400, #"{"code":80000,"message":"Incoming friend requests disabled."}"#)

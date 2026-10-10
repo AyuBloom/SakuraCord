@@ -10,7 +10,7 @@ extension AppModel {
             )
         }.map(\.id))
         let blocked = Set(inbox.mentions.filter {
-            snapshot?.blockedOrIgnoredUserIDs.contains($0.author.id) == true
+            isMessageSuppressed($0)
         }.map(\.id))
         inbox.hiddenMentionIDs = blocked.union(snapshot?.currentUser.allowsAdultContent == true ? [] : restricted)
         inbox.obscuredMentionIDs = snapshot?.currentUser.allowsAdultContent == true ? restricted : []

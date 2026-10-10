@@ -413,6 +413,7 @@ enum NativeTimelineBeginning: Equatable {
 
 enum NativeMessageTimelineItem: Equatable {
     nonisolated enum Identifier: Hashable {
+        case ignoredMessages(MessageID)
         case beginning(ChannelID)
         case inboxGroup(ChannelID)
         case inboxForumPost(ChannelID)
@@ -421,6 +422,7 @@ enum NativeMessageTimelineItem: Equatable {
         case message(MessageRowIdentity)
     }
 
+    case ignoredMessages(IgnoredMessageGroup)
     case beginning(NativeTimelineBeginning)
     case inboxGroup(InboxGroupHeaderPresentation)
     case inboxForumPost(ForumPost)
@@ -433,8 +435,18 @@ enum NativeMessageTimelineItem: Equatable {
     )
 
     var messageID: MessageID? {
-        guard case let .message(row, _, _) = self else { return nil }
-        return row.id
+        switch self {
+        case let .message(row, _, _): row.id
+        // A concealed run is still a message boundary for scrolling and read
+        // acknowledgement. Revealed runs use their original rows instead.
+        case let .ignoredMessages(group) where !group.isRevealed: group.messageIDs.first
+        default: nil
+        }
+    }
+
+    func containsMessage(_ id: MessageID) -> Bool {
+        if case let .ignoredMessages(group) = self { return group.messageIDs.contains(id) }
+        return messageID == id
     }
 
     var messageRow: MessageRowPresentation? {
@@ -444,6 +456,8 @@ enum NativeMessageTimelineItem: Equatable {
 
     var identifier: Identifier {
         switch self {
+        case let .ignoredMessages(group):
+            .ignoredMessages(group.messageIDs[0])
         case let .inboxEvent(event):
             .inboxEvent(event.id)
         case let .inboxGroup(header):

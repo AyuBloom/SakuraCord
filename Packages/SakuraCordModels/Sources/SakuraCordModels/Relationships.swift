@@ -47,7 +47,26 @@ public struct Relationship: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// Official-client action contexts observed or source-backed in stable634304.
+public enum IgnoreActionLocation: String, Sendable {
+    case contextMenu = "ContextMenu"
+    case directMessage = "DMUserContextMenu"
+    case guildChannel = "GuildChannelUserContextMenu"
+    case profile = "user profile overflow menu"
+    case profileNotice = "UserProfileRemediatedNotice"
+    case settings = "user settings"
+}
+
+public extension Relationship {
+    /// Block takes precedence without clearing the underlying Ignore flag.
+    var isIgnored: Bool { isUserIgnored && type != .blocked }
+}
+
 public extension Collection<Relationship> {
+    var ignoredUserIDs: Set<UserID> {
+        Set(lazy.filter(\.isIgnored).map(\.id))
+    }
+
     var blockedOrIgnoredUserIDs: Set<UserID> {
         Set(lazy.filter { $0.type == .blocked || $0.isUserIgnored }.map(\.id))
     }

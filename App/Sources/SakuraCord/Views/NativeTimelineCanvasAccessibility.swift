@@ -291,6 +291,12 @@ extension NativeTimelineCanvasView {
         let layout = layouts[index]
         let rowFrame = rowFrame(at: index)
         switch item {
+        case let .ignoredMessages(group):
+            return accessibilityElement(role: .button, label: "\(group.label), \(group.isRevealed ? "Hide" : "Show")",
+                                        frame: rowFrame, parent: self) { [weak self] in
+                self?.model?.toggleIgnoredMessages(group.messageIDs)
+                return self != nil
+            }
         case let .inboxEvent(event):
             return accessibilityElement(role: .button, label: event.name, frame: rowFrame, parent: self) { [weak self] in
                 self?.model?.inbox.selectedEvent = event

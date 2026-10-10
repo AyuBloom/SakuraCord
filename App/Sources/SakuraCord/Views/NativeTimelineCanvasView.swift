@@ -528,6 +528,17 @@ enum NativeTimelineRowPainter {
             isHovered: isHovered
         )
         switch item {
+        case let .ignoredMessages(group):
+            if let day = group.day, let frame = layout.daySeparatorFrame { dateSeparator(date: day, frame: frame) }
+            if let frame = layout.unreadSeparatorFrame { newMessagesSeparator(frame: frame) }
+            let prefix = group.contextTitle.map { "\($0) · " } ?? ""
+            let text = "\(prefix)\(group.label) — \(group.isRevealed ? "Hide" : "Show")"
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
+            (text as NSString).draw(in: CGRect(x: InterfaceScale.metric(20), y: layout.height - InterfaceScale.metric(27),
+                                              width: max(0, rowFrame.width - InterfaceScale.metric(40)), height: InterfaceScale.metric(22)),
+                                   withAttributes: [.font: NSFont.systemFont(ofSize: InterfaceScale.metric(13)),
+                                                    .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph])
         case .inboxGroup, .inboxForumPost, .inboxEvent:
             break
         case let .beginning(beginning):

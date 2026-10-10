@@ -66,12 +66,12 @@ struct FriendsProjection {
         case .outgoingRequest:
             subtitle = row.relationship.note.map { "“\($0)”" } ?? "Outgoing Friend Request"
         default:
-            subtitle = row.presence.customStatus ?? row.presence.activityText
+            subtitle = row.relationship.isIgnored ? "Ignored" : row.presence.customStatus ?? row.presence.activityText
                 ?? PresenceIndicatorPresentation.accessibilityLabel(for: row.presence.status, isMobile: false)
         }
         return Member(user: user, roleName: "", status: row.presence.status,
                       activityText: subtitle,
-                      isListeningToMusic: row.relationship.type == .friend && row.presence.customStatus == nil && row.presence.isListeningToMusic,
+                      isListeningToMusic: !row.relationship.isIgnored && row.relationship.type == .friend && row.presence.customStatus == nil && row.presence.isListeningToMusic,
                       isMobileOnly: row.presence.isMobileOnly)
     }
 }

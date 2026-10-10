@@ -29,7 +29,7 @@ enum UserContextMenu {
             item.isEnabled = action.isEnabled
             item.identifier = NSUserInterfaceItemIdentifier("user-\(action.group.rawValue)")
             ContextMenuItemSupport.configure(item, title: action.title, systemImage: action.systemImage,
-                                             isDestructive: action.group == .destructive)
+                                             isDestructive: action.group == .destructive && action.id != "ignore")
             return item
         }
     }

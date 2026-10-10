@@ -39,6 +39,8 @@ public actor MockChatProvider: ChatProvider {
     var categoryCollapsedUpdateWaiters: [CheckedContinuation<Void, Never>] = []
     public internal(set) var threadNotificationRequests: [ThreadNotificationRequest] = []
     var forumQueriesByChannel: [ChannelID: [ForumPostQuery]] = [:]
+    var relationshipPresences: [UserID: UserPresence]?
+    var presenceChurnTask: Task<Void, Never>?
 
     public init(
         includesLongServerList: Bool = false,
@@ -48,7 +50,8 @@ public actor MockChatProvider: ChatProvider {
         pinMutationFailureStatus: Int? = nil,
         timelineIncludesAnimatedMedia: Bool = false,
         timelineIncludesVoiceMessages: Bool = false,
-        includesIncomingPrivateCall: Bool = false
+        includesIncomingPrivateCall: Bool = false,
+        friendCount: Int? = nil
     ) {
         let fixture = MockChatFixture.make(
             includesLongServerList: includesLongServerList,
@@ -114,6 +117,13 @@ public actor MockChatProvider: ChatProvider {
             }
         }
         profilesByUser = fixture.profilesByUser
+        if let friendCount {
+            let fixture = Self.performanceRelationships(friendCount: friendCount)
+            snapshot.relationships += fixture.relationships
+            snapshot.friendUserIDs = snapshot.relationships.friendUserIDs
+            snapshot.relationshipNicknamesByUserID = snapshot.relationships.nicknamesByUserID
+            relationshipPresences = fixture.presences
+        }
         if includesIncomingPrivateCall {
             let channelID = ChannelID(rawValue: 400)
             let callerID = UserID(rawValue: 2)
@@ -176,6 +186,20 @@ public actor MockChatProvider: ChatProvider {
         continuation?.yield(.connectionChanged(.connecting))
         try await Task.sleep(for: .milliseconds(180))
         continuation?.yield(.connectionChanged(.ready))
+        let referenceMembers = Dictionary(
+            (membersByGuild[GuildID(rawValue: 100)] ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { _, newer in newer }
+        )
+        var presences = Dictionary(uniqueKeysWithValues: snapshot.relationships.map { relationship in
+            let member = referenceMembers[relationship.id]
+            return (relationship.id, UserPresence(
+                status: member?.status ?? .offline,
+                customStatus: member?.customStatus, activityText: member?.activityText,
+                isListeningToMusic: member?.isListeningToMusic ?? false, isMobileOnly: member?.isMobileOnly ?? false
+            ))
+        })
+        presences.merge(relationshipPresences ?? [:]) { _, fixture in fixture }
+        continuation?.yield(.relationshipPresencesChanged(presences, isComplete: true))
         return snapshot
     }
 

@@ -84,6 +84,7 @@ public struct Channel: Identifiable, Codable, Hashable, Sendable {
     public var isMuted: Bool
     public var isAgeRestricted: Bool
     public var recipients: [User]
+    public var blockedUserWarningDismissed: Bool
     public var permissionOverwrites: [ChannelPermissionOverwrite]?
     public var memberListID: String?
     public var lastMessageID: MessageID?
@@ -118,6 +119,7 @@ public struct Channel: Identifiable, Codable, Hashable, Sendable {
         isMuted: Bool = false,
         isAgeRestricted: Bool = false,
         recipients: [User] = [],
+        blockedUserWarningDismissed: Bool = false,
         permissionOverwrites: [ChannelPermissionOverwrite]? = nil,
         memberListID: String? = nil,
         lastMessageID: MessageID? = nil,
@@ -151,6 +153,7 @@ public struct Channel: Identifiable, Codable, Hashable, Sendable {
         self.isMuted = isMuted
         self.isAgeRestricted = isAgeRestricted
         self.recipients = recipients
+        self.blockedUserWarningDismissed = blockedUserWarningDismissed
         self.permissionOverwrites = permissionOverwrites
         self.memberListID = memberListID
         self.lastMessageID = lastMessageID
@@ -178,7 +181,7 @@ public struct Channel: Identifiable, Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, guildID, name, hasExplicitName, iconURL, ownerID, topic, kind, category, categoryID, position, categoryPosition
-        case isAgeRestricted
+        case isAgeRestricted, blockedUserWarningDismissed
         case unreadCount, mentionCount, isMuted, recipients, permissionOverwrites, memberListID, lastMessageID, lastPinTimestamp
         case flags, availableTags, defaultReaction, defaultSortOrder, defaultForumLayout
         case defaultTagMatch, defaultAutoArchiveDuration, defaultThreadRateLimitPerUser
@@ -205,6 +208,7 @@ public struct Channel: Identifiable, Codable, Hashable, Sendable {
         isMuted = try values.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         isAgeRestricted = try values.decodeIfPresent(Bool.self, forKey: .isAgeRestricted) ?? false
         recipients = try values.decodeIfPresent([User].self, forKey: .recipients) ?? []
+        blockedUserWarningDismissed = try values.decodeIfPresent(Bool.self, forKey: .blockedUserWarningDismissed) ?? false
         permissionOverwrites = try values.decodeIfPresent(
             [ChannelPermissionOverwrite].self, forKey: .permissionOverwrites
         )

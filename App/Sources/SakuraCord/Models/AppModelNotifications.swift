@@ -90,7 +90,7 @@ extension AppModel {
 
     func deliverNativeNotification(for message: Message, isMention: Bool = false) {
         // Keep synthetic performance events away from Notification Center's XPC queue.
-        guard !runsChatPerformanceBenchmark, currentStatus != .dnd else { return }
+        guard !runsChatPerformanceBenchmark, currentStatus != .dnd, !isMessageSuppressed(message) else { return }
         let channel = snapshot?.channels.first { $0.id == message.channelID }
             ?? visibleChannels.first { $0.id == message.channelID }
         guard let currentUserID = snapshot?.currentUser.id else { return }
@@ -114,7 +114,7 @@ extension AppModel {
         let account = accountSession()
         startAccountChildTask(account: account) { model, account in
             guard model.isCurrentAccountSession(account), !Task.isCancelled,
-                  model.currentStatus != .dnd
+                  model.currentStatus != .dnd, !model.isMessageSuppressed(message)
             else { return }
             var presented = message
             presented.author = model.privateConversationUser(message.author, in: guildID)
@@ -179,6 +179,7 @@ extension AppModel {
     }
 
     func deliverIncomingCallNotification(_ call: PrivateCall) {
+        guard !isIncomingCallSuppressed(call) else { return }
         guard !runsChatPerformanceBenchmark,
               let currentUserID = snapshot?.currentUser.id
         else { return }
@@ -203,6 +204,7 @@ extension AppModel {
         startAccountChildTask(account: account) { model, account in
             guard model.isCurrentAccountSession(account), !Task.isCancelled,
                   model.privateCallsByChannel[call.channelID]?.isRinging(currentUserID) == true,
+                  !model.isIncomingCallSuppressed(call),
                   model.activeVoiceChannel?.id != call.channelID
             else { return }
             guard model.currentStatus != .dnd else {

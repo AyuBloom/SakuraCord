@@ -2,6 +2,12 @@ import DiscordProtocol
 import Foundation
 import SakuraCordModels
 
+/// The Direct Messages home destinations: Friends above every conversation.
+nonisolated enum DirectMessageSidebarSelection: Hashable, Sendable {
+    case friends
+    case channel(ChannelID)
+}
+
 extension AppModel {
     func selectGuild(_ guildID: GuildID?) {
         startConversationNavigation { model, account in
@@ -510,8 +516,18 @@ extension AppModel {
         // Snapshot this before changing the selected guild. A synchronous
         // workspace projection may select that guild's first channel while
         // activation is in flight, which must not replace the user's memory.
-        let rememberedChannelID = guildID.flatMap { lastOpenedChannelIDsByGuild[$0] }
+        let rememberedDirectMessage = lastDirectMessageSelection
+        let rememberedChannelID: ChannelID? = if let guildID {
+            lastOpenedChannelIDsByGuild[guildID]
+        } else if case .channel(let channelID) = rememberedDirectMessage {
+            channelID
+        } else { nil }
+        let keepsFriends = guildID == nil && (rememberedDirectMessage == .friends || friends.isPresented)
         dismissAllProfiles()
+        // Friends stays the Direct Messages home; clear the server channel
+        // first so automatic reselection does not replace it.
+        if keepsFriends { selectedChannelID = nil }
+        if guildID == nil { friends.isPresented = keepsFriends }
         selectedGuildID = guildID
         refreshSelectedGuildOnboarding()
         beginCurrentUserProfilePrefetch(in: guildID, account: session)
@@ -561,6 +577,11 @@ extension AppModel {
             await loadEmojis(for: guildID)
             guard isCurrentAccountSession(session) else { return }
         }
+        restoreGuildChannelSelection(guildID: guildID, rememberedChannelID: rememberedChannelID, keepsFriends: keepsFriends)
+        beginMemberLoad(for: guildID)
+    }
+
+    private func restoreGuildChannelSelection(guildID: GuildID?, rememberedChannelID: ChannelID?, keepsFriends: Bool) {
         let permissionBasis = guildID.flatMap {
             conversationPermissionBasis(for: $0)
         }
@@ -579,9 +600,12 @@ extension AppModel {
                 ? rememberedID
                 : nil
         }
-        if restoredChannelID != nil
-            || !visibleChannels.contains(where: { $0.id == selectedChannelID })
-        {
+        if keepsFriends {
+            friends.isPresented = true
+            selectedChannelID = nil
+            lastDirectMessageSelection = .friends
+        }
+        if !keepsFriends, restoredChannelID != nil || !visibleChannels.contains(where: { $0.id == selectedChannelID }) {
             let preferredChannelID = restoredChannelID
                 ?? Self.preferredInitialChannelID(in: selectableChannels)
             pendingAutomaticChannelAccessID = preferredChannelID.flatMap { id in
@@ -593,8 +617,11 @@ extension AppModel {
                 }
             }
             selectedChannelID = preferredChannelID
+            if guildID == nil, preferredChannelID == nil {
+                friends.isPresented = true
+                lastDirectMessageSelection = .friends
+            }
         }
-        beginMemberLoad(for: guildID)
     }
 
     func restoreMemberPresentation(for guildID: GuildID?) {

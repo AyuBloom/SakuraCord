@@ -96,6 +96,7 @@ nonisolated enum TimelineButtonActivationPolicy {
 
 nonisolated enum NativeTimelinePointerActivationTarget: Hashable {
     case loader
+    case ignoredMessages(MessageID)
     case message(MessageID)
     case componentReveal(MessageID, String)
     case componentImage(MessageID, String)

@@ -133,6 +133,7 @@ struct ChannelDTO: Decodable {
     var parentID: String?
     var position: Int?
     var recipients: [UserDTO]?
+    var blockedUserWarningDismissed: Bool?
     var recipientIDs: [String]?
     var permissionOverwrites: [PermissionOverwriteDTO]?
     var memberListID: String?
@@ -185,6 +186,7 @@ struct ChannelDTO: Decodable {
         case name, icon, topic, type, nsfw
         case parentID = "parent_id"
         case position, recipients
+        case blockedUserWarningDismissed = "blocked_user_warning_dismissed"
         case recipientIDs = "recipient_ids"
         case permissionOverwrites = "permission_overwrites"
         case memberListID = "member_list_id"
@@ -283,6 +285,7 @@ struct ChannelDTO: Decodable {
             categoryPosition: categoryPosition,
             isAgeRestricted: nsfw ?? false,
             recipients: users,
+            blockedUserWarningDismissed: blockedUserWarningDismissed ?? false,
             permissionOverwrites: permissionOverwrites?.map(\.domain),
             memberListID: memberListID,
             lastMessageID: lastMessageID.flatMap(MessageID.init),

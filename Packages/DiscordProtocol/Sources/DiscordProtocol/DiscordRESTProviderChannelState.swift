@@ -2,6 +2,14 @@ import Foundation
 import SakuraCordModels
 
 extension DiscordRESTProvider {
+    public func dismissIgnoredGroupWarning(in channelID: ChannelID) async throws {
+        guard let account = currentUser?.id else { throw ChatProviderError.unauthenticated }
+        try await requestEmpty("/channels/\(channelID)/blocked-user-warning-dismissal", method: "POST")
+        guard currentUser?.id == account, var channel = privateChannel(id: channelID) else { return }
+        channel.blockedUserWarningDismissed = true
+        upsertPrivateChannel(channel)
+    }
+
     public func channels(in guildID: GuildID?) async throws -> [Channel] {
         if let cached = cachedChannels[guildID] {
             return cached

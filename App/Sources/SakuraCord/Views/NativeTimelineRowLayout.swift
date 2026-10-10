@@ -202,6 +202,21 @@ struct NativeTimelineRowLayout {
     ) -> Self {
         let width = max(InterfaceScale.metric(220), proposedWidth)
         switch item {
+        case let .ignoredMessages(group):
+            var result = Self(height: InterfaceScale.metric(36))
+            var offset: CGFloat = 0
+            if group.day != nil {
+                result.daySeparatorFrame = CGRect(x: InterfaceScale.metric(12), y: offset,
+                                                  width: width - InterfaceScale.metric(24), height: NativeTimelineDateSeparatorMetrics.rowHeight)
+                offset += NativeTimelineDateSeparatorMetrics.rowHeight
+            }
+            if group.isUnreadBoundary {
+                result.unreadSeparatorFrame = CGRect(x: InterfaceScale.metric(12), y: offset,
+                                                     width: width - InterfaceScale.metric(24), height: NativeTimelineUnreadSeparatorMetrics.rowHeight)
+                offset += NativeTimelineUnreadSeparatorMetrics.rowHeight
+            }
+            result.height += offset
+            return result
         case .inboxGroup:
             return Self(height: InboxRowMetrics.headerHeight)
         case .inboxEvent:

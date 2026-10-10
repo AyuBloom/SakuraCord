@@ -1022,7 +1022,7 @@ extension NativeMessageTimelineCoordinator {
                     if !group.isCollapsed {
                         result.append(contentsOf: group.events.map(NativeMessageTimelineItem.inboxEvent))
                         result.append(contentsOf: group.forumPosts.map(NativeMessageTimelineItem.inboxForumPost))
-                        result.append(contentsOf: group.messages.compactMap { rowsByID[$0.id] }.map { messageItem($0, from: parent) })
+                        result.append(contentsOf: messageItems(group.messages.compactMap { rowsByID[$0.id] }, from: parent))
                         if !group.isLoaded { break }
                     } else if let canvas {
                         result.append(contentsOf: canvas.heldInboxItems(for: group.id))
@@ -1032,9 +1032,7 @@ extension NativeMessageTimelineCoordinator {
             }
             var result = makeLeadingItems(from: parent)
             result.reserveCapacity(rows.count + 2)
-            result.append(contentsOf: rows.map {
-                messageItem($0, from: parent)
-            })
+            result.append(contentsOf: messageItems(rows, from: parent))
             return result
         }
 
@@ -1437,7 +1435,7 @@ extension NativeMessageTimelineCoordinator {
 
         func restore(_ anchor: VisibleAnchor) {
             guard let index = items.firstIndex(where: {
-                $0.messageID == anchor.messageID
+                $0.containsMessage(anchor.messageID)
             }), rowOrigins.indices.contains(index),
             let scrollView
             else { return }
@@ -1480,7 +1478,7 @@ extension NativeMessageTimelineCoordinator {
             guard case let .message(messageID, _) = target,
                   parent.unreadMessageID == messageID,
                   let unreadIndex = items.firstIndex(where: {
-                      $0.messageID == messageID
+                      $0.containsMessage(messageID)
                   }),
                   let newestIndex = items.lastIndex(where: {
                       $0.messageID != nil
@@ -1531,7 +1529,7 @@ extension NativeMessageTimelineCoordinator {
                 scroll(toDocumentY: .greatestFiniteMagnitude, scrollView: scrollView)
             case let .message(messageID, anchor):
                 guard let index = items.firstIndex(where: {
-                    $0.messageID == messageID
+                    $0.containsMessage(messageID)
                 }) else { return false }
                 let rowY =
                     contentOriginY(viewportHeight: viewportHeight)

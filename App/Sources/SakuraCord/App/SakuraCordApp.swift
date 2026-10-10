@@ -11,6 +11,7 @@ struct SakuraCordApp: App {
     private let opensForumPerformanceFixture: Bool
     private let opensChatPerformanceFixture: Bool
     private let opensPinsPerformanceFixture: Bool
+    private let runsFriendsPerformanceBenchmark: Bool
     private let runsChatLiveArrivalStress: Bool
     private let runsAuthenticatedNavigationBenchmark: Bool
     private let runsAuthenticatedAccountSwitchBenchmark: Bool
@@ -31,6 +32,7 @@ struct SakuraCordApp: App {
         opensForumPerformanceFixture = configuration.includesForumPerformanceFixture
         opensChatPerformanceFixture = configuration.includesChatPerformanceFixture
         opensPinsPerformanceFixture = configuration.includesPinsPerformanceFixture
+        runsFriendsPerformanceBenchmark = configuration.runsFriendsPerformanceBenchmark
         runsChatLiveArrivalStress = configuration.runsChatLiveArrivalStress
         runsAuthenticatedNavigationBenchmark =
             configuration.runsAuthenticatedNavigationBenchmark
@@ -67,7 +69,8 @@ struct SakuraCordApp: App {
                 timelineIncludesVoiceMessages:
                     configuration.includesChatVoicePerformanceFixture,
                 includesIncomingPrivateCall:
-                    configuration.includesIncomingPrivateCallFixture
+                    configuration.includesIncomingPrivateCallFixture,
+                friendCount: configuration.runsFriendsPerformanceBenchmark ? 1_000 : nil
             )
             : nil
         performanceMockProvider = mockProvider
@@ -157,6 +160,9 @@ struct SakuraCordApp: App {
                         model.selectedChannelID = ChannelID(rawValue: 220)
                     } else if opensChatPerformanceFixture {
                         model.selectedChannelID = ChannelID(rawValue: 210)
+                    }
+                    if runsFriendsPerformanceBenchmark {
+                        await FriendsPerformanceBenchmark.run(model: model, provider: performanceMockProvider)
                     }
                     if opensPinsPerformanceFixture {
                         await model.channelLoadTask?.value

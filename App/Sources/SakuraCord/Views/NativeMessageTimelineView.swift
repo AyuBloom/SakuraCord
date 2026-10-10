@@ -625,6 +625,17 @@ extension NativeMessageTimelineCoordinator {
                let highlightedMessageID = parent.highlightedMessageID {
                 canvas.startMessageJumpHighlight(highlightedMessageID)
             }
+            // Collapsing changes the item-to-message cardinality. Reconcile the
+            // affected conversation as a projection while retaining source rows.
+            if !preparation.hasUnpublishedRows,
+               items.contains(where: { if case .ignoredMessages = $0 { true } else { false } })
+                || preparation.newRows.contains(where: { parent.model.isMessageSuppressed($0.message)
+                    || $0.replyPreview.map { parent.model.isUserIgnored($0.author.id) } == true }) {
+                layoutWidth = preparation.width
+                rebuildAll(from: parent, rows: preparation.newRows, width: preparation.width,
+                           force: preparation.widthChanged || preparation.presentationChanged)
+                return
+            }
             if preparation.widthChanged || preparation.presentationChanged {
                 layoutWidth = preparation.width
                 if preparation.acceptsNewRows, !preparation.hasUnpublishedRows {

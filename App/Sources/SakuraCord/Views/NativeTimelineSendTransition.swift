@@ -1257,6 +1257,10 @@ extension NativeMessageTimelineCoordinator {
             // The composer is growing or shrinking on its resize curve; the
             // rows the inset just moved follow its edge on the same curve.
             canvas.glideTranscript(by: shift(), on: ComposerResizeMotion.glideCurve)
+        } else if preparation.bottomInsetChanged, preparation.wasNearBottom {
+            // Footer chrome such as the typing bubble resized under the
+            // newest rows. Glide them with it rather than jumping.
+            canvas.glideTranscript(by: shift())
         }
     }
 

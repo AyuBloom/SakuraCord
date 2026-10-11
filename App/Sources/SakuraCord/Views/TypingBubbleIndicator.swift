@@ -4,7 +4,7 @@ import SakuraCordModels
 import SwiftUI
 
 /// The Messages-style typing bubble: a capsule with a two-circle thought tail
-/// whose three dots darken in a left-to-right wave while the bubble breathes.
+/// whose three dots darken in a left-to-right wave.
 ///
 /// Core Animation runs the loop in the render server, so a visible indicator
 /// never redraws the footer or wakes the main thread.
@@ -36,6 +36,13 @@ final class TypingBubble {
     /// The body's leading edge, which lines up with incoming message bubbles.
     static var bodyLeadingInset: CGFloat { Metrics.leadingOverhang }
     static var bodyHeight: CGFloat { Metrics.bodySize.height }
+    /// The body's width with nothing beside the dots.
+    static var minimumBodyWidth: CGFloat { Metrics.bodySize.width }
+    /// Where the dots end inside the body. They keep their place however
+    /// wide the body grows, so content beside them starts here.
+    static var dotsTrailingEdge: CGFloat {
+        minimumBodyWidth / 2 + Metrics.dotSpacing + Metrics.dotDiameter / 2
+    }
 
     // Each dot darkens for just under half a cycle, trailing the previous one
     // by a quarter, so the wave crosses the bubble and briefly rests.
@@ -55,12 +62,15 @@ final class TypingBubble {
         }
     }
 
-    /// The tail, body, and dots, laid out in a `size` frame from the origin.
+    /// The tail, body, and dots, laid out from the origin.
     let layer = CALayer()
-    private let body = CALayer()
+    /// Holds the dots, and anything shown beside them, in coordinates from
+    /// its leading edge.
+    let body = CALayer()
     private let cornerCircle = CALayer()
     private let tinyCircle = CALayer()
     private let dots = (0 ..< 3).map { _ in CALayer() }
+    private var bodyWidth: CGFloat?
 
     init() {
         for sublayer in [tinyCircle, cornerCircle, body] {
@@ -70,12 +80,34 @@ final class TypingBubble {
         layOut()
     }
 
+    /// Grows or shrinks the body from its leading edge, which stays put.
+    /// The caller disables implicit actions.
+    func setBodyWidth(_ width: CGFloat, animated: Bool) {
+        let from = body.bounds.width
+        bodyWidth = width
+        layOut()
+        guard animated, from != width else { return }
+        // Width and centre ride the same spring, so the leading edge holds
+        // exactly; additive springs keep their velocity when retargeted.
+        for (keyPath, offset) in [("bounds.size.width", from - width), ("position.x", (from - width) / 2)] {
+            let spring = TypingIndicator.spring(keyPath)
+            spring.isAdditive = true
+            spring.fromValue = offset
+            spring.toValue = 0
+            body.add(spring, forKey: nil)
+        }
+    }
+
     func layOut() {
         let bodyFrame = CGRect(
             origin: CGPoint(x: Metrics.leadingOverhang, y: 0),
-            size: Metrics.bodySize
+            size: CGSize(width: bodyWidth ?? Metrics.bodySize.width, height: Metrics.bodySize.height)
         )
-        layer.frame = CGRect(origin: .zero, size: Self.size)
+        layer.frame = CGRect(
+            x: 0, y: 0,
+            width: bodyFrame.maxX,
+            height: Self.size.height
+        )
         place(body, frame: bodyFrame)
         let corner = Metrics.cornerCircleDiameter
         place(cornerCircle, frame: CGRect(
@@ -93,7 +125,7 @@ final class TypingBubble {
         ))
         let dot = Metrics.dotDiameter
         for (index, layer) in dots.enumerated() {
-            let centerX = bodyFrame.width / 2 + CGFloat(index - 1) * Metrics.dotSpacing
+            let centerX = Self.minimumBodyWidth / 2 + CGFloat(index - 1) * Metrics.dotSpacing
             place(layer, frame: CGRect(
                 x: centerX - dot / 2,
                 y: (bodyFrame.height - dot) / 2,
@@ -136,23 +168,6 @@ final class TypingBubble {
             dot.opacity = Self.dimDotOpacity
             dot.add(wave, forKey: "wave")
         }
-        guard !reducesMotion else { return }
-        body.add(breathing(to: 1.04, halfCycle: 1), forKey: "breathe")
-        for circle in [cornerCircle, tinyCircle] {
-            circle.add(breathing(to: 1.1, halfCycle: 0.5), forKey: "breathe")
-        }
-    }
-
-    private func breathing(to scale: CGFloat, halfCycle: CFTimeInterval) -> CABasicAnimation {
-        let animation = CABasicAnimation(keyPath: "transform")
-        animation.fromValue = CATransform3DIdentity
-        animation.toValue = TypingIndicator.scale(scale)
-        animation.duration = halfCycle
-        animation.autoreverses = true
-        animation.repeatCount = .infinity
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        animation.preferredFrameRateRange = Self.loopFrameRate
-        return animation
     }
 }
 
@@ -201,9 +216,9 @@ private struct TypingIndicatorRepresentable: NSViewRepresentable {
     }
 }
 
-/// Draws the typing bubble and avatar stack bottom-aligned to its bounds.
-/// When the footer collapses it to zero height, the content keeps drawing
-/// above it while it shrinks away.
+/// Draws the typing bubble bottom-aligned to its bounds, with the typists'
+/// avatars stacked inside it after the dots. When the footer collapses it to
+/// zero height, the content keeps drawing above it while it shrinks away.
 final class TypingIndicator: NSView {
     struct Typist: Equatable {
         let id: UserID
@@ -213,7 +228,7 @@ final class TypingIndicator: NSView {
 
     struct State: Equatable {
         let channelID: ChannelID
-        /// Newest first: each new typist joins beside the bubble and pushes
+        /// Newest first: each new typist joins beside the dots and pushes
         /// the others along, and anyone past the visible few folds into the
         /// count. Empty where avatars do not show.
         let typists: [Typist]
@@ -226,11 +241,16 @@ final class TypingIndicator: NSView {
     private enum Metrics {
         static let maximumVisibleAvatars = 4
         static var bottomPadding: CGFloat { InterfaceScale.metric(6) }
-        static var stackSpacing: CGFloat { InterfaceScale.metric(6) }
         static var avatarDiameter: CGFloat { InterfaceScale.metric(24) }
         static var avatarOverlap: CGFloat { InterfaceScale.metric(8) }
         static var ringWidth: CGFloat { InterfaceScale.metric(2) }
-        static var countPadding: CGFloat { InterfaceScale.metric(4) }
+        /// Concentric with the body's rounded end.
+        static var avatarInset: CGFloat { (TypingBubble.bodyHeight - avatarDiameter) / 2 }
+        static var dotsGap: CGFloat { InterfaceScale.metric(8) }
+        static var countGap: CGFloat { InterfaceScale.metric(4) }
+        static var countTrailingPadding: CGFloat { InterfaceScale.metric(8) }
+        /// Room reserved for a two-digit count.
+        static var countAllowance: CGFloat { InterfaceScale.metric(20) }
         static var countFontSize: CGFloat { InterfaceScale.fontSize(10) }
         /// How long a new avatar waits for its picture before it shows its
         /// placeholder instead.
@@ -238,23 +258,59 @@ final class TypingIndicator: NSView {
     }
 
     static var height: CGFloat { TypingBubble.size.height + Metrics.bottomPadding }
-    /// Room for the bubble, a full stack, and a two-digit count.
+    /// Room for the bubble holding a full stack and a two-digit count.
     static var width: CGFloat {
-        stackX + CGFloat(Metrics.maximumVisibleAvatars) * avatarStep
-            + Metrics.avatarOverlap + InterfaceScale.metric(40)
+        TypingBubble.bodyLeadingInset
+            + bodyWidth(avatars: Metrics.maximumVisibleAvatars, countWidth: Metrics.countAllowance)
     }
 
-    private static var stackX: CGFloat { TypingBubble.size.width + Metrics.stackSpacing }
+    private static var stackX: CGFloat { TypingBubble.dotsTrailingEdge + Metrics.dotsGap }
     private static var avatarStep: CGFloat { Metrics.avatarDiameter - Metrics.avatarOverlap }
 
+    private static func stackWidth(_ avatars: Int) -> CGFloat {
+        avatars > 0 ? Metrics.avatarDiameter + CGFloat(avatars - 1) * avatarStep : 0
+    }
+
+    private static func bodyWidth(avatars: Int, countWidth: CGFloat?) -> CGFloat {
+        guard avatars > 0 else { return TypingBubble.minimumBodyWidth }
+        let end = countWidth.map { Metrics.countGap + $0 + Metrics.countTrailingPadding } ?? Metrics.avatarInset
+        return stackX + stackWidth(avatars) + end
+    }
+
+    /// An avatar is three layers deep so each part of its motion has one
+    /// owner: `layer` slides along the stack, each clip cuts the ring of one
+    /// avatar in front, and `picture` grows in and out.
     private final class AvatarSlot {
         let layer = CALayer()
+        /// Nested, so their masks intersect: an avatar can sit behind two
+        /// others while one slides into the place of another that leaves.
+        let clips = [CALayer(), CALayer()]
+        let picture = CALayer()
         var typist: Typist?
         var showsFallback = false
         /// A new avatar stays hidden while its picture loads.
         var isWaitingForPicture = false
         var load: Task<Void, Never>?
         var wait: Task<Void, Never>?
+
+        init() {
+            layer.addSublayer(clips[0])
+            clips[0].addSublayer(clips[1])
+            clips[1].addSublayer(picture)
+            picture.masksToBounds = true
+            picture.contentsGravity = .resizeAspectFill
+            picture.anchorPoint = CGPoint(x: 0, y: 0.5)
+            layer.anchorPoint = CGPoint(x: 0, y: 0.5)
+        }
+
+        func size(diameter: CGFloat) {
+            let bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+            layer.bounds = bounds
+            clips.forEach { $0.frame = bounds }
+            picture.bounds = bounds
+            picture.position = CGPoint(x: 0, y: diameter / 2)
+            picture.cornerRadius = diameter / 2
+        }
 
         func cancelLoading() {
             load?.cancel()
@@ -267,9 +323,12 @@ final class TypingIndicator: NSView {
     private let count = CALayer()
     private let countText = CATextLayer()
     private var slots: [UserID: AvatarSlot] = [:]
-    /// The slots on screen, newest first, including departing ones until
-    /// their exit finishes.
+    /// The visible typists, newest first.
     private var order: [UserID] = []
+    /// Every avatar on screen from front to back, including departing ones
+    /// until their exit finishes. A departing avatar keeps its place, so it
+    /// stays behind everyone who was in front of it while it leaves.
+    private var stack: [AvatarSlot] = []
     private var appliedAvatarDiameter = Metrics.avatarDiameter
     private var state: State?
     private var isShown: Bool { state?.isTyping == true }
@@ -285,9 +344,9 @@ final class TypingIndicator: NSView {
         count.anchorPoint = CGPoint(x: 0, y: 0.5)
         count.opacity = 0
         count.addSublayer(countText)
-        countText.alignmentMode = .center
+        countText.alignmentMode = .left
         updateCountFont()
-        content.addSublayer(count)
+        bubble.body.addSublayer(count)
         setAccessibilityElement(false)
         setAccessibilityRole(.staticText)
     }
@@ -302,8 +361,7 @@ final class TypingIndicator: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard isShown, let superview, let layer else { return nil }
         let local = content.convert(convert(point, from: superview), from: layer)
-        let parts = [bubble.layer] + slots.values.map(\.layer) + (count.opacity > 0 ? [count] : [])
-        return parts.contains { $0.frame.contains(local) } ? self : nil
+        return bubble.layer.frame.contains(local) ? self : nil
     }
 
     override func layout() {
@@ -317,15 +375,13 @@ final class TypingIndicator: NSView {
         CATransaction.commit()
     }
 
-    /// Interface Size changed: resize every avatar, ring, and the count,
-    /// then lay the stack out again.
+    /// Interface Size changed: resize every avatar and the count, then lay
+    /// the stack out again.
     private func resizeStack() {
         appliedAvatarDiameter = Metrics.avatarDiameter
         updateCountFont()
-        count.bounds = .zero
-        for slot in slots.values {
-            size(slot.layer)
-            slot.layer.mask = nil
+        for slot in stack {
+            slot.size(diameter: Metrics.avatarDiameter)
             if slot.showsFallback { showPlaceholder(in: slot, arrives: false) }
         }
         updateStack(state?.typists ?? [], animated: false)
@@ -345,7 +401,7 @@ final class TypingIndicator: NSView {
         super.viewDidChangeBackingProperties()
         let scale = window?.backingScaleFactor ?? 2
         countText.contentsScale = scale
-        slots.values.forEach { $0.layer.contentsScale = scale }
+        stack.forEach { $0.picture.contentsScale = scale }
     }
 
     override func viewDidMoveToWindow() {
@@ -461,42 +517,38 @@ final class TypingIndicator: NSView {
             guard let slot = slots.removeValue(forKey: id) else { continue }
             slot.cancelLoading()
             if animated {
-                depart(slot.layer)
+                depart(slot)
             } else {
-                slot.layer.removeFromSuperlayer()
+                remove(slot)
             }
         }
         order = visible.map(\.id)
+        // A new typist joins at the front, beside the dots. Someone the
+        // count held steps out of it at the back instead.
+        var joiningFront: [AvatarSlot] = []
+        var joiningBack: [AvatarSlot] = []
         for (index, typist) in visible.enumerated() {
             let isNew = slots[typist.id] == nil
-            let slot = slots[typist.id] ?? makeSlot(for: typist.id)
-            load(typist, into: slot, arrives: isNew && animated)
-            slot.layer.zPosition = CGFloat(visible.count - index)
+            let slot = slots[typist.id] ?? makeSlot(for: typist.id, at: index)
+            if isNew {
+                if index == 0 { joiningFront.append(slot) } else { joiningBack.append(slot) }
+            }
             move(slot.layer, to: avatarPosition(at: index), animated: animated)
+            load(typist, into: slot, arrives: isNew && animated)
         }
-        updateRings(animated: animated)
-        updateCount(typists.count - visible.count, after: visible.count, animated: animated)
+        stack = joiningFront + stack + joiningBack
+        restack()
+        let countWidth = updateCount(typists.count - visible.count, after: visible.count, animated: animated)
+        bubble.setBodyWidth(
+            Self.bodyWidth(avatars: visible.count, countWidth: countWidth),
+            animated: animated && !reducesMotion
+        )
+        updateRings()
     }
 
-    /// Cuts a ring in each avatar where the one in front of it overlaps,
-    /// opening it as that avatar grows in.
-    private func updateRings(animated: Bool) {
-        for (index, id) in order.enumerated() {
-            guard let slot = slots[id] else { continue }
-            let isCovered = index > 0 && slots[order[index - 1]]?.isWaitingForPicture == false
-            guard isCovered else {
-                slot.layer.mask = nil
-                continue
-            }
-            guard slot.layer.mask == nil else { continue }
-            let mask = cutout(width: Metrics.avatarDiameter)
-            slot.layer.mask = mask
-            if animated, !reducesMotion {
-                let open = spring("path")
-                open.fromValue = cutoutPath(width: Metrics.avatarDiameter, ringScale: 0)
-                open.toValue = mask.path
-                mask.add(open, forKey: "open")
-            }
+    private func restack() {
+        for (index, slot) in stack.enumerated() {
+            slot.layer.zPosition = CGFloat(stack.count - index)
         }
     }
 
@@ -504,23 +556,99 @@ final class TypingIndicator: NSView {
         CGPoint(x: Self.stackX + CGFloat(index) * Self.avatarStep, y: TypingBubble.bodyHeight / 2)
     }
 
-    private func makeSlot(for id: UserID) -> AvatarSlot {
+    private func makeSlot(for id: UserID, at index: Int) -> AvatarSlot {
         let slot = AvatarSlot()
-        size(slot.layer)
-        slot.layer.anchorPoint = CGPoint(x: 0, y: 0.5)
-        slot.layer.position = avatarPosition(at: 0)
-        slot.layer.masksToBounds = true
-        slot.layer.contentsGravity = .resizeAspectFill
-        slot.layer.contentsScale = window?.backingScaleFactor ?? 2
-        content.addSublayer(slot.layer)
+        slot.size(diameter: Metrics.avatarDiameter)
+        slot.layer.position = avatarPosition(at: index)
+        slot.picture.contentsScale = window?.backingScaleFactor ?? 2
+        bubble.body.insertSublayer(slot.layer, below: count)
         slots[id] = slot
         return slot
     }
 
-    private func size(_ avatar: CALayer) {
+    private func remove(_ slot: AvatarSlot) {
+        slot.layer.removeFromSuperlayer()
+        stack.removeAll { $0 === slot }
+    }
+
+    /// Masks each avatar's clips with ghosts of the nearest avatars in front
+    /// of it: a large shape with a hole the size of that avatar and its ring.
+    /// A ghost carries copies of its avatar's in-flight animations, and the
+    /// inverse of the masked avatar's own slides, so the hole follows the
+    /// avatar in front through every slide, growth, and fade entirely in
+    /// the render server.
+    private func updateRings() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, slot) in stack.enumerated() {
+            let inFront = Array(stack[..<index].reversed())
+            for (level, clip) in slot.clips.enumerated() {
+                clip.mask = level < inFront.count ? ghost(of: inFront[level], over: slot) : nil
+            }
+        }
+        CATransaction.commit()
+    }
+
+    private func ghost(of front: AvatarSlot, over back: AvatarSlot) -> CALayer {
         let diameter = Metrics.avatarDiameter
-        avatar.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
-        avatar.cornerRadius = diameter / 2
+        let bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+        let ring = bounds.insetBy(dx: -Metrics.ringWidth, dy: -Metrics.ringWidth)
+        let ghost = CAShapeLayer()
+        ghost.bounds = bounds
+        ghost.anchorPoint = front.picture.anchorPoint
+        // Large enough to cover the avatar behind even while the ghost is
+        // scaled down with an avatar growing in.
+        let cover = CGMutablePath()
+        cover.addRect(bounds.insetBy(dx: -12 * diameter, dy: -12 * diameter))
+        cover.addEllipse(in: ring)
+        ghost.path = cover
+        ghost.fillRule = .evenOdd
+        // Closes the hole as the avatar in front fades.
+        let fill = CAShapeLayer()
+        fill.frame = bounds
+        fill.path = CGPath(ellipseIn: ring, transform: nil)
+        ghost.addSublayer(fill)
+
+        let offset = CGPoint(
+            x: front.layer.position.x - back.layer.position.x,
+            y: front.layer.position.y - back.layer.position.y
+        )
+        ghost.position = CGPoint(x: offset.x + front.picture.position.x, y: offset.y + front.picture.position.y)
+        ghost.transform = front.picture.transform
+        fill.opacity = 1 - front.picture.opacity
+        for (key, animation) in animations(of: front.layer) where animation.keyPath == "position" {
+            ghost.add(animation, forKey: "front-\(key)")
+        }
+        for (key, animation) in animations(of: back.layer) where animation.keyPath == "position" {
+            guard let slide = animation.copy() as? CABasicAnimation,
+                  let from = slide.fromValue as? CGPoint
+            else { continue }
+            slide.fromValue = CGPoint(x: -from.x, y: -from.y)
+            ghost.add(slide, forKey: "back-\(key)")
+        }
+        for (key, animation) in animations(of: front.picture) {
+            switch animation.keyPath {
+            case "transform":
+                ghost.add(animation, forKey: key)
+            case "opacity":
+                guard let fade = animation.copy() as? CABasicAnimation,
+                      let from = fade.fromValue as? CGFloat,
+                      let to = fade.toValue as? CGFloat
+                else { continue }
+                fade.fromValue = 1 - from
+                fade.toValue = 1 - to
+                fill.add(fade, forKey: key)
+            default:
+                continue
+            }
+        }
+        return ghost
+    }
+
+    private func animations(of layer: CALayer) -> [(String, CABasicAnimation)] {
+        (layer.animationKeys() ?? []).compactMap { key in
+            (layer.animation(forKey: key) as? CABasicAnimation).map { (key, $0) }
+        }
     }
 
     /// Shows the typist's picture. A new avatar whose picture still has to
@@ -552,7 +680,7 @@ final class TypingIndicator: NSView {
         }
         if isNew {
             slot.isWaitingForPicture = true
-            slot.layer.opacity = 0
+            slot.picture.opacity = 0
             slot.wait = Task { @MainActor [weak self, weak slot] in
                 try? await Task.sleep(for: Metrics.pictureWait)
                 guard !Task.isCancelled, let self, let slot else { return }
@@ -577,15 +705,16 @@ final class TypingIndicator: NSView {
     private func show(_ image: CGImage?, in slot: AvatarSlot, arrives: Bool, isPlaceholder: Bool = false) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        slot.layer.contents = image
+        slot.picture.contents = image
         slot.showsFallback = isPlaceholder
-        if slot.isWaitingForPicture {
+        let wasWaiting = slot.isWaitingForPicture
+        if wasWaiting {
             slot.isWaitingForPicture = false
             slot.wait?.cancel()
-            slot.layer.opacity = 1
-            updateRings(animated: arrives)
+            slot.picture.opacity = 1
         }
-        if arrives, isShown { arrive(slot.layer) }
+        if arrives, isShown { arrive(slot) }
+        if wasWaiting || arrives { updateRings() }
         CATransaction.commit()
     }
 
@@ -609,59 +738,37 @@ final class TypingIndicator: NSView {
         return image
     }
 
-    private func updateCount(_ hidden: Int, after visibleCount: Int, animated: Bool) {
+    /// Shows how many typists the stack leaves out, after the last avatar.
+    /// Returns its width while it shows.
+    private func updateCount(_ hidden: Int, after visibleCount: Int, animated: Bool) -> CGFloat? {
         let wasShowing = count.opacity > 0 && count.animation(forKey: "depart") == nil
-        if hidden > 0 {
-            countText.string = "+\(hidden)"
-            let textSize = countText.preferredFrameSize()
-            let diameter = Metrics.avatarDiameter
-            // The last avatar covers the chip's leading edge, so the count
-            // centers in the part that shows.
-            let covered = Metrics.avatarOverlap
-            let width = max(diameter, covered + ceil(textSize.width) + Metrics.countPadding * 2)
-            if count.bounds.width != width {
-                count.bounds = CGRect(x: 0, y: 0, width: width, height: diameter)
-                count.cornerRadius = diameter / 2
-                count.mask = cutout(width: width)
+        guard hidden > 0 else {
+            if wasShowing {
+                count.opacity = 0
+                if animated { count.add(departure(), forKey: "depart") }
             }
-            let textHeight = ceil(textSize.height)
-            countText.frame = CGRect(
-                x: covered, y: (diameter - textHeight) / 2, width: width - covered, height: textHeight
-            )
-            count.removeAnimation(forKey: "depart")
-            count.opacity = 1
-            if !wasShowing {
-                count.position = avatarPosition(at: visibleCount)
-                if animated { arrive(count) }
-            } else {
-                move(count, to: avatarPosition(at: visibleCount), animated: animated)
-            }
-        } else if wasShowing {
-            count.opacity = 0
-            if animated { count.add(departure(), forKey: "depart") }
+            return nil
         }
-    }
-
-    /// Removes a ring where the avatar before this one overlaps, so the
-    /// stack separates cleanly over any timeline background.
-    private func cutout(width: CGFloat) -> CAShapeLayer {
-        let mask = CAShapeLayer()
-        mask.frame = CGRect(x: 0, y: 0, width: width, height: Metrics.avatarDiameter)
-        mask.path = cutoutPath(width: width, ringScale: 1)
-        mask.fillRule = .evenOdd
-        return mask
-    }
-
-    private func cutoutPath(width: CGFloat, ringScale: CGFloat) -> CGPath {
-        let diameter = Metrics.avatarDiameter
-        let ring = (diameter + Metrics.ringWidth * 2) * max(ringScale, 0.001)
-        let previousCenter = CGPoint(x: Metrics.avatarOverlap - diameter / 2, y: diameter / 2)
-        let path = CGMutablePath()
-        path.addRect(CGRect(x: 0, y: 0, width: width, height: diameter))
-        path.addEllipse(in: CGRect(
-            x: previousCenter.x - ring / 2, y: previousCenter.y - ring / 2, width: ring, height: ring
-        ))
-        return path
+        countText.string = "+\(hidden)"
+        let textSize = countText.preferredFrameSize()
+        let size = CGSize(width: ceil(textSize.width), height: Metrics.avatarDiameter)
+        count.bounds = CGRect(origin: .zero, size: size)
+        let textHeight = ceil(textSize.height)
+        countText.frame = CGRect(x: 0, y: (size.height - textHeight) / 2, width: size.width, height: textHeight)
+        let position = CGPoint(
+            x: Self.stackX + Self.stackWidth(visibleCount) + Metrics.countGap,
+            y: TypingBubble.bodyHeight / 2
+        )
+        count.removeAnimation(forKey: "depart")
+        count.opacity = 1
+        if wasShowing {
+            move(count, to: position, animated: animated)
+        } else {
+            count.position = position
+            if animated, !reducesMotion { add(arrival(from: -Metrics.avatarDiameter / 4), to: count) }
+            if animated { add(fadeIn(), to: count) }
+        }
+        return size.width
     }
 
     // MARK: Avatar motion
@@ -673,38 +780,61 @@ final class TypingIndicator: NSView {
     private static let springDuration: CFTimeInterval = 0.35
     private static let springBounce: CGFloat = 0.25
 
-    private func spring(_ keyPath: String) -> CASpringAnimation {
-        let spring = CASpringAnimation(perceptualDuration: Self.springDuration, bounce: Self.springBounce)
+    static func spring(_ keyPath: String) -> CASpringAnimation {
+        let spring = CASpringAnimation(perceptualDuration: springDuration, bounce: springBounce)
         spring.keyPath = keyPath
         spring.duration = spring.settlingDuration
         return spring
     }
 
-    private func move(_ layer: CALayer, to position: CGPoint, animated: Bool) {
-        let from = layer.presentation()?.position ?? layer.position
-        layer.position = position
-        guard animated, from != position, !reducesMotion else { return }
-        let slide = spring("position")
-        slide.fromValue = from
-        slide.toValue = position
-        layer.add(slide, forKey: "move")
+    private var animationSerial = 0
+
+    /// Starts the animation now, under a key of its own so it never replaces
+    /// one in flight. An explicit begin time lets ghosts copy it in step.
+    private func add(_ animation: CAAnimation, to layer: CALayer) {
+        animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil)
+        animationSerial &+= 1
+        layer.add(animation, forKey: "\(animation is CASpringAnimation ? "spring" : "basic")-\(animationSerial)")
     }
 
-    /// A new typist grows in beside the bubble, or under Reduce Motion
-    /// fades in.
-    private func arrive(_ layer: CALayer) {
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = 0
-        fade.toValue = 1
-        fade.duration = Self.springDuration
-        layer.add(fade, forKey: "arriveFade")
+    /// Slides on an additive spring: a new target adds to the slide in
+    /// flight instead of restarting it, so the layer keeps its velocity.
+    private func move(_ layer: CALayer, to position: CGPoint, animated: Bool) {
+        let from = layer.position
+        layer.position = position
+        guard animated, from != position, !reducesMotion else { return }
+        let slide = Self.spring("position")
+        slide.isAdditive = true
+        slide.fromValue = CGPoint(x: from.x - position.x, y: from.y - position.y)
+        slide.toValue = CGPoint.zero
+        add(slide, to: layer)
+    }
+
+    /// A new typist grows in beside the dots, and someone leaving the count
+    /// grows in from it; under Reduce Motion they fade in.
+    private func arrive(_ slot: AvatarSlot) {
+        add(fadeIn(), to: slot.picture)
         guard !reducesMotion else { return }
-        let scale = spring("transform")
-        var start = CATransform3DMakeTranslation(-Metrics.avatarDiameter / 2, 0, 0)
+        let index = order.firstIndex { slots[$0] === slot } ?? 0
+        let offset = Metrics.avatarDiameter / 2
+        add(arrival(from: index == 0 ? -offset : offset), to: slot.picture)
+    }
+
+    private func fadeIn() -> CABasicAnimation {
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = CGFloat(0)
+        fade.toValue = CGFloat(1)
+        fade.duration = Self.springDuration
+        return fade
+    }
+
+    private func arrival(from offset: CGFloat) -> CASpringAnimation {
+        let grow = Self.spring("transform")
+        var start = CATransform3DMakeTranslation(offset, 0, 0)
         start = CATransform3DScale(start, 0.3, 0.3, 1)
-        scale.fromValue = start
-        scale.toValue = CATransform3DIdentity
-        layer.add(scale, forKey: "arrive")
+        grow.fromValue = start
+        grow.toValue = CATransform3DIdentity
+        return grow
     }
 
     /// A flat scale, which stays affine so every renderer honours it.
@@ -716,11 +846,36 @@ final class TypingIndicator: NSView {
         scaleFade(from: 1, to: 0, minimumScale: 0.3, duration: 0.2, timing: CAMediaTimingFunction(name: .easeIn))
     }
 
-    private func depart(_ layer: CALayer) {
+    /// Shrinks and fades in place. Its fade and shrink run as separate
+    /// animations so the ghosts behind it can copy each.
+    private func depart(_ slot: AvatarSlot) {
         CATransaction.begin()
-        layer.opacity = 0
-        CATransaction.setCompletionBlock { layer.removeFromSuperlayer() }
-        layer.add(departure(), forKey: "depart")
+        CATransaction.setCompletionBlock { [weak self] in
+            guard let self else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            remove(slot)
+            restack()
+            updateRings()
+            CATransaction.commit()
+        }
+        let timing = CAMediaTimingFunction(name: .easeIn)
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = CGFloat(slot.picture.opacity)
+        fade.toValue = CGFloat(0)
+        fade.duration = 0.2
+        fade.timingFunction = timing
+        slot.picture.opacity = 0
+        add(fade, to: slot.picture)
+        if !reducesMotion {
+            let shrink = CABasicAnimation(keyPath: "transform")
+            shrink.fromValue = CATransform3DIdentity
+            shrink.toValue = Self.scale(0.3)
+            shrink.duration = 0.2
+            shrink.timingFunction = timing
+            slot.picture.transform = Self.scale(0.3)
+            add(shrink, to: slot.picture)
+        }
         CATransaction.commit()
     }
 
@@ -728,12 +883,11 @@ final class TypingIndicator: NSView {
         bubble.updateColors(for: effectiveAppearance)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for slot in slots.values where slot.showsFallback {
-            slot.layer.contents = slot.typist.flatMap { fallbackImage(name: $0.name) }
+        for slot in stack where slot.showsFallback {
+            slot.picture.contents = slot.typist.flatMap { fallbackImage(name: $0.name) }
         }
         CATransaction.commit()
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            count.backgroundColor = NativeTimelineBubbleDrawing.incomingFillColor.cgColor
             countText.foregroundColor = NSColor.secondaryLabelColor.cgColor
         }
     }

@@ -152,6 +152,9 @@ struct SakuraCordApp: App {
                     if preparesMemberListScrollBenchmark {
                         await model.prepareAuthenticatedMemberListScrollPerformanceBenchmark()
                     }
+                    if TypingBubbleDemo.isRequested, model.launchMode == .offlineTesting {
+                        await TypingBubbleDemo.run(model: model)
+                    }
 #endif
                     if opensChatPerformanceFixture {
                         NSApp.activate(ignoringOtherApps: true)

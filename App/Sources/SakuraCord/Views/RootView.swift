@@ -397,8 +397,10 @@ private struct ChatRootView: View {
                 )
                 .interfaceScaleRoot()
                 .allowsHitTesting(false)
+                .transition(.opacity)
             }
         }
+        .animation(.smooth(duration: 0.22), value: showsFileDropEffect)
     }
 
     var body: some View {
@@ -1273,6 +1275,7 @@ private struct ComposerFileDropOverlay: View {
                     )
                 }
             }
+            .animation(.smooth(duration: 0.22), value: hoveredDestination)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -1290,6 +1293,7 @@ private struct ComposerFileDropOverlay: View {
         if hoveredDestination == destination, model.isComposerDropEligible(destination) {
             ZStack {
                 Color.black.opacity(0.6)
+                    .transition(.opacity)
 
                 GlassEffectContainer(spacing: InterfaceScale.metric(14)) {
                     VStack(spacing: InterfaceScale.metric(18)) {
@@ -1357,8 +1361,12 @@ private struct ComposerFileDropOverlay: View {
                         in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(28), style: .continuous)
                     )
                     .padding(InterfaceScale.metric(24))
+                    .animation(.snappy(duration: 0.25), value: isInstantUpload)
                 }
+                // The card lifts toward the pointer as files come over it.
+                .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
+            .transition(.opacity)
         } else {
             Color.clear
         }

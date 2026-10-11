@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import SakuraCordModels
 import UniformTypeIdentifiers
 
@@ -59,11 +60,17 @@ enum MockChatMediaFixtures {
         try FileManager.default.copyItem(at: sourceURL, to: destination)
         let values = try destination.resourceValues(forKeys: [.fileSizeKey])
         let mediaType = UTType(filenameExtension: fileExtension)?.preferredMIMEType
+        // Discord reports an uploaded image's size, which lays out its frame.
+        let properties = CGImageSourceCreateWithURL(destination as CFURL, nil).flatMap {
+            CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [CFString: Any]
+        }
         return Attachment(
             id: "\(messageID)-\(index)",
             filename: filename,
             url: destination,
             mediaType: mediaType,
+            width: (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+            height: (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
             size: values.fileSize ?? 0
         )
     }

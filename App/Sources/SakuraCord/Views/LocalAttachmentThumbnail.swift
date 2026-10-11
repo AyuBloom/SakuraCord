@@ -17,21 +17,21 @@ struct LocalAttachmentThumbnail: View {
         ZStack {
             Color.clear
             if let displayImage {
-                if preservesImageAspectRatio {
-                    Image(nsImage: displayImage)
-                        .resizable()
-                        .scaledToFit()
-                        .clipShape(
-                            ConcentricRectangle(cornerRadius: imageCornerRadius, style: .continuous)
-                        )
-                } else {
-                    Image(nsImage: displayImage)
-                        .resizable()
-                        .scaledToFill()
-                        .clipShape(
-                            ConcentricRectangle(cornerRadius: imageCornerRadius, style: .continuous)
-                        )
+                Group {
+                    if preservesImageAspectRatio {
+                        Image(nsImage: displayImage)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Image(nsImage: displayImage)
+                            .resizable()
+                            .scaledToFill()
+                    }
                 }
+                .clipShape(
+                    ConcentricRectangle(cornerRadius: imageCornerRadius, style: .continuous)
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 if isVideoFile {
                     Image(systemName: "play.fill")
                         .font(.interfaceSystem(size: 14, weight: .semibold))
@@ -42,11 +42,13 @@ struct LocalAttachmentThumbnail: View {
             } else if isImageFile {
                 ProgressView()
                     .controlSize(.small)
+                    .transition(.opacity)
             } else {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                     .resizable()
                     .scaledToFit()
                     .padding(InterfaceScale.metric(14))
+                    .transition(.opacity)
             }
         }
         .clipped()
@@ -71,8 +73,7 @@ struct LocalAttachmentThumbnail: View {
                     !Task.isCancelled
                 else { return }
                 let loadedImage = NSImage(cgImage: frame, size: .zero)
-                image = loadedImage
-                onImageLoaded?(loadedImage)
+                reveal(loadedImage)
                 return
             }
             guard let data = try? await SharedMediaDataLoader.shared.data(for: url),
@@ -92,9 +93,16 @@ struct LocalAttachmentThumbnail: View {
                 guard let fallbackImage = NSImage(data: data) else { return }
                 loadedImage = fallbackImage
             }
-            image = loadedImage
-            onImageLoaded?(loadedImage)
+            reveal(loadedImage)
         }
+    }
+
+    /// A decoded preview fades in over its placeholder instead of popping.
+    private func reveal(_ loadedImage: NSImage) {
+        withAnimation(.smooth(duration: 0.28)) {
+            image = loadedImage
+        }
+        onImageLoaded?(loadedImage)
     }
 
     private var displayImage: NSImage? {

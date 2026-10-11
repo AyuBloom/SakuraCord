@@ -294,6 +294,9 @@ nonisolated struct MessageNavigationRequest: Equatable, Sendable {
     let requestID: UInt64
     let channelID: ChannelID
     let messageID: MessageID
+    /// The message was already on hand in the open conversation, so the
+    /// timeline can glide to it rather than cut.
+    var glides = false
 }
 
 nonisolated struct ConversationNewestRequest: Equatable, Sendable {

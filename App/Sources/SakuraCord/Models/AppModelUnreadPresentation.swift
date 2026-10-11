@@ -254,13 +254,11 @@ extension AppModel {
         // observable transaction. The wider sidebar projection is allowed to
         // finish asynchronously, but a delivered mention must never briefly
         // expose the previous badge count.
-        let totalMentions = AppPerformanceSignposts.measureSync(
-            "UnreadDockBadgeProjection"
-        ) {
-            readState.totalMentions
-        }
         let badgeCount: Int? = switch notificationPreferences.dockBadgeStyle {
-        case .mentions: totalMentions
+        case .mentions:
+            AppPerformanceSignposts.measureSync("UnreadDockBadgeProjection") {
+                readState.totalMentions
+            }
         case .unreadConversations:
             readState.unreadPresentationProjection().unreadByChannelID.values.count { $0 }
         case .off: nil

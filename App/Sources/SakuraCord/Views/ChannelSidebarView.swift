@@ -155,9 +155,14 @@ struct ChannelSidebarView: View {
                     bottomContentInset: accountControlHeight
                 )
             } else {
+                let preparedThreads = threadLayout(at: .now)
                 // Re-evaluate when a timed-relevant thread expires. An explicit
                 // schedule reports its next entry as `context.date`, so read the clock.
-                TimelineView(.explicit(threadRelevanceDeadlines)) { _ in
+                TimelineView(.explicit(preparedThreads.relevanceDeadlines)) { _ in
+                    let now = Date.now
+                    let threads = preparedThreads.relevanceDeadlines.first.map { $0 <= now } == true
+                        ? threadLayout(at: now)
+                        : preparedThreads
                     GuildChannelList(
                         input: GuildChannelListInput(
                             modelIdentity: ObjectIdentifier(voiceModel),
@@ -173,7 +178,7 @@ struct ChannelSidebarView: View {
                             checkingChannelIDs: checkingChannelIDs,
                             unreadCategoryIDs: unreadCategoryIDs,
                             selectedChannelID: selection,
-                            threadsByParentID: threadLayout(at: .now).threadsByParentID,
+                            threadsByParentID: threads.threadsByParentID,
                             bottomContentInset: accountControlHeight
                         ),
                         model: voiceModel,
@@ -243,10 +248,6 @@ struct ChannelSidebarView: View {
             channelGroups: channelGroups,
             now: date
         )
-    }
-
-    private var threadRelevanceDeadlines: [Date] {
-        threadLayout(at: .now).relevanceDeadlines
     }
 
     private var deferredGuildSelection: Binding<GuildSidebarSelection?> {

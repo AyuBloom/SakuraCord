@@ -466,6 +466,7 @@ nonisolated final class DecodedAnimatedImage: @unchecked Sendable {
 
     let frames: [CGImage]
     let frameDurations: [TimeInterval]
+    let frameSchedule: AnimatedImageFrameSchedule
     let playCount: Int?
     let estimatedByteCount: Int
     let storedByteCount: Int
@@ -474,6 +475,7 @@ nonisolated final class DecodedAnimatedImage: @unchecked Sendable {
     init(frames: [CGImage], frameDurations: [TimeInterval], playCount: Int?, compressedFrameData: [Data?]) {
         self.frames = frames
         self.frameDurations = frameDurations
+        frameSchedule = AnimatedImageFrameSchedule(durations: frameDurations)
         self.playCount = playCount
         self.compressedFrameData = compressedFrameData
         estimatedByteCount = frames.reduce(0) { $0 + $1.bytesPerRow * $1.height }
@@ -581,6 +583,7 @@ nonisolated final class DecodedAnimatedImage: @unchecked Sendable {
         guard !frames.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
         self.frames = frames
         self.frameDurations = frameDurations
+        frameSchedule = AnimatedImageFrameSchedule(durations: frameDurations)
         self.estimatedByteCount = estimatedByteCount
         self.storedByteCount = storedByteCount
         self.compressedFrameData = compressedFrameData
@@ -1299,9 +1302,8 @@ final class AnimatedImageCanvas: NSView {
         guard let image = displayedImage, let preference = displayedAnimationPreference, let layer else { return }
         let clock = displayedPlayback?.clock ?? playbackClock
         let elapsed = (clock.pausedAt ?? CACurrentMediaTime()) - clock.pausedDuration - boundedStartTime
-        let index = preference.resetsWhenStopped && !preference.animates ? 0 : AnimatedImageFrameSchedule.frameIndex(
+        let index = preference.resetsWhenStopped && !preference.animates ? 0 : image.frameSchedule.frameIndex(
             elapsed: elapsed,
-            durations: image.frameDurations,
             playCount: image.playCount,
             isLooping: preference.isLooping,
             activeDuration: displayedPlayback?.duration,

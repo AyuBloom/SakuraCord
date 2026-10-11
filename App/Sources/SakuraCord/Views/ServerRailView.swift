@@ -235,7 +235,7 @@ struct ServerRailView: View {
                 }
             }.first
             if let entry {
-                ServerRailGuildItemView(entry: entry, selectGuild: { _ in }, contextMenuActions: contextMenuActions)
+                ServerRailGuildItemView(entry: entry, selectGuild: { _ in }, contextMenuActions: contextMenuActions, loadsImageWhenOffscreen: true)
             }
         case .folder:
             if let entry = items.lazy.compactMap({ item -> ServerRailFolderEntry? in
@@ -245,7 +245,8 @@ struct ServerRailView: View {
                     entry: entry,
                     isExpanded: PRBuildProfile.defaults.bool(forKey: ServerFolderRailView.expansionKey(entry.folder.id)),
                     contextMenuActions: contextMenuActions,
-                    toggle: {}
+                    toggle: {},
+                    loadsImageWhenOffscreen: true
                 )
             }
         }
@@ -383,13 +384,15 @@ struct ServerRailGuildItemView: View {
     let entry: ServerRailGuildEntry
     let selectGuild: (GuildID?) -> Void
     let contextMenuActions: ServerRailContextMenuActions
+    var loadsImageWhenOffscreen = false
 
     var body: some View {
         if let presentation = entry.presentation {
             GuildRailButton(
                 presentation: presentation,
                 isSelected: entry.isSelected,
-                contextMenuActions: contextMenuActions
+                contextMenuActions: contextMenuActions,
+                loadsImageWhenOffscreen: loadsImageWhenOffscreen
             ) {
                 selectGuild(entry.id)
             }
@@ -406,8 +409,10 @@ struct GuildRailButton: View {
     let presentation: ServerRailGuildPresentation
     let isSelected: Bool
     let contextMenuActions: ServerRailContextMenuActions
+    var loadsImageWhenOffscreen = false
     let action: () -> Void
     @State private var isHovering = false
+    @State private var iconIsVisible = false
 
     var body: some View {
         let guild = presentation.guild
@@ -427,7 +432,8 @@ struct GuildRailButton: View {
                         size: InterfaceScale.metric(44),
                         cornerRadius: InterfaceScale.metric(14),
                         animates: isHovering,
-                        isSelected: isSelected
+                        isSelected: isSelected,
+                        loadsImage: loadsImageWhenOffscreen || iconIsVisible
                     )
                 }
             }
@@ -475,6 +481,7 @@ struct GuildRailButton: View {
         .anchorPreference(key: ServerRailHoverPreferenceKey.self, value: .bounds) { bounds in
             isHovering ? ServerRailHoverItem(name: displayName, bounds: bounds) : nil
         }
+        .onScrollVisibilityChange(threshold: 0.01) { iconIsVisible = $0 }
         .onModalHover { isHovering = $0 }
         .animation(.snappy(duration: 0.18), value: isHovering)
     }

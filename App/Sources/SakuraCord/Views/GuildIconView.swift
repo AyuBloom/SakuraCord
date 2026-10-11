@@ -7,6 +7,7 @@ struct GuildIconView: View {
     let cornerRadius: CGFloat
     var animates = true
     var isSelected = false
+    var loadsImage = true
     @Environment(\.colorScheme) private var colorScheme
 
     init(
@@ -15,7 +16,8 @@ struct GuildIconView: View {
         size: CGFloat,
         cornerRadius: CGFloat,
         animates: Bool = true,
-        isSelected: Bool = false
+        isSelected: Bool = false,
+        loadsImage: Bool = true
     ) {
         self.name = name
         self.iconURL = iconURL
@@ -23,25 +25,29 @@ struct GuildIconView: View {
         self.cornerRadius = cornerRadius
         self.animates = animates
         self.isSelected = isSelected
+        self.loadsImage = loadsImage
     }
 
     var body: some View {
         let displayedCornerRadius = iconURL == nil ? size * 0.25 : cornerRadius
         ZStack {
             if let iconURL {
-                StaticRemoteImage(
-                    url: iconURL,
-                    maximumPixelDimension: requestedPixelDimension
-                )
-                if animates,
-                   NativeTimelineAvatarPresentation
-                    .shouldDecodeAnimation(for: iconURL)
-                {
-                    AnimatedRemoteImage(
+                if loadsImage {
+                    StaticRemoteImage(
                         url: iconURL,
-                        maximumPixelDimension: requestedPixelDimension
+                        maximumPixelDimension: requestedPixelDimension,
+                        retriesFailedLoads: true
                     )
-                    .transition(.identity)
+                    if animates,
+                       NativeTimelineAvatarPresentation
+                        .shouldDecodeAnimation(for: iconURL)
+                    {
+                        AnimatedRemoteImage(
+                            url: iconURL,
+                            maximumPixelDimension: requestedPixelDimension
+                        )
+                        .transition(.identity)
+                    }
                 }
             } else {
                 ConcentricRectangle(cornerRadius: displayedCornerRadius, style: .continuous)

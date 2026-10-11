@@ -1343,10 +1343,14 @@ extension ComposerView {
     }
 
     func composerSendSlot(appearance: ComposerBarAppearance) -> some View {
-        TimelineView(.periodic(from: .now, by: 0.25)) { context in
-            let coolingDown = activeConversationID.map {
-                model.slowmodeRemaining(in: $0, now: context.date) > 0
-            } ?? false
+        let deadline = activeConversationID.flatMap { channelID in
+            let configuration = model.slowmodeConfiguration(in: channelID)
+            return model.composer.slowmode.deadline(
+                in: channelID, interval: configuration.interval, immune: configuration.immune
+            )
+        }
+        return TimelineView(ComposerSlowmodeTimelineSchedule(deadline: deadline)) { context in
+            let coolingDown = deadline.map { $0 > context.date } ?? false
             ComposerSendSlot(
                 mode: sendSlotMode,
                 appearance: appearance,

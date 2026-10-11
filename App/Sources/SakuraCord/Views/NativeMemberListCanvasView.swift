@@ -178,6 +178,8 @@ final class NativeMemberListCanvasView: NSView, WindowModalInputParticipant {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        sectionHeaderLines.removeAll(keepingCapacity: true)
+        fittedTextLines.removeAll(keepingCapacity: true)
         needsDisplay = true
         layer?.setNeedsDisplay()
         rowOverlay?.needsDisplay = true
@@ -197,6 +199,8 @@ final class NativeMemberListCanvasView: NSView, WindowModalInputParticipant {
     var origins: [CGFloat] = []
     var contentHeight: CGFloat = 1
     var preparedText: [ItemID: PreparedText] = [:]
+    var sectionHeaderLines: [SectionHeaderLineKey: CTLine] = [:]
+    var fittedTextLines: [FittedTextLineKey: FittedTextLine] = [:]
     var presentation = NativeMemberListPresentation()
     var loadedItemIndexes: [Int] = []
     var selectedMemberID: UserID?

@@ -62,9 +62,7 @@ extension AppModel {
         _ post: ForumPost
     ) -> MessageNotificationLevel {
         guard let parentID = post.thread.parentID,
-              let parent =
-              snapshot?.channels.first(where: { $0.id == parentID })
-                ?? visibleChannels.first(where: { $0.id == parentID })
+              let parent = messagePresentationChannel(parentID)
         else { return .onlyMentions }
         if let configured = channelNotificationOverride(for: parent)?
             .messageNotifications,

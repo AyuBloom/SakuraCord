@@ -9,8 +9,11 @@ struct ComposerSlowmodeIndicator: View {
     var body: some View {
         let configuration = model.slowmodeConfiguration(in: channelID)
         if configuration.interval > 0 {
-            TimelineView(.periodic(from: .now, by: 0.25)) { context in
-                let remaining = model.slowmodeRemaining(in: channelID, now: context.date)
+            let deadline = model.composer.slowmode.deadline(
+                in: channelID, interval: configuration.interval, immune: configuration.immune
+            )
+            TimelineView(ComposerSlowmodeTimelineSchedule(deadline: deadline)) { context in
+                let remaining = deadline.map { max(0, Int(ceil($0.timeIntervalSince(context.date)))) } ?? 0
                 let title = remaining > 0
                     ? Self.countdown(remaining)
                     : (configuration.immune ? "Slowmode Immune" : "Slowmode is enabled")
@@ -71,5 +74,17 @@ struct ComposerSlowmodeIndicator: View {
         Duration.seconds(seconds).formatted(.units(
             allowed: [.hours, .minutes, .seconds], width: .wide
         ))
+    }
+}
+
+/// Keep the countdown cadence, but stop scheduling updates at expiry.
+nonisolated struct ComposerSlowmodeTimelineSchedule: TimelineSchedule {
+    let deadline: Date?
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
+        guard let deadline, deadline > startDate else { return AnySequence([startDate]) }
+        return AnySequence(sequence(first: startDate) { date in
+            date < deadline ? min(date.addingTimeInterval(0.25), deadline) : nil
+        })
     }
 }

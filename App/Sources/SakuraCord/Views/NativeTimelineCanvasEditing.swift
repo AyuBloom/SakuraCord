@@ -485,7 +485,6 @@ extension NativeTimelineCanvasView {
             ),
             in: self
         )
-        synchronizeActionCapsuleShiftState()
     }
 
     /// Keeps a shown capsule on the row's current message, such as after a

@@ -390,6 +390,8 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
                                        name: NSApplication.didBecomeActiveNotification, object: nil)
         notificationCenter.addObserver(self, selector: #selector(synchronizeActionCapsuleShiftState),
                                        name: NSApplication.didBecomeActiveNotification, object: nil)
+        notificationCenter.addObserver(self, selector: #selector(synchronizeActionCapsuleShiftState),
+                                       name: NSMenu.didEndTrackingNotification, object: nil)
         notificationCenter.addObserver(self, selector: #selector(voiceMessagePlaybackDidChange(_:)),
                                        name: VoiceMessagePlaybackStore.didChange, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(

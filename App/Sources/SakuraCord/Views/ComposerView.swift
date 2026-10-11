@@ -1470,7 +1470,7 @@ private extension ComposerView {
     ) {
         // A send from older history first loads the newest messages, so
         // the field stays editable and nothing arrives to take it over yet.
-        guard model.appearanceSettings.messageAppearance == .bubbles,
+        guard model.messageAppearance(for: channelID) == .bubbles,
               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               conversation == .thread || !model.hasMoreLaterMessages,
               let source = sendTransitionAnchor.source(

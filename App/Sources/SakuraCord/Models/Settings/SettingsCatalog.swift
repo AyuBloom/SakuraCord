@@ -250,6 +250,8 @@ nonisolated extension SettingsControlID {
     static let themeDesigner = Self(rawValue: "appearance.theme-designer")
     static let resetTheme = Self(rawValue: "appearance.reset-theme")
     static let composerBarAppearance = Self(rawValue: "appearance.composer-bar")
+    static let directMessageAppearance = Self(rawValue: "appearance.direct-messages")
+    static let groupMessageAppearance = Self(rawValue: "appearance.group-messages")
     static let messageAppearance = Self(rawValue: "appearance.messages")
     static let messageDensity = Self(rawValue: "appearance.message-density")
     static let interfaceSize = Self(rawValue: "interface.size")

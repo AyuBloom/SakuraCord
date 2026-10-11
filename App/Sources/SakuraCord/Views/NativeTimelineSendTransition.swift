@@ -1104,9 +1104,9 @@ extension NativeMessageTimelineCoordinator {
         for parent: NativeMessageTimelineView
     ) -> SendTransitionTranscriptAnchor? {
         guard parent.conversation == self.parent.conversation,
-              parent.model.appearanceSettings.messageAppearance == .bubbles,
               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
               let channelID = parent.conversation.sendTransitionChannelID,
+              parent.model.messageAppearance(for: channelID) == .bubbles,
               let canvas
         else { return nil }
         let store = parent.model.timelineSendTransitionStore

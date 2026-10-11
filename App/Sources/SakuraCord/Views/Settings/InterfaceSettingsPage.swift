@@ -1,3 +1,4 @@
+import SakuraCordModels
 import SwiftUI
 
 struct InterfaceSettingsPage: View {
@@ -36,7 +37,9 @@ struct InterfaceSettingsPage: View {
     }
 
     private func resetMessageAppearance() {
-        appearanceValue.messageAppearance = .defaultStyle
+        appearanceValue.serverMessageAppearance = .defaultStyle
+        appearanceValue.directMessageAppearance = .defaultStyle
+        appearanceValue.groupMessageAppearance = .defaultStyle
         appearanceValue.messageSpacing =
             AppearanceSettingsSnapshot.defaultMessageSpacing
     }
@@ -127,27 +130,27 @@ private struct InterfaceMessagesSection: View {
     let reset: () -> Void
     let state: SettingsViewState
 
+    @State private var previewKind = ChannelKindValue.directMessage
+
     private var isUsingDefaults: Bool {
-        value.messageAppearance
-            == AppearanceSettingsSnapshot.defaults.messageAppearance
+        value.serverMessageAppearance == .defaultStyle
+            && value.directMessageAppearance == .defaultStyle
+            && value.groupMessageAppearance == .defaultStyle
             && value.messageSpacing
                 == AppearanceSettingsSnapshot.defaults.messageSpacing
     }
 
     var body: some View {
         Section {
-            LabeledContent("Messages") {
-                Picker("Messages", selection: $value.messageAppearance) {
-                    ForEach(MessageAppearance.allCases) { appearance in
-                        Text(appearance.title).tag(appearance)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.radioGroup)
-                .horizontalRadioGroupLayout()
-                .tint(SakuraCordAccentColor.color)
-            }
-            .settingsControlAnchor(.messageAppearance, state: state)
+            appearancePicker(LocalizedStringResource("Direct messages", bundle: #bundle), selection: $value.directMessageAppearance)
+                .settingsControlAnchor(.directMessageAppearance, state: state)
+                .onChange(of: value.directMessageAppearance) { previewKind = .directMessage }
+            appearancePicker(LocalizedStringResource("Group chats", bundle: #bundle), selection: $value.groupMessageAppearance)
+                .settingsControlAnchor(.groupMessageAppearance, state: state)
+                .onChange(of: value.groupMessageAppearance) { previewKind = .groupDirectMessage }
+            appearancePicker(LocalizedStringResource("Server channels", bundle: #bundle), selection: $value.serverMessageAppearance)
+                .settingsControlAnchor(.messageAppearance, state: state)
+                .onChange(of: value.serverMessageAppearance) { previewKind = .text }
 
             LabeledContent("Density") {
                 HStack {
@@ -168,7 +171,14 @@ private struct InterfaceMessagesSection: View {
             )
             .settingsControlAnchor(.messageDensity, state: state)
 
+            Picker("Preview", selection: $previewKind) {
+                Text("Direct messages", bundle: #bundle).tag(ChannelKindValue.directMessage)
+                Text("Group chats", bundle: #bundle).tag(ChannelKindValue.groupDirectMessage)
+                Text("Server channels", bundle: #bundle).tag(ChannelKindValue.text)
+            }
+
             MessageAppearancePreview(
+                channelKind: previewKind,
                 appearance: value, interface: interface,
                 accessibility: accessibility
             )
@@ -178,6 +188,27 @@ private struct InterfaceMessagesSection: View {
                 .settingsControlAnchor(.resetMessageAppearance, state: state)
         } header: {
             Text("Messages", bundle: #bundle)
+        }
+    }
+
+    private func appearancePicker(
+        _ title: LocalizedStringResource,
+        selection: Binding<MessageAppearance>
+    ) -> some View {
+        LabeledContent {
+            Picker(selection: selection) {
+                ForEach(MessageAppearance.allCases) { appearance in
+                    Text(appearance.title).tag(appearance)
+                }
+            } label: {
+                Text(title)
+            }
+            .labelsHidden()
+            .pickerStyle(.radioGroup)
+            .horizontalRadioGroupLayout()
+            .tint(SakuraCordAccentColor.color)
+        } label: {
+            Text(title)
         }
     }
 }

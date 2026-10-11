@@ -1015,18 +1015,15 @@ private struct ForumPostStarterExcerpt: View {
     let isEmphasized: Bool
     @State private var authorFont: NSFont?
 
-    private var presentation: MessageAuthorPresentation {
-        model.authorPresentation(for: message)
-    }
-
     var body: some View {
-        ForumPostPreviewText(
+        let presentation = model.authorPresentation(for: message)
+        return ForumPostPreviewText(
             model: model,
             message: message,
             maximumNumberOfLines: 2,
             isEmphasized: isEmphasized,
             prefix: ForumPostPreviewTextView.Prefix(
-                value: authorPrefix,
+                value: authorPrefix(presentation: presentation),
                 accessibilityText: "\(presentation.user.displayName): "
             )
         )
@@ -1048,7 +1045,7 @@ private struct ForumPostStarterExcerpt: View {
 
     /// The author's name, preceded by a role color dot when names show roles
     /// that way, and followed by the separator before the message.
-    private var authorPrefix: NSAttributedString {
+    private func authorPrefix(presentation: MessageAuthorPresentation) -> NSAttributedString {
         let bodySize = NSFont.preferredFont(forTextStyle: .body).pointSize
         let value = NSMutableAttributedString()
         if roleColorDisplay == .nextToNames,
@@ -1069,7 +1066,7 @@ private struct ForumPostStarterExcerpt: View {
             string: presentation.user.displayName,
             attributes: [
                 .font: authorFont ?? NSFont.interfaceSystemFont(ofSize: bodySize, weight: .semibold),
-                .foregroundColor: NSColor(nameColor),
+                .foregroundColor: NSColor(nameColor(presentation: presentation)),
             ]
         ))
         value.append(NSAttributedString(
@@ -1082,7 +1079,7 @@ private struct ForumPostStarterExcerpt: View {
         return value
     }
 
-    private var nameColor: Color {
+    private func nameColor(presentation: MessageAuthorPresentation) -> Color {
         if presentation.user.isBot { return SakuraCordAccentColor.color }
         return roleColorDisplay == .inNames ? presentation.roleColorHex.map(Color.init(hex:)) ?? .primary : .primary
     }

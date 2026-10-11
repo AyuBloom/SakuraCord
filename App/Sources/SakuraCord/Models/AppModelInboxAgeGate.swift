@@ -9,7 +9,10 @@ extension AppModel {
                 guildID: message.guildID ?? readState.entries[message.channelID]?.guildID
             )
         }.map(\.id))
-        inbox.hiddenMentionIDs = snapshot?.currentUser.allowsAdultContent == true ? [] : restricted
+        let blocked = Set(inbox.mentions.filter {
+            isMessageSuppressed($0)
+        }.map(\.id))
+        inbox.hiddenMentionIDs = blocked.union(snapshot?.currentUser.allowsAdultContent == true ? [] : restricted)
         inbox.obscuredMentionIDs = snapshot?.currentUser.allowsAdultContent == true ? restricted : []
     }
 
@@ -38,7 +41,7 @@ extension AppModel {
         guard snapshot?.currentUser.allowsAdultContent == true, let guildID = inbox.ageRestrictedGuildID else { return }
         inbox.acceptedAgeRestrictedGuildIDs.insert(guildID)
         if !isOfflineTesting {
-            UserDefaults.standard.set(inbox.acceptedAgeRestrictedGuildIDs.map(\.description), forKey: "dev.sakuracord.inbox-age-agreements")
+            PRBuildProfile.defaults.set(inbox.acceptedAgeRestrictedGuildIDs.map(\.description), forKey: "dev.sakuracord.inbox-age-agreements")
         }
         let action = inbox.ageRestrictedAction
         cancelInboxAgeAgreement()

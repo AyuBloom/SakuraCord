@@ -27,7 +27,10 @@ run_checks() {
   "$ROOT_DIR/script/test_debug_credentials_config.sh"
   python3 "$ROOT_DIR/script/test_run_test_diagnostics.py"
   node --test "$ROOT_DIR/script/release_automation.test.mjs"
+  node --test "$ROOT_DIR/script/release_hotfix.test.mjs"
   node --test "$ROOT_DIR/script/ci_reuse.test.mjs"
+  node --test "$ROOT_DIR/script/pr_builds.test.mjs"
+  python3 "$ROOT_DIR/script/test_pr_build_archive.py"
   node --test "$ROOT_DIR/script/update_appcast_display_version.test.mjs"
   "$ROOT_DIR/script/test_release_tag_guard.sh"
 

@@ -155,9 +155,14 @@ struct ChannelSidebarView: View {
                     bottomContentInset: accountControlHeight
                 )
             } else {
+                let preparedThreads = threadLayout(at: .now)
                 // Re-evaluate when a timed-relevant thread expires. An explicit
                 // schedule reports its next entry as `context.date`, so read the clock.
-                TimelineView(.explicit(threadRelevanceDeadlines)) { _ in
+                TimelineView(.explicit(preparedThreads.relevanceDeadlines)) { _ in
+                    let now = Date.now
+                    let threads = preparedThreads.relevanceDeadlines.first.map { $0 <= now } == true
+                        ? threadLayout(at: now)
+                        : preparedThreads
                     GuildChannelList(
                         input: GuildChannelListInput(
                             modelIdentity: ObjectIdentifier(voiceModel),
@@ -173,7 +178,7 @@ struct ChannelSidebarView: View {
                             checkingChannelIDs: checkingChannelIDs,
                             unreadCategoryIDs: unreadCategoryIDs,
                             selectedChannelID: selection,
-                            threadsByParentID: threadLayout(at: .now).threadsByParentID,
+                            threadsByParentID: threads.threadsByParentID,
                             bottomContentInset: accountControlHeight
                         ),
                         model: voiceModel,
@@ -245,10 +250,6 @@ struct ChannelSidebarView: View {
         )
     }
 
-    private var threadRelevanceDeadlines: [Date] {
-        threadLayout(at: .now).relevanceDeadlines
-    }
-
     private var deferredGuildSelection: Binding<GuildSidebarSelection?> {
         Binding(
             // Keep every destination on the same deferred NSOutlineView handoff.
@@ -297,15 +298,21 @@ struct ChannelSidebarView: View {
         )
     }
 
-    private var directMessageSelection: Binding<ChannelID?> {
+    private var directMessageSelection: Binding<DirectMessageSidebarSelection?> {
         Binding(
-            get: { selection },
+            get: { voiceModel.isFriendsPresented ? .friends : selection.map(DirectMessageSidebarSelection.channel) },
             set: { newSelection in
-                guard selection != newSelection else { return }
-                if let newSelection {
-                    voiceModel.recordForwardDestinationVisit(newSelection)
+                switch newSelection {
+                case .friends:
+                    guard !voiceModel.isFriendsPresented else { return }
+                    voiceModel.openFriends()
+                case .channel(let channelID):
+                    guard selection != channelID || voiceModel.isFriendsPresented else { return }
+                    voiceModel.recordForwardDestinationVisit(channelID)
+                    selection = channelID
+                case nil:
+                    break
                 }
-                selection = newSelection
             }
         )
     }
@@ -1023,6 +1030,7 @@ private struct CurrentUserCapsule: View {
                 maximumPopoverHeight: InterfaceScale.metric(720),
                 showsRoles: false,
                 openProfile: model.expandProfile,
+                userMenu: { UserContextMenu.make(for: presentation.member.user, context: .init(guildID: presentation.guildID), model: model) },
             footer: {
                 YouPopoverOptions(
                     currentStatus: currentStatus,

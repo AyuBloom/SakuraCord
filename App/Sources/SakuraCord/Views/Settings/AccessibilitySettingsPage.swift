@@ -9,6 +9,7 @@ struct AccessibilitySettingsPage: View {
 
     var body: some View {
         SettingsPageForm(page: .accessibility, state: state) {
+            motionSection
             cosmeticsSection
             readabilitySection
             voiceOverSection
@@ -33,6 +34,16 @@ struct AccessibilitySettingsPage: View {
             message: "This resets all of SakuraCord’s accessibility settings. Are you sure you want to do this?",
             reset: resetPreferences
         )
+    }
+
+    private var motionSection: some View {
+        Section {
+            Toggle("Disable message sending animations", isOn: $value.disablesMessageSendingAnimations)
+                .tint(SakuraCordAccentColor.color)
+                .settingsControlAnchor(.accessibilityDisableSendAnimations, state: state)
+        } header: {
+            Text("Motion", bundle: #bundle)
+        }
     }
 
     private var cosmeticsSection: some View {

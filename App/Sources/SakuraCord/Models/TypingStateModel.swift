@@ -13,11 +13,14 @@ final class TypingStateModel {
     private struct Entry {
         var user: User
         var generation: UInt64
+        /// When this user started typing; refreshes keep their place.
+        var arrival: UInt64
     }
 
     private(set) var revision: UInt64 = 0
     @ObservationIgnored private var entries: [Key: Entry] = [:]
     @ObservationIgnored private var expiryTasks: [Key: Task<Void, Never>] = [:]
+    @ObservationIgnored private var nextArrival: UInt64 = 0
     @ObservationIgnored private let expiry: Duration
 
     init(expiry: Duration = .seconds(10)) {
@@ -28,7 +31,11 @@ final class TypingStateModel {
         guard user.id != currentUserID else { return }
         let key = Key(channelID: channelID, userID: user.id)
         let generation = (entries[key]?.generation ?? 0) &+ 1
-        entries[key] = Entry(user: user, generation: generation)
+        let arrival = entries[key]?.arrival ?? {
+            nextArrival &+= 1
+            return nextArrival
+        }()
+        entries[key] = Entry(user: user, generation: generation, arrival: arrival)
         expiryTasks[key]?.cancel()
         let expiry = expiry
         expiryTasks[key] = Task { [weak self] in
@@ -74,6 +81,16 @@ final class TypingStateModel {
                 let comparison = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
                 return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
             }
+    }
+
+    /// The channel's typists, most recent to start first.
+    func usersNewestFirst(in channelID: ChannelID) -> [User] {
+        _ = revision
+        return entries
+            .filter { $0.key.channelID == channelID }
+            .map(\.value)
+            .sorted { $0.arrival > $1.arrival }
+            .map(\.user)
     }
 
     func presentation(in channelID: ChannelID) -> String? {

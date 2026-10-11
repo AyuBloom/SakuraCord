@@ -83,7 +83,7 @@ nonisolated enum ComposerLatestMessageEditingPolicy {
     ) -> MessageID? {
         guard let currentUserID else { return nil }
         return messages.last(where: {
-            $0.author.id == currentUserID && !$0.hasPoll
+            $0.author.id == currentUserID && !$0.hasPoll && !$0.flags.contains(.voiceMessage)
         })?.id
     }
 }
@@ -878,6 +878,10 @@ final class ComposerNSTextView: ComposerFocusReportingTextView {
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
         updateAttachmentDropTarget(sender)
+    }
+
+    override func wantsPeriodicDraggingUpdates() -> Bool {
+        true
     }
 
     override func draggingExited(_ sender: (any NSDraggingInfo)?) {

@@ -265,10 +265,10 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
         NativeTimelineBeginningSelectionOverlay()
     var spoilerRevealStore = NativeTimelineSpoilerRevealStore()
     var spoilerRevealObserverID: UUID?
-    var actionCapsuleHost: NSHostingView<AnyView>?
+    var actionCapsuleHost: NativeTimelineActionCapsuleHost?
     var actionCapsuleState: NativeTimelineActionCapsuleState?
     var actionCapsuleMessageID: MessageID?
-    var actionCapsuleSize: NSSize?
+    var actionCapsuleModifierMonitor: Any?
     let editing = NativeTimelineEditingSession()
     let messageProfilePopoverCoordinator =
         StableAnchoredPopoverPresenter<AnyView>.Coordinator()
@@ -389,6 +389,10 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
                                        name: ComposerOverlayPointerRegion.changed, object: nil)
         notificationCenter.addObserver(self, selector: #selector(restoreInboxKeyboardFocus),
                                        name: NSApplication.didBecomeActiveNotification, object: nil)
+        notificationCenter.addObserver(self, selector: #selector(synchronizeActionCapsuleShiftState),
+                                       name: NSApplication.didBecomeActiveNotification, object: nil)
+        notificationCenter.addObserver(self, selector: #selector(synchronizeActionCapsuleShiftState),
+                                       name: NSMenu.didEndTrackingNotification, object: nil)
         notificationCenter.addObserver(self, selector: #selector(voiceMessagePlaybackDidChange(_:)),
                                        name: VoiceMessagePlaybackStore.didChange, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -450,6 +454,9 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
             )
             if let spoilerRevealObserverID {
                 spoilerRevealStore.removeObserver(spoilerRevealObserverID)
+            }
+            if let actionCapsuleModifierMonitor {
+                NSEvent.removeMonitor(actionCapsuleModifierMonitor)
             }
         }
     }

@@ -365,14 +365,22 @@ enum MessageDeleteConfirmationPolicy {
     }
 }
 
+/// Holding Shift alone swaps the hover capsule's quick reactions for
+/// message utilities, as in Discord.
+enum MessageActionShiftPolicy {
+    static func isActive(_ modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        modifierFlags.intersection([.shift, .command, .option, .control]) == .shift
+    }
+}
+
 struct MessageActionCapsule: View {
     let model: AppModel
     let message: Message
     let canEdit: Bool
     let canDelete: Bool
     let showsQuickReactions: Bool
+    let showsShiftActions: Bool
     @Binding var isReactionPickerPresented: Bool
-    @Binding var isDeleteConfirmationPresented: Bool
     let retry: (() -> Void)?
     let edit: () -> Void
     let reply: (() -> Void)?
@@ -380,20 +388,16 @@ struct MessageActionCapsule: View {
     let react: (String) -> Void
     let copy: () -> Void
     let copyLink: () -> Void
-    let openThread: (() -> Void)?
+    let copyMessageID: () -> Void
+    let markUnread: () -> Void
+    let togglePin: (() -> Void)?
+    let showMoreActions: () -> Void
     let delete: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if isDeleteConfirmationPresented {
-            deleteConfirmation
-        } else {
-            actions
-        }
-    }
-
-    private var actions: some View {
-        HoverActionPill {
-            if message.outboxState == .failed {
+        if message.outboxState == .failed {
+            HoverActionPill {
                 if let retry {
                     HoverActionButton(
                         systemImage: "arrow.clockwise",
@@ -406,76 +410,87 @@ struct MessageActionCapsule: View {
                     help: "Copy text",
                     action: copy
                 )
-            } else {
-                if showsQuickReactions {
-                    QuickReactionSection(model: model, message: message, react: react)
-                }
-                ReactionActionMenu(
-                    model: model,
-                    guildID: message.guildID,
-                    isPickerPresented: $isReactionPickerPresented,
-                    react: react
-                )
-                .id("reaction-picker-\(message.id)-toolbar")
-                if let reply {
-                    HoverActionButton(systemImage: "arrowshape.turn.up.left", help: "Reply", action: reply)
-                }
-                if let forward {
-                    HoverActionButton(
-                        systemImage: "arrowshape.turn.up.right",
-                        help: "Forward",
-                        action: forward
+            }
+        } else {
+            // The leading section carries its own trailing spacing, so it
+            // stays in place while empty without widening the pill.
+            HoverActionPill(spacing: 0) {
+                leadingActions
+                HStack(spacing: HoverActionPillMetrics.spacing) {
+                    ReactionActionMenu(
+                        model: model,
+                        guildID: message.guildID,
+                        isPickerPresented: $isReactionPickerPresented,
+                        react: react
                     )
-                }
-                if canEdit {
-                    HoverActionButton(systemImage: "pencil", help: "Edit message", action: edit)
-                }
-                HoverActionButton(systemImage: "doc.on.doc", help: "Copy text", action: copy)
-                HoverActionButton(systemImage: "link", help: "Copy message link", action: copyLink)
-                if let openThread {
-                    HoverActionButton(
-                        systemImage: SakuraCordSystemSymbol.thread, help: "Open thread", action: openThread
-                    )
-                }
-                if canDelete {
-                    HoverActionButton(
-                        systemImage: "trash",
-                        help: "Delete message",
-                        role: .destructive
-                    ) {
-                        if MessageDeleteConfirmationPolicy.isBypassed(
-                            by: NSEvent.modifierFlags
-                        ) {
-                            delete()
-                        } else {
-                            isDeleteConfirmationPresented = true
-                        }
+                    .id("reaction-picker-\(message.id)-toolbar")
+                    if let reply {
+                        HoverActionButton(systemImage: "arrowshape.turn.up.left", help: "Reply", action: reply)
                     }
+                    if canEdit {
+                        HoverActionButton(systemImage: "pencil", help: "Edit message", action: edit)
+                    }
+                    if let forward {
+                        HoverActionButton(
+                            systemImage: "arrowshape.turn.up.right",
+                            help: "Forward",
+                            action: forward
+                        )
+                    }
+                    trailingAction
                 }
             }
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .smooth(duration: 0.3), value: showsShiftActions)
         }
     }
 
-    private var deleteConfirmation: some View {
-        HoverActionPill {
-            Text("Delete message?")
-                .font(.interface(.caption).weight(.semibold))
-                .padding(.horizontal, InterfaceScale.metric(4))
-            HoverActionButton(
-                systemImage: "xmark",
-                help: "Cancel deletion"
-            ) {
-                isDeleteConfirmationPresented = false
-            }
-            HoverActionButton(
-                systemImage: "trash.fill",
-                help: "Delete message",
-                role: .destructive
-            ) {
-                isDeleteConfirmationPresented = false
-                delete()
+    /// Quick reactions slide up and out as the Shift utilities rise from
+    /// below; releasing Shift plays the same motion in reverse.
+    private var leadingActions: some View {
+        ZStack(alignment: .trailing) {
+            if showsShiftActions {
+                HStack(spacing: HoverActionPillMetrics.spacing) {
+                    HoverActionButton(systemImage: "number.square", help: "Copy Message ID", action: copyMessageID)
+                    HoverActionButton(systemImage: "link", help: "Copy Link", action: copyLink)
+                    HoverActionButton(systemImage: "envelope.badge", help: "Mark Unread", action: markUnread)
+                    if let togglePin {
+                        HoverActionButton(
+                            systemImage: message.isPinned ? "pin.slash" : "pin",
+                            help: message.isPinned ? "Unpin Message" : "Pin Message",
+                            action: togglePin
+                        )
+                    }
+                }
+                .padding(.trailing, HoverActionPillMetrics.spacing)
+                .transition(variantTransition(isShift: true))
+            } else if showsQuickReactions {
+                HStack(spacing: HoverActionPillMetrics.spacing) {
+                    QuickReactionSection(model: model, message: message, react: react)
+                }
+                .padding(.trailing, HoverActionPillMetrics.spacing)
+                .transition(variantTransition(isShift: false))
             }
         }
+        .clipped()
+    }
+
+    /// Shift turns More into Delete. Shift is held when it is clicked, so
+    /// deletion skips confirmation as it does from the context menu.
+    private var trailingAction: some View {
+        ZStack {
+            if showsShiftActions, canDelete {
+                HoverActionButton(systemImage: "trash", help: "Delete message", role: .destructive, action: delete)
+                    .transition(variantTransition(isShift: true))
+            } else {
+                HoverActionButton(systemImage: "ellipsis", help: "More", action: showMoreActions)
+                    .transition(variantTransition(isShift: false))
+            }
+        }
+        .clipped()
+    }
+
+    private func variantTransition(isShift: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .move(edge: isShift ? .bottom : .top).combined(with: .opacity)
     }
 }
 

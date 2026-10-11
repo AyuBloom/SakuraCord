@@ -1157,11 +1157,22 @@ extension NativeTimelineCanvasView {
                 actions: imageContextMenuActions(for: imageItem)
             )
         }
-        guard let actions else { return nil }
+        guard let actions,
+              TimelineContextMenuHitTesting.contains(
+                  point,
+                  rowOrigin: displayedRowOrigin(at: index),
+                  highlightFrame: layouts[index].highlightFrame
+              )
+        else { return nil }
         return messageContextMenu(
             for: row,
             at: index,
-            point: point,
+            targetsAuthor: NativeTimelineAuthorProfileGeometry.hitFrame(
+                at: localPoint,
+                avatarFrame: layouts[index].avatarFrame,
+                authorFrame: layouts[index].authorFrame
+            ) != nil,
+            lookupPoint: point,
             actions: actions,
             failedMediaActions: interactionMode == .failed
                 ? imageItem.map(imageContextMenuActions(for:))
@@ -1169,19 +1180,17 @@ extension NativeTimelineCanvasView {
         )
     }
 
+    /// `targetsAuthor` offers user commands instead of message commands in
+    /// the Apps submenu, as when the author's avatar or name was clicked.
     func messageContextMenu(
         for row: MessageRowPresentation,
         at index: Int,
-        point: CGPoint,
+        targetsAuthor: Bool,
+        lookupPoint: CGPoint? = nil,
         actions: NativeTimelineRowActions,
         failedMediaActions: MediaImageContextMenuActions?
     ) -> NSMenu? {
-        guard MessageOutboxPresentation.interactionMode(for: row.message).allowsMessageContextMenu,
-              TimelineContextMenuHitTesting.contains(
-            point,
-            rowOrigin: displayedRowOrigin(at: index),
-            highlightFrame: layouts[index].highlightFrame
-        ) else { return nil }
+        guard MessageOutboxPresentation.interactionMode(for: row.message).allowsMessageContextMenu else { return nil }
         // Discord does not allow editing voice messages.
         let canEdit =
             row.message.author.id == model?.snapshot?.currentUser.id
@@ -1193,7 +1202,7 @@ extension NativeTimelineCanvasView {
         let canDelete = model?.canDeleteMessage(row.message) == true
         let menu = NSMenu()
         menu.autoenablesItems = false
-        if let lookup = dictionaryLookupAction(at: point, usesSelection: true) {
+        if let lookupPoint, let lookup = dictionaryLookupAction(at: lookupPoint, usesSelection: true) {
             menu.addItem(actionItem("Look Up", systemImage: "character.book.closed", action: lookup))
             menu.addItem(.separator())
         }
@@ -1250,7 +1259,7 @@ extension NativeTimelineCanvasView {
                 )
             )
         }
-        appendApplicationCommandMenu(to: menu, row: row, index: index, point: point)
+        appendApplicationCommandMenu(to: menu, row: row, targetsAuthor: targetsAuthor)
         return menu
     }
 
@@ -1286,20 +1295,13 @@ extension NativeTimelineCanvasView {
     private func appendApplicationCommandMenu(
         to menu: NSMenu,
         row: MessageRowPresentation,
-        index: Int,
-        point: CGPoint
+        targetsAuthor: Bool
     ) {
         let message = row.message
         guard let model, messageInteractionContext == .conversation,
               message.outboxState == .confirmed, !message.flags.contains(.ephemeral),
               model.supportsCapability(.slashCommands)
         else { return }
-        let localPoint = CGPoint(x: point.x, y: point.y - displayedRowOrigin(at: index))
-        let targetsAuthor = NativeTimelineAuthorProfileGeometry.hitFrame(
-            at: localPoint,
-            avatarFrame: layouts[index].avatarFrame,
-            authorFrame: layouts[index].authorFrame
-        ) != nil
         let type: ApplicationCommandType = targetsAuthor ? .user : .message
         let targetID = targetsAuthor ? message.author.id.description : message.id.description
         let destination = model.commandDestination(in: message.channelID)

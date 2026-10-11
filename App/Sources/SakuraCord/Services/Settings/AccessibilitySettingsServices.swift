@@ -49,6 +49,7 @@ nonisolated struct AccessibilitySettingsSnapshot: Equatable, Sendable {
     var announcesAttachmentTypes: Bool
     var announcesNewMessages: Bool
 
+    var disablesMessageSendingAnimations = false
     var disablesOwnCosmetics = false
 
 }
@@ -90,11 +91,13 @@ final class AccessibilitySettingsStore {
             ?? value.announcesAttachmentTypes
         value.announcesNewMessages = bool(.accessibilityAnnounceNewMessages)
             ?? value.announcesNewMessages
+        value.disablesMessageSendingAnimations = bool(.accessibilityDisableSendAnimations) ?? false
         value.disablesOwnCosmetics = bool(.accessibilityDisableOwnCosmetics) ?? false
         return value
     }
 
     func save(_ value: AccessibilitySettingsSnapshot) {
+        preferences.set(.bool(value.disablesMessageSendingAnimations), for: .accessibilityDisableSendAnimations)
         preferences.set(.bool(value.disablesOwnCosmetics), for: .accessibilityDisableOwnCosmetics)
         preferences.set(.bool(value.underlinesLinks), for: .underlineLinks)
         preferences.set(.string(value.roleColorDisplay.rawValue), for: .roleColorDisplay)
@@ -171,6 +174,11 @@ nonisolated enum AccessibilityMessageMetadataPolicy {
 
 @MainActor
 extension AppModel {
+    var animatesMessageSending: Bool {
+        !accessibilitySettings.disablesMessageSendingAnimations
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
     var cosmeticPolicy: ProfileCosmeticPolicy {
         ProfileCosmeticPolicy(settings: accessibilitySettings, currentUserID: snapshot?.currentUser.id)
     }

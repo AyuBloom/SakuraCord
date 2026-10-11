@@ -538,6 +538,12 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
         ),
 
         SettingsPreferenceRegistration(
+            id: .accessibilityDisableSendAnimations,
+            page: .accessibility,
+            storage: .appWide(key: "settings.accessibility.disableMessageSendingAnimations"),
+            defaultValue: .bool(false)
+        ),
+        SettingsPreferenceRegistration(
             id: .accessibilityDisableOwnCosmetics,
             page: .accessibility,
             storage: .appWide(key: "settings.accessibility.disableOwnCosmetics"),

@@ -141,8 +141,13 @@ final class NativeTimelineSendTransitionStore {
         return Pending(source: source, overlay: overlay)
     }
 
-    func discard(_ channelID: ChannelID) {
-        pending.removeValue(forKey: channelID)?.overlay.dismiss()
+    func discard(_ channelID: ChannelID, animated: Bool = true) {
+        guard let overlay = pending.removeValue(forKey: channelID)?.overlay else { return }
+        if animated {
+            overlay.dismiss()
+        } else {
+            overlay.removeFromSuperview()
+        }
     }
 }
 
@@ -652,6 +657,11 @@ extension NativeTimelineCanvasView {
         rowIndex index: Int,
         transcriptShift: CGFloat
     ) {
+        guard model?.animatesMessageSending == true else {
+            pending.overlay.removeFromSuperview()
+            cancelTranscriptGlide()
+            return
+        }
         guard let window,
               let (geometry, bubbleInWindow) = sendTransitionGeometry(
                   from: pending, rowIndex: index, in: window
@@ -695,7 +705,7 @@ extension NativeTimelineCanvasView {
     ) -> (NativeTimelineSendTransitionOverlay.Geometry, CGRect)? {
         let source = pending.source
         let overlay = pending.overlay
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+        guard model?.animatesMessageSending == true,
               source.window === window,
               overlay.window === window,
               items.indices.contains(index),
@@ -780,6 +790,19 @@ extension NativeTimelineCanvasView {
     /// Keeps in-flight bubbles aimed at their rows after a later timeline
     /// update moves them, and ends a transition whose row changed shape.
     func reconcileSendTransitions() {
+        guard model?.animatesMessageSending == true else {
+            let store = model?.timelineSendTransitionStore
+            let hasPending = presentedConversationID.map { store?.hasPendingSource(for: $0) == true } ?? false
+            if hasPending || !sendTransitions.isEmpty {
+                cancelTranscriptGlide()
+            }
+            if let presentedConversationID {
+                store?.discard(presentedConversationID, animated: false)
+            }
+            finishSendTransitions(reconcilesHeldMedia: true)
+            restoreSendTransitionInteractions()
+            return
+        }
         for transition in sendTransitions {
             reconcileSendTransition(transition)
         }
@@ -1217,7 +1240,7 @@ extension NativeMessageTimelineCoordinator {
            )
         {
             canvas.beginSendTransition(from: pending, rowIndex: index, transcriptShift: shift())
-        } else if anchor.isSending {
+        } else if anchor.isSending, parent.model.animatesMessageSending {
             // The composer resizing as it clears moves the transcript too.
             // Until the message arrives, hold the rows where they were so
             // they move once, together with the bubble.
@@ -1244,6 +1267,7 @@ extension NativeMessageTimelineCoordinator {
         channelID: ChannelID,
         anchor: SendTransitionTranscriptAnchor
     ) -> (Int, NativeTimelineSendTransitionStore.Pending)? {
+        guard parent.model.animatesMessageSending else { return nil }
         let store = parent.model.timelineSendTransitionStore
         let currentUserID = parent.model.snapshot?.currentUser.id
         for index in items.indices.reversed().prefix(3) {

@@ -297,12 +297,13 @@ extension AppModel {
         let resources = guide?.enabled == true ? Set(guide?.resourceChannels.map(\.channelID) ?? []) : []
         let settings = presentedGuildChannelSettings(in: guildID)
         let filtersSelection = !showsAllChannels(in: guildID)
+        let hasGuide = filtersSelection && hasGuildGuide(in: guildID)
         let activeChannelID = guildWorkspacePage == nil ? selectedChannelID : nil
         return groups.compactMap { group -> ChannelGroup? in
             var group = group
             group.channels.removeAll { channel in
                 guard filtersSelection else { return false }
-                if hasGuildGuide(in: guildID), resources.contains(channel.id) || channel.flags & (1 << 7) != 0,
+                if hasGuide, resources.contains(channel.id) || channel.flags & (1 << 7) != 0,
                    channel.id != activeChannelID { return true }
                 guard !GuildChannelSelection.isSelected(channel.id, settings: settings),
                       !(group.categoryID.map { GuildChannelSelection.isSelected($0, settings: settings) } ?? false),

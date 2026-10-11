@@ -68,7 +68,7 @@ extension NativeMemberListCanvasView {
         } else {
             .secondaryLabelColor
         }
-        let line = Self.line(label, font: font, color: color)
+        let line = cachedSectionHeaderLine(label, font: font, color: color)
         let labelY = origins[index] + 12
         let labelX: CGFloat
         if showsRoleIndicator {
@@ -344,7 +344,7 @@ extension NativeMemberListCanvasView {
         let nameX = geometry.nameX
         let nameLayout = geometry.layout
         if nameLayout.nameWidth > 0 {
-            let visibleName = Self.truncatedLine(
+            let visibleName = cachedFittedTextLine(
                 prepared.name,
                 token: prepared.nameTruncationToken,
                 maximumWidth: nameLayout.nameWidth
@@ -380,7 +380,7 @@ extension NativeMemberListCanvasView {
            let truncationToken = prepared.activityTruncationToken
         {
             let maximumWidth = max(0, row.maxX - textX - 4 - InterfaceScale.metric(presentation.trailingAccessoryWidth))
-            let visibleActivity = Self.truncatedLine(
+            let visibleActivity = cachedFittedTextLine(
                 activity,
                 token: truncationToken,
                 maximumWidth: maximumWidth

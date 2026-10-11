@@ -104,6 +104,8 @@ extension NativeMemberListCanvasView {
         contentHeight = document.contentHeight
         invalidateIntrinsicContentSize()
         preparedText = document.preparedText
+        sectionHeaderLines.removeAll(keepingCapacity: true)
+        fittedTextLines.removeAll(keepingCapacity: true)
         memberNameGeometries.removeAll(keepingCapacity: true)
         reconcileServerTagCardPresentation()
         window?.invalidateCursorRects(for: self)

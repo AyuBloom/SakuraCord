@@ -1172,6 +1172,7 @@ extension NativeTimelineCanvasView {
                 avatarFrame: layouts[index].avatarFrame,
                 authorFrame: layouts[index].authorFrame
             ) != nil,
+            lookupPoint: point,
             actions: actions,
             failedMediaActions: interactionMode == .failed
                 ? imageItem.map(imageContextMenuActions(for:))
@@ -1185,6 +1186,7 @@ extension NativeTimelineCanvasView {
         for row: MessageRowPresentation,
         at index: Int,
         targetsAuthor: Bool,
+        lookupPoint: CGPoint? = nil,
         actions: NativeTimelineRowActions,
         failedMediaActions: MediaImageContextMenuActions?
     ) -> NSMenu? {
@@ -1200,6 +1202,10 @@ extension NativeTimelineCanvasView {
         let canDelete = model?.canDeleteMessage(row.message) == true
         let menu = NSMenu()
         menu.autoenablesItems = false
+        if let lookupPoint, let lookup = dictionaryLookupAction(at: lookupPoint, usesSelection: true) {
+            menu.addItem(actionItem("Look Up", systemImage: "character.book.closed", action: lookup))
+            menu.addItem(.separator())
+        }
         var insertedFailedMediaActions = false
         for entry in NativeTimelineMessageMenuPolicy.entries(
             canEdit: canEdit,

@@ -20,6 +20,12 @@ enum MessageRowLayoutMetrics {
     nonisolated static var commandInvocationHeight: CGFloat { InterfaceScale.metric(20) }
     nonisolated static var commandInvocationContentInset: CGFloat { InterfaceScale.metric(3) }
 
+    /// The gap after the avatar column, which widens with the compact
+    /// timestamp gutter so grouped content stays aligned.
+    static func columnGap(timestampGutterWidth: CGFloat) -> CGFloat {
+        avatarColumnGap + max(avatarDiameter, timestampGutterWidth) - avatarDiameter
+    }
+
     nonisolated static func avatarColumnHeight(startsGroup: Bool) -> CGFloat {
         startsGroup ? avatarDiameter : compactContentHeight
     }

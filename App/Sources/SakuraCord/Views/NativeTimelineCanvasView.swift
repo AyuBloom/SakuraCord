@@ -361,6 +361,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        pressureConfiguration = NSPressureConfiguration(pressureBehavior: .primaryDeepClick)
         postsFrameChangedNotifications = true
         wantsLayer = true
         // The document height changes whenever history is prepended or live

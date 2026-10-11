@@ -82,7 +82,11 @@ private struct ChatDetailFooter: View {
                     appearance: model.appearanceSettings.composerBarAppearance
                 )
             case .readable(canSend: true):
-                TypingIndicatorView(typingState: model.typingState, channelID: channel.id)
+                if model.messageAppearance(for: channel.id) == .bubbles {
+                    TypingBubbleIndicatorView(model: model, channel: channel)
+                } else {
+                    TypingIndicatorView(typingState: model.typingState, channelID: channel.id)
+                }
                 ComposerView(
                     model: model,
                     channelName: channel.name,

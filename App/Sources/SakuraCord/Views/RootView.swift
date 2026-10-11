@@ -201,7 +201,7 @@ private struct ChatRootView: View {
         @Bindable var model = model
         NavigationSplitView(columnVisibility: $columnVisibility) {
             HStack(spacing: 0) {
-                ServerRailContainer(model: model)
+                ServerRailContainer(model: model, sidebarWidth: sidebarWidth)
                 .zIndex(200)
                 ChannelSidebarView(
                     voiceModel: model,

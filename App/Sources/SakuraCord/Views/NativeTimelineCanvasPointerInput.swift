@@ -1306,7 +1306,8 @@ extension NativeTimelineCanvasView {
     }
 
     func actionCapsuleContains(_ point: CGPoint) -> Bool {
-        actionCapsuleHost?.frame.contains(point) == true
+        guard let host = actionCapsuleHost else { return false }
+        return (host.interactiveFrame ?? host.frame).contains(point)
     }
 
     func synchronizeHoveredRow(at point: CGPoint) {

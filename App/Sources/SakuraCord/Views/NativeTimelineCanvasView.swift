@@ -265,10 +265,10 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
         NativeTimelineBeginningSelectionOverlay()
     var spoilerRevealStore = NativeTimelineSpoilerRevealStore()
     var spoilerRevealObserverID: UUID?
-    var actionCapsuleHost: NSHostingView<AnyView>?
+    var actionCapsuleHost: NativeTimelineActionCapsuleHost?
     var actionCapsuleState: NativeTimelineActionCapsuleState?
     var actionCapsuleMessageID: MessageID?
-    var actionCapsuleSize: NSSize?
+    var actionCapsuleModifierMonitor: Any?
     let editing = NativeTimelineEditingSession()
     let messageProfilePopoverCoordinator =
         StableAnchoredPopoverPresenter<AnyView>.Coordinator()
@@ -449,6 +449,9 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
             )
             if let spoilerRevealObserverID {
                 spoilerRevealStore.removeObserver(spoilerRevealObserverID)
+            }
+            if let actionCapsuleModifierMonitor {
+                NSEvent.removeMonitor(actionCapsuleModifierMonitor)
             }
         }
     }

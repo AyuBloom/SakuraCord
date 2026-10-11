@@ -24,6 +24,9 @@ extension NativeTimelineCanvasView {
         {
             return
         }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            reconcileSendTransitions()
+        }
         if !permitsAnimatedMediaPlayback {
             NativeTimelineMediaStore.shared.cancelAnimatedRequests(owner: visibleMediaPinOwner)
         }

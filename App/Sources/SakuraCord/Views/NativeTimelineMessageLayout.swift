@@ -127,7 +127,7 @@ extension NativeTimelineRowLayout {
             horizontalInset = searchContext == nil
                 ? MessageRowLayoutMetrics.horizontalInset
                 : 22
-            let columnGap = MessageRowLayoutMetrics.avatarColumnGap + timestampGutterWidth - avatarWidth
+            let columnGap = MessageRowLayoutMetrics.columnGap(timestampGutterWidth: metrics.timestampGutterWidth)
             if isOutgoingBubble {
                 contentPresentation = NativeTimelineTextPresentation.outgoingBubble(contentPresentation)
             }
@@ -430,7 +430,7 @@ extension NativeTimelineRowLayout {
         private mutating func appendTextAndPoll() {
             bubbleStartY = verticalOffset
             if usesBubbles {
-                verticalOffset += InterfaceScale.metric(8)
+                verticalOffset += NativeTimelineBubbleLayout.verticalPadding
             }
 
             if message.forwardedSnapshot != nil {
@@ -803,7 +803,7 @@ extension NativeTimelineRowLayout {
             }
 
             if usesBubbles, hasRichContent {
-                verticalOffset += InterfaceScale.metric(8)
+                verticalOffset += NativeTimelineBubbleLayout.verticalPadding
                 let region = NativeTimelineBubbleLayout.region(
                     contentX: contentX,
                     contentWidth: contentWidth,

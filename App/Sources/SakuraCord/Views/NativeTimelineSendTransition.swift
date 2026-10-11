@@ -1155,6 +1155,10 @@ extension NativeMessageTimelineCoordinator {
                 by: shift(),
                 holdingFor: holdsForMessage ? NativeTimelineSendTransitionStore.lifetime : 0
             )
+        } else if preparation.bottomInsetChanged, preparation.wasNearBottom {
+            // Footer chrome such as the typing bubble resized under the
+            // newest rows. Glide them with it rather than jumping.
+            canvas.glideTranscript(by: shift())
         }
     }
 

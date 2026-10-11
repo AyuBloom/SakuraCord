@@ -112,6 +112,7 @@ extension AppModel {
         if previousBlocked != value.blockedOrIgnoredUserIDs { reconcileInboxEligibility() }
         if previousIgnored != relationships.ignoredUserIDs || previousBlocked != value.blockedOrIgnoredUserIDs {
             ignoredUsers.revealedMessageIDs = []
+            ignoredUsers.collapsingMessageIDs = []
             ignoredUsers.revealedProfileRequests = []
             timelinePresentationRevision &+= 1
             typingState.clearAll()

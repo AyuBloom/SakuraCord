@@ -123,9 +123,11 @@ extension NativeTimelineCanvasView {
         guard hoveredFooterAction != value else { return }
         let old = hoveredFooterAction
         hoveredFooterAction = value
-        for messageID in [old, value].compactMap({ $0?.messageID }) {
+        for target in [old, value].compactMap({ $0 }) {
+            // A revealed run's header shares its first row's message ID.
+            let header = NativeMessageTimelineItem.Identifier.suppressedMessages(target.messageID)
             guard let index = items.firstIndex(where: {
-                $0.messageID == messageID
+                target.kind == .suppressedToggle ? $0.identifier == header : $0.messageID == target.messageID
             }) else { continue }
             setNeedsDisplay(rowFrame(at: index))
         }
@@ -1098,7 +1100,8 @@ extension NativeTimelineCanvasView {
 
     func displayedRowOrigin(at index: Int) -> CGFloat {
         contentOriginY
-            + (index >= inboxDisclosureRange.upperBound ? inboxDisclosureShift : 0)
+            + (index >= disclosureRange.upperBound ? disclosureShiftAfter
+                : index < disclosureRange.lowerBound ? disclosureShiftBefore : 0)
             + NativeTimelineTransientRowGeometry.rowOrigin(
                 base: rowOrigins[index],
                 rowIndex: index,

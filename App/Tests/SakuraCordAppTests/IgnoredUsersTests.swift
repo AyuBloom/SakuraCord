@@ -28,10 +28,33 @@ struct IgnoredUsersTests {
         #expect(items().allSatisfy { $0.messageRow == nil })
         #expect(items().first(where: { $0.containsMessage(messages[1].id) })?.messageID == messages[0].id)
         #expect(model.messages.count == 2)
-        model.toggleIgnoredMessages(Array(messages.prefix(2)).map(\.id))
+        model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id))
         #expect(items().compactMap(\.messageRow).count == 2)
         #expect(items().compactMap(\.messageID) == Array(messages.prefix(2)).map(\.id))
         #expect(items().first(where: { $0.containsMessage(messages[1].id) })?.messageRow?.id == messages[1].id)
+        // An animated conceal holds the rows only until its motion finishes.
+        model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id), holdsCollapsingRows: true)
+        #expect(items().first?.messageID == messages[0].id)
+        #expect(items().compactMap(\.messageRow).count == 2)
+        model.finishCollapsingSuppressedMessages(Array(messages.prefix(2)).map(\.id))
+        #expect(items().count == 1)
+        // Dismissing a timeline during Hide must also release the held rows.
+        let scrollView = coordinator.makeScrollView()
+        let canvas = try #require(coordinator.canvas)
+        canvas.model = model
+        model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id))
+        model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id), holdsCollapsingRows: true)
+        canvas.rowDisclosure = .init(
+            key: .suppressedMessages(messages[0].id), isCollapsing: true, requestedUptime: 0,
+            heldMessageIDs: Array(messages.prefix(2)).map(\.id), startHeight: 100, revealedHeight: 50,
+            startBeforeShift: 0, targetBeforeShift: 100, beforeShift: 50
+        )
+        model.replaceSelectedMessages(with: messages)
+        #expect(items().compactMap(\.messageRow).map(\.id) == Array(messages.prefix(2)).map(\.id))
+        NativeMessageTimelineView.dismantleNSView(scrollView, coordinator: coordinator)
+        #expect(model.ignoredUsers.collapsingMessageIDs.isEmpty)
+        #expect(items().allSatisfy { $0.messageRow == nil })
+        model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id))
         model.replaceSelectedMessages(with: messages)
         #expect(items().compactMap(\.messageRow).count == 2)
         #expect(items().last?.containsMessage(messages[2].id) == true)
@@ -55,10 +78,12 @@ struct IgnoredUsersTests {
         let command = Message(id: .init(rawValue: 99302), channelID: .init(rawValue: 99303), author: bot, content: "Command response",
                               interactionMetadata: .init(user: author))
         #expect(model.isMessageSuppressed(command))
-        #expect(model.userMenuActions(for: author, context: .init()).contains { $0.id == "unignore" })
+        // Reversing actions take the slots of the actions they undo.
+        #expect(model.userMenuActions(for: author, context: .init()).filter { $0.group == .destructive }.map(\.id) == ["unignore", "block"])
         model.applyRelationships([Relationship(id: author.id, type: .blocked, user: author, isUserIgnored: true)])
         #expect(!model.isUserIgnored(author.id))
         #expect(!model.userMenuActions(for: author, context: .init()).contains { $0.id == "ignore" || $0.id == "unignore" })
+        #expect(model.userMenuActions(for: author, context: .init()).filter { $0.group == .destructive }.map(\.id) == ["unblock"])
         model.applyRelationships([])
         let stale = try #require(model.userMenuActions(for: author, context: .init()).first { $0.id == "ignore" })
         model.invalidateAccountSession()

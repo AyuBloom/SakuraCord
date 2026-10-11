@@ -21,6 +21,11 @@ struct UserMenuAction: Identifiable {
     let group: Group
     var isEnabled = true
     let perform: () -> Void
+
+    /// Reversing a relationship action shares its slot without its warning tint.
+    var isDestructive: Bool {
+        group == .destructive && !["ignore", "unignore", "unblock"].contains(id)
+    }
 }
 
 extension AppModel {
@@ -77,7 +82,7 @@ extension AppModel {
         if !isSelf, !isLocalIdentity, relationship?.type != .blocked {
             let location = context.ignoreLocation ?? (context.guildID != nil ? .guildChannel : .contextMenu)
             if relationship?.isIgnored == true {
-                add("unignore", "Unignore", "eye", .relationship, enabled: !pending) {
+                add("unignore", "Unignore", "eye", .destructive, enabled: !pending) {
                     $0.setUserIgnored(user, ignored: false, location: location)
                 }
             } else {
@@ -93,7 +98,9 @@ extension AppModel {
         add("copy-user-id", "Copy User ID", "number", .copy) { _ in ChannelContextMenuValue.copy(user.id.description) }
         return UserMenuAction.Group.allCases.flatMap { group in
             let grouped = actions.filter { $0.group == group }
-            return group == .destructive ? grouped.filter { $0.id != "block" } + grouped.filter { $0.id == "block" } : grouped
+            guard group == .destructive else { return grouped }
+            let blockIDs: Set = ["block", "unblock"]
+            return grouped.filter { !blockIDs.contains($0.id) } + grouped.filter { blockIDs.contains($0.id) }
         }
     }
 
@@ -138,12 +145,14 @@ extension AppModel {
                 model.friends.confirmation = .removeFriend(user)
             }
         case .blocked:
-            add("unblock", "Unblock", "hand.raised.slash", .relationship, !pending) { model in
+            break
+        }
+        if relationship?.type == .blocked {
+            add("unblock", "Unblock", "hand.raised.slash", .destructive, !pending) { model in
                 guard model.relationships.first(where: { $0.id == user.id })?.type == .blocked else { return }
                 model.removeRelationship(with: user, as: .unblock)
             }
-        }
-        if relationship?.type != .blocked {
+        } else {
             add("block", "Block…", "hand.raised", .destructive, !pending) { model in
                 guard model.relationships.first(where: { $0.id == user.id })?.type != .blocked else { return }
                 model.friends.confirmation = .block(user)

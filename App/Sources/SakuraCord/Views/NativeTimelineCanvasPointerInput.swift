@@ -67,8 +67,8 @@ extension NativeTimelineCanvasView {
             }
             if layouts.indices.contains(index) {
                 let rowOrigin = displayedRowOrigin(at: index)
-                if case .ignoredMessages = items[index] {
-                    addCursorRect(rowFrame(at: index), cursor: .pointingHand)
+                if let toggle = layouts[index].suppressedHeader?.toggleFrame {
+                    addCursorRect(toggle.offsetBy(dx: 0, dy: rowOrigin), cursor: .pointingHand)
                 }
                 if case let .loader(isLoading, _) = items[index],
                    !isLoading,
@@ -579,10 +579,14 @@ extension NativeTimelineCanvasView {
     private func footerActionPointerHit(at point: CGPoint) -> NativeTimelineFooterActionTarget? {
         guard let index = rowIndex(at: point.y),
               items.indices.contains(index),
-              layouts.indices.contains(index),
-              let messageID = items[index].messageID
+              layouts.indices.contains(index)
         else { return nil }
         let local = CGPoint(x: point.x, y: point.y - displayedRowOrigin(at: index))
+        if case let .suppressedMessages(group) = items[index] {
+            guard layouts[index].suppressedHeader?.toggleFrame.contains(local) == true else { return nil }
+            return .init(messageID: group.id, kind: .suppressedToggle)
+        }
+        guard let messageID = items[index].messageID else { return nil }
         if layouts[index].ephemeralRegion?.dismissFrame.contains(local) == true {
             return .init(messageID: messageID, kind: .ephemeralDismiss)
         }
@@ -737,8 +741,10 @@ extension NativeTimelineCanvasView {
             x: point.x,
             y: point.y - displayedRowOrigin(at: index)
         )
-        if case let .ignoredMessages(group) = item {
-            model?.toggleIgnoredMessages(group.messageIDs)
+        if case let .suppressedMessages(group) = item {
+            if layouts[index].suppressedHeader?.toggleFrame.contains(local) == true {
+                toggleSuppressedGroup(group)
+            }
             return
         }
         if case let .loader(isLoading, _) = item {
@@ -1509,8 +1515,9 @@ extension NativeTimelineCanvasView {
             x: point.x,
             y: point.y - displayedRowOrigin(at: index)
         )
-        if case let .ignoredMessages(group) = item {
-            return .ignoredMessages(group.messageIDs[0])
+        if case let .suppressedMessages(group) = item {
+            guard layout.suppressedHeader?.toggleFrame.contains(local) == true else { return nil }
+            return .suppressedMessages(group.id)
         }
         if case let .loader(isLoading, _) = item {
             guard !isLoading,

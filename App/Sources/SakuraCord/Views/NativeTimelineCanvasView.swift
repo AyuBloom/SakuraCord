@@ -237,12 +237,18 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
     var inboxEventHosts: [ScheduledEventID: NSHostingView<InboxScheduledEventView>] = [:]
     var inboxForumPostHosts: [ChannelID: NSHostingView<InboxForumPostView>] = [:]
     var inboxHeaderHosts: [ChannelID: NSHostingView<InboxGroupHeaderView>] = [:]
-    var inboxDisclosure: NativeTimelineInboxDisclosure?
-    var inboxDisclosureRange: Range<Int> = 0 ..< 0
-    var inboxDisclosureShift: CGFloat = 0
-    var inboxDisclosureClipMaxY = CGFloat.greatestFiniteMagnitude
-    var inboxDisclosureMaskedViews: [NSView] = []
-    let inboxDisclosureTicker = NativeTimelineDisplayLinkTicker()
+    var rowDisclosure: NativeTimelineRowDisclosure?
+    var disclosureRange: Range<Int> = 0 ..< 0
+    var disclosureShiftBefore: CGFloat = 0
+    var disclosureShiftAfter: CGFloat = 0
+    /// The visible span of the group's rows, relative to its first row, so a
+    /// content-origin change can never leave the clip behind the rows.
+    var disclosureRelativeClipMinY = -CGFloat.greatestFiniteMagnitude
+    var disclosureRelativeClipMaxY = CGFloat.greatestFiniteMagnitude
+    var disclosureMaskedViews: [NSView] = []
+    /// A header whose viewport position the next structural update keeps.
+    var pendingDisclosureScrollAnchor: NativeTimelineRowDisclosure.Key?
+    let disclosureTicker = NativeTimelineDisplayLinkTicker()
     var model: AppModel?
     var accessibilitySettingsSnapshot = AccessibilitySettingsSnapshot.defaults
     var presentedConversationID: ChannelID?
@@ -417,7 +423,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
             NSWorkspace.shared.notificationCenter.removeObserver(self)
             pollClockTask?.cancel()
             pollAnimationTicker.stop()
-            inboxDisclosureTicker.stop()
+            clearDisclosure(redraws: false)
             pollPopover?.close()
             mediaInvalidationTask?.cancel()
             visibleMediaRequestTask?.cancel()
@@ -489,6 +495,7 @@ enum NativeTimelineRowPainter {
         isForwardedSourceHovered: Bool = false,
         isEphemeralDismissHovered: Bool = false,
         isTranslationActionHovered: Bool = false,
+        isSuppressedToggleHovered: Bool = false,
         hidesMessageContent: Bool = false,
         hoveredReactionID: String? = nil,
         isAddReactionHovered: Bool = false,
@@ -528,17 +535,12 @@ enum NativeTimelineRowPainter {
             isHovered: isHovered
         )
         switch item {
-        case let .ignoredMessages(group):
+        case let .suppressedMessages(group):
             if let day = group.day, let frame = layout.daySeparatorFrame { dateSeparator(date: day, frame: frame) }
             if let frame = layout.unreadSeparatorFrame { newMessagesSeparator(frame: frame) }
-            let prefix = group.contextTitle.map { "\($0) · " } ?? ""
-            let text = "\(prefix)\(group.label) — \(group.isRevealed ? "Hide" : "Show")"
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.lineBreakMode = .byTruncatingTail
-            (text as NSString).draw(in: CGRect(x: InterfaceScale.metric(20), y: layout.height - InterfaceScale.metric(27),
-                                              width: max(0, rowFrame.width - InterfaceScale.metric(40)), height: InterfaceScale.metric(22)),
-                                   withAttributes: [.font: NSFont.systemFont(ofSize: InterfaceScale.metric(13)),
-                                                    .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: paragraph])
+            if let header = layout.suppressedHeader {
+                drawSuppressedHeader(group, layout: header, isToggleHovered: isSuppressedToggleHovered)
+            }
         case .inboxGroup, .inboxForumPost, .inboxEvent:
             break
         case let .beginning(beginning):
@@ -588,7 +590,7 @@ enum NativeTimelineRowPainter {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private static func drawStripedHighlight(
+    static func drawStripedHighlight(
         in frame: CGRect,
         color: NSColor,
         backgroundAlpha: CGFloat

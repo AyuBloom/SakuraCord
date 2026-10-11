@@ -232,7 +232,9 @@ final class TypingIndicator: NSView {
         static var ringWidth: CGFloat { InterfaceScale.metric(2) }
         static var countPadding: CGFloat { InterfaceScale.metric(4) }
         static var countFontSize: CGFloat { InterfaceScale.fontSize(10) }
-        static let avatarPixelDimension = 96
+        /// How long a new avatar waits for its picture before it shows its
+        /// placeholder instead.
+        static let pictureWait: Duration = .milliseconds(350)
     }
 
     static var height: CGFloat { TypingBubble.size.height + Metrics.bottomPadding }
@@ -249,7 +251,15 @@ final class TypingIndicator: NSView {
         let layer = CALayer()
         var typist: Typist?
         var showsFallback = false
+        /// A new avatar stays hidden while its picture loads.
+        var isWaitingForPicture = false
         var load: Task<Void, Never>?
+        var wait: Task<Void, Never>?
+
+        func cancelLoading() {
+            load?.cancel()
+            wait?.cancel()
+        }
     }
 
     private let content = CALayer()
@@ -260,6 +270,7 @@ final class TypingIndicator: NSView {
     /// The slots on screen, newest first, including departing ones until
     /// their exit finishes.
     private var order: [UserID] = []
+    private var appliedAvatarDiameter = Metrics.avatarDiameter
     private var state: State?
     private var isShown: Bool { state?.isTyping == true }
 
@@ -275,8 +286,7 @@ final class TypingIndicator: NSView {
         count.opacity = 0
         count.addSublayer(countText)
         countText.alignmentMode = .center
-        countText.font = NSFont.systemFont(ofSize: Metrics.countFontSize, weight: .semibold)
-        countText.fontSize = Metrics.countFontSize
+        updateCountFont()
         content.addSublayer(count)
         setAccessibilityElement(false)
         setAccessibilityRole(.staticText)
@@ -303,7 +313,27 @@ final class TypingIndicator: NSView {
         content.bounds = CGRect(x: 0, y: 0, width: Self.width, height: TypingBubble.size.height)
         content.position = CGPoint(x: 0, y: bounds.maxY - Metrics.bottomPadding)
         bubble.layOut()
+        if appliedAvatarDiameter != Metrics.avatarDiameter { resizeStack() }
         CATransaction.commit()
+    }
+
+    /// Interface Size changed: resize every avatar, ring, and the count,
+    /// then lay the stack out again.
+    private func resizeStack() {
+        appliedAvatarDiameter = Metrics.avatarDiameter
+        updateCountFont()
+        count.bounds = .zero
+        for slot in slots.values {
+            size(slot.layer)
+            slot.layer.mask = nil
+            if slot.showsFallback { showPlaceholder(in: slot, arrives: false) }
+        }
+        updateStack(state?.typists ?? [], animated: false)
+    }
+
+    private func updateCountFont() {
+        countText.font = NSFont.systemFont(ofSize: Metrics.countFontSize, weight: .semibold)
+        countText.fontSize = Metrics.countFontSize
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -409,7 +439,7 @@ final class TypingIndicator: NSView {
         opacity.fromValue = from
         opacity.toValue = to
         var animations: [CAAnimation] = [opacity]
-        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if !reducesMotion {
             let scale = CABasicAnimation(keyPath: "transform")
             scale.fromValue = Self.scale(max(from, minimumScale))
             scale.toValue = Self.scale(max(to, minimumScale))
@@ -429,7 +459,7 @@ final class TypingIndicator: NSView {
         let visibleIDs = Set(visible.map(\.id))
         for id in order where !visibleIDs.contains(id) {
             guard let slot = slots.removeValue(forKey: id) else { continue }
-            slot.load?.cancel()
+            slot.cancelLoading()
             if animated {
                 depart(slot.layer)
             } else {
@@ -438,70 +468,125 @@ final class TypingIndicator: NSView {
         }
         order = visible.map(\.id)
         for (index, typist) in visible.enumerated() {
-            let slot = slots[typist.id] ?? makeSlot(for: typist.id, animated: animated)
-            load(typist, into: slot)
+            let isNew = slots[typist.id] == nil
+            let slot = slots[typist.id] ?? makeSlot(for: typist.id)
+            load(typist, into: slot, arrives: isNew && animated)
             slot.layer.zPosition = CGFloat(visible.count - index)
-            if index == 0 {
-                slot.layer.mask = nil
-            } else if slot.layer.mask == nil {
-                let mask = cutout(width: Metrics.avatarDiameter)
-                slot.layer.mask = mask
-                // The ring opens as the avatar in front of it grows in.
-                if animated {
-                    let open = spring("path")
-                    open.fromValue = cutoutPath(width: Metrics.avatarDiameter, ringScale: 0)
-                    open.toValue = mask.path
-                    mask.add(open, forKey: "open")
-                }
-            }
             move(slot.layer, to: avatarPosition(at: index), animated: animated)
         }
+        updateRings(animated: animated)
         updateCount(typists.count - visible.count, after: visible.count, animated: animated)
+    }
+
+    /// Cuts a ring in each avatar where the one in front of it overlaps,
+    /// opening it as that avatar grows in.
+    private func updateRings(animated: Bool) {
+        for (index, id) in order.enumerated() {
+            guard let slot = slots[id] else { continue }
+            let isCovered = index > 0 && slots[order[index - 1]]?.isWaitingForPicture == false
+            guard isCovered else {
+                slot.layer.mask = nil
+                continue
+            }
+            guard slot.layer.mask == nil else { continue }
+            let mask = cutout(width: Metrics.avatarDiameter)
+            slot.layer.mask = mask
+            if animated, !reducesMotion {
+                let open = spring("path")
+                open.fromValue = cutoutPath(width: Metrics.avatarDiameter, ringScale: 0)
+                open.toValue = mask.path
+                mask.add(open, forKey: "open")
+            }
+        }
     }
 
     private func avatarPosition(at index: Int) -> CGPoint {
         CGPoint(x: Self.stackX + CGFloat(index) * Self.avatarStep, y: TypingBubble.bodyHeight / 2)
     }
 
-    private func makeSlot(for id: UserID, animated: Bool) -> AvatarSlot {
+    private func makeSlot(for id: UserID) -> AvatarSlot {
         let slot = AvatarSlot()
-        let diameter = Metrics.avatarDiameter
-        slot.layer.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+        size(slot.layer)
         slot.layer.anchorPoint = CGPoint(x: 0, y: 0.5)
         slot.layer.position = avatarPosition(at: 0)
-        slot.layer.cornerRadius = diameter / 2
         slot.layer.masksToBounds = true
         slot.layer.contentsGravity = .resizeAspectFill
         slot.layer.contentsScale = window?.backingScaleFactor ?? 2
         content.addSublayer(slot.layer)
         slots[id] = slot
-        if animated { arrive(slot.layer) }
         return slot
     }
 
-    private func load(_ typist: Typist, into slot: AvatarSlot) {
-        guard slot.typist?.avatarURL != typist.avatarURL || slot.layer.contents == nil else { return }
+    private func size(_ avatar: CALayer) {
+        let diameter = Metrics.avatarDiameter
+        avatar.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+        avatar.cornerRadius = diameter / 2
+    }
+
+    /// Shows the typist's picture. A new avatar whose picture still has to
+    /// load waits for it, briefly, so it grows in with its picture rather
+    /// than swapping a placeholder for it mid-animation.
+    private func load(_ typist: Typist, into slot: AvatarSlot, arrives: Bool) {
+        let previous = slot.typist
         slot.typist = typist
-        slot.load?.cancel()
-        let dimension = Metrics.avatarPixelDimension
-        if let url = typist.avatarURL,
-           let cached = SharedDecodedImageLoader.shared.cachedImage(for: url, maximumPixelDimension: dimension)
-        {
-            slot.layer.contents = cached
-            slot.showsFallback = false
+        guard previous == nil || previous?.avatarURL != typist.avatarURL else {
+            if slot.showsFallback, previous?.name != typist.name {
+                showPlaceholder(in: slot, arrives: false)
+            }
             return
         }
-        slot.layer.contents = fallbackImage(name: typist.name)
-        slot.showsFallback = true
-        guard let url = typist.avatarURL else { return }
-        slot.load = Task { @MainActor [weak slot] in
-            let image = await SharedDecodedImageLoader.shared.image(
-                for: url, maximumPixelDimension: dimension, priority: .visible
-            )
-            guard !Task.isCancelled, let slot, slot.typist?.avatarURL == url, let image else { return }
-            slot.layer.contents = image
-            slot.showsFallback = false
+        let isNew = previous == nil
+        slot.cancelLoading()
+        guard let url = typist.avatarURL else {
+            showPlaceholder(in: slot, arrives: arrives)
+            return
         }
+        // Share the timeline's decoded avatars, so anyone with a visible
+        // message shows their picture straight away.
+        let dimension = NativeTimelineMediaKey.avatarPixelDimension
+        if let cached = SharedDecodedImageLoader.shared.cachedImage(
+            for: url, maximumPixelDimension: dimension, preparesForTimeline: true
+        ) {
+            show(cached, in: slot, arrives: arrives)
+            return
+        }
+        if isNew {
+            slot.isWaitingForPicture = true
+            slot.layer.opacity = 0
+            slot.wait = Task { @MainActor [weak self, weak slot] in
+                try? await Task.sleep(for: Metrics.pictureWait)
+                guard !Task.isCancelled, let self, let slot else { return }
+                showPlaceholder(in: slot, arrives: true)
+            }
+        } else {
+            showPlaceholder(in: slot, arrives: false)
+        }
+        slot.load = Task { @MainActor [weak self, weak slot] in
+            let image = await SharedDecodedImageLoader.shared.image(
+                for: url, maximumPixelDimension: dimension, priority: .visible, preparesForTimeline: true
+            )
+            guard !Task.isCancelled, let self, let slot, slot.typist?.avatarURL == url, let image else { return }
+            show(image, in: slot, arrives: slot.isWaitingForPicture)
+        }
+    }
+
+    private func showPlaceholder(in slot: AvatarSlot, arrives: Bool) {
+        show(slot.typist.flatMap { fallbackImage(name: $0.name) }, in: slot, arrives: arrives, isPlaceholder: true)
+    }
+
+    private func show(_ image: CGImage?, in slot: AvatarSlot, arrives: Bool, isPlaceholder: Bool = false) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        slot.layer.contents = image
+        slot.showsFallback = isPlaceholder
+        if slot.isWaitingForPicture {
+            slot.isWaitingForPicture = false
+            slot.wait?.cancel()
+            slot.layer.opacity = 1
+            updateRings(animated: arrives)
+        }
+        if arrives, isShown { arrive(slot.layer) }
+        CATransaction.commit()
     }
 
     private static var fallbackImages: [String: CGImage] = [:]
@@ -512,7 +597,7 @@ final class TypingIndicator: NSView {
     }
 
     private static func fallbackImage(name: String, colorScheme: ColorScheme, scale: CGFloat) -> CGImage? {
-        let key = "\(name.prefix(1).uppercased())@\(scale)-\(colorScheme)"
+        let key = "\(name.prefix(1).uppercased())@\(scale)-\(colorScheme)-\(Metrics.avatarDiameter)"
         if let image = fallbackImages[key] { return image }
         let renderer = ImageRenderer(
             content: AvatarView(name: name, url: nil, size: Metrics.avatarDiameter)
@@ -581,6 +666,10 @@ final class TypingIndicator: NSView {
 
     // MARK: Avatar motion
 
+    private var reducesMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
     private static let springDuration: CFTimeInterval = 0.35
     private static let springBounce: CGFloat = 0.25
 
@@ -594,26 +683,28 @@ final class TypingIndicator: NSView {
     private func move(_ layer: CALayer, to position: CGPoint, animated: Bool) {
         let from = layer.presentation()?.position ?? layer.position
         layer.position = position
-        guard animated, from != position else { return }
+        guard animated, from != position, !reducesMotion else { return }
         let slide = spring("position")
         slide.fromValue = from
         slide.toValue = position
         layer.add(slide, forKey: "move")
     }
 
-    /// A new typist grows in beside the bubble.
+    /// A new typist grows in beside the bubble, or under Reduce Motion
+    /// fades in.
     private func arrive(_ layer: CALayer) {
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.duration = Self.springDuration
+        layer.add(fade, forKey: "arriveFade")
+        guard !reducesMotion else { return }
         let scale = spring("transform")
         var start = CATransform3DMakeTranslation(-Metrics.avatarDiameter / 2, 0, 0)
         start = CATransform3DScale(start, 0.3, 0.3, 1)
         scale.fromValue = start
         scale.toValue = CATransform3DIdentity
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = 0
-        fade.toValue = 1
-        fade.duration = Self.springDuration
         layer.add(scale, forKey: "arrive")
-        layer.add(fade, forKey: "arriveFade")
     }
 
     /// A flat scale, which stays affine so every renderer honours it.

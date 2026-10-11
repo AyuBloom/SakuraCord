@@ -456,6 +456,12 @@ extension NativeTimelineCanvasView {
         updateActionCapsuleInteractiveFrame()
     }
 
+    /// Modifier changes are not delivered while another app is active or a
+    /// menu is tracking, so re-read Shift when either ends.
+    @objc func synchronizeActionCapsuleShiftState() {
+        setActionCapsuleShiftHeld(MessageActionShiftPolicy.isActive(NSEvent.modifierFlags))
+    }
+
     /// The capsule's More button opens the same menu as a right click.
     func presentActionCapsuleMenu(forMessageID messageID: MessageID) {
         guard let host = actionCapsuleHost,
@@ -479,6 +485,7 @@ extension NativeTimelineCanvasView {
             ),
             in: self
         )
+        synchronizeActionCapsuleShiftState()
     }
 
     /// Keeps a shown capsule on the row's current message, such as after a

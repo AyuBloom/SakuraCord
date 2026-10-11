@@ -26,6 +26,8 @@ extension NativeMemberListCanvasView {
     }
 
     func cachedSectionHeaderLine(_ text: String, font: NSFont, color: NSColor) -> CTLine {
+        // Fresh dynamic providers can render the same color but compare unequal.
+        let color = color.usingColorSpace(.sRGB) ?? color
         let key = SectionHeaderLineKey(text: text, font: font, color: color)
         if let cached = sectionHeaderLines[key] { return cached }
         let result = Self.line(text, font: font, color: color)

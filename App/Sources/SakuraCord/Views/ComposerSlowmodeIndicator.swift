@@ -77,14 +77,16 @@ struct ComposerSlowmodeIndicator: View {
     }
 }
 
-/// Keep the countdown cadence, but stop scheduling updates at expiry.
+/// Keep the countdown cadence, then stop after delivering the expiry update.
 nonisolated struct ComposerSlowmodeTimelineSchedule: TimelineSchedule {
     let deadline: Date?
 
     func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
         guard let deadline, deadline > startDate else { return AnySequence([startDate]) }
         return AnySequence(sequence(first: startDate) { date in
-            date < deadline ? min(date.addingTimeInterval(0.25), deadline) : nil
+            if date < deadline { return min(date.addingTimeInterval(0.25), deadline) }
+            // TimelineView needs a following entry to render the deadline itself.
+            return date == deadline ? deadline.addingTimeInterval(0.25) : nil
         })
     }
 }

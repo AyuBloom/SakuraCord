@@ -1436,17 +1436,34 @@ extension NativeMessageTimelineCoordinator {
         func restore(_ anchor: VisibleAnchor) {
             guard let index = items.firstIndex(where: {
                 $0.containsMessage(anchor.messageID)
-            }), rowOrigins.indices.contains(index),
-            let scrollView
-            else { return }
+            }) else { return }
+            restoreRow(at: index, offsetFromViewportTop: anchor.offsetFromViewportTop)
+        }
+
+        func restoreRow(at index: Int, offsetFromViewportTop: CGFloat) {
+            guard rowOrigins.indices.contains(index), let scrollView else { return }
             scroll(
                 toDocumentY:
                     contentOriginY(
                         viewportHeight: scrollView.contentView.bounds.height
                     )
                     + rowOrigins[index]
-                    - anchor.offsetFromViewportTop,
+                    - offsetFromViewportTop,
                 scrollView: scrollView
+            )
+        }
+
+        /// Consumes the canvas's request, measured before rows change.
+        func resolvedDisclosureAnchor(
+            canvas: NativeTimelineCanvasView,
+            scrollView: NSScrollView
+        ) -> NativeTimelineRowDisclosure.ScrollAnchor? {
+            defer { canvas.pendingDisclosureScrollAnchor = nil }
+            guard let key = canvas.pendingDisclosureScrollAnchor,
+                  let index = canvas.disclosureHeaderIndex(for: key) else { return nil }
+            return .init(
+                key: key,
+                offsetFromViewportTop: canvas.displayedRowOrigin(at: index) - scrollView.contentView.bounds.minY
             )
         }
 

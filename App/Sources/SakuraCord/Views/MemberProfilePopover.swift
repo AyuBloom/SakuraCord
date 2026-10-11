@@ -39,23 +39,34 @@ struct ProfilePresentationContent<Footer: View>: View {
     var body: some View {
         if presentation.isLocalIdentity {
             CompactIdentityProfilePopover(user: presentation.member.user, isClyde: presentation.isClyde)
-        } else if let model, model.shouldGateIgnoredProfile(presentation) {
-            IgnoredProfileGate(model: model, presentation: presentation)
-                .frame(width: layout == .popover ? MemberProfilePopover<EmptyView>.preferredWidth : nil)
         } else {
-        MemberProfilePopover(
-            member: presentation.member,
-            isCurrentUser: presentation.isCurrentUser,
-            profile: presentation.profile,
-            isLoading: presentation.isLoading,
-            errorMessage: presentation.errorMessage,
-            layout: layout,
-            maximumPopoverHeight: maximumPopoverHeight,
-            showsRoles: showsRoles,
-            footer: footer,
-            openProfile: openProfile.map { action in { action(presentation) } },
-            userMenu: userMenu
-        )
+            let suppression = model?.profileSuppression(presentation)
+            // The profile stays mounted, collapsed and hidden, behind a
+            // blocked or ignored gate, so its media and theme are already
+            // resolved when the viewer reveals it.
+            ZStack(alignment: .top) {
+                MemberProfilePopover(
+                    member: presentation.member,
+                    isCurrentUser: presentation.isCurrentUser,
+                    profile: presentation.profile,
+                    isLoading: presentation.isLoading,
+                    errorMessage: presentation.errorMessage,
+                    layout: layout,
+                    maximumPopoverHeight: maximumPopoverHeight,
+                    showsRoles: showsRoles,
+                    footer: footer,
+                    openProfile: openProfile.map { action in { action(presentation) } },
+                    userMenu: userMenu
+                )
+                .frame(height: suppression == nil ? nil : 0, alignment: .top)
+                .clipped()
+                .opacity(suppression == nil ? 1 : 0)
+                .allowsHitTesting(suppression == nil)
+                .accessibilityHidden(suppression != nil)
+                if let model, let suppression {
+                    SuppressedProfileGate(model: model, presentation: presentation, reason: suppression, layout: layout)
+                }
+            }
         }
     }
 }

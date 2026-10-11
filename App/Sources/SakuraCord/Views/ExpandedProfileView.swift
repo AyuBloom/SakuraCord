@@ -15,8 +15,8 @@ struct ExpandedProfileView: View {
 
     var body: some View {
         Group {
-            if model.shouldGateIgnoredProfile(presentation) {
-                IgnoredProfileGate(model: model, presentation: presentation)
+            if let reason = model.profileSuppression(presentation) {
+                SuppressedProfileGate(model: model, presentation: presentation, reason: reason, layout: .expanded)
                     .overlay(alignment: .topTrailing) {
                         HoverCloseButton(help: "Close Profile", accessibilityIdentifier: "expanded-profile-close") { modal?() }
                             .padding(InterfaceScale.metric(10))

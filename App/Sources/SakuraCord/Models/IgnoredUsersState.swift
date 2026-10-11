@@ -2,8 +2,27 @@ import Foundation
 import Observation
 import SakuraCordModels
 
+/// Blocked and ignored content share one presentation; only copy and symbols differ.
 enum UserContentSuppression: String {
     case ignored, blocked
+
+    var systemImage: String {
+        switch self {
+        case .ignored: "eye.slash"
+        case .blocked: "nosign"
+        }
+    }
+
+    func countLabel(_ count: Int) -> String {
+        count == 1 ? "1 \(rawValue) message" : "\(count) \(rawValue) messages"
+    }
+
+    var replyPlaceholder: String {
+        switch self {
+        case .ignored: "Ignored message"
+        case .blocked: "Blocked message"
+        }
+    }
 }
 
 /// Reveals are local presentation state, never relationship mutations.
@@ -12,6 +31,8 @@ final class IgnoredUsersState {
     private(set) var ignoredUserIDs: Set<UserID> = []
     private(set) var blockedUserIDs: Set<UserID> = []
     var revealedMessageIDs: Set<MessageID> = []
+    /// Concealed rows that stay in the timeline until their closing motion ends.
+    var collapsingMessageIDs: Set<MessageID> = []
     var revealedProfileRequests: Set<UUID> = []
     var groupWarning: Channel?
     var dismissedGroupWarningIDs: Set<ChannelID> = []
@@ -27,6 +48,7 @@ final class IgnoredUsersState {
         ignoredUserIDs = []
         blockedUserIDs = []
         revealedMessageIDs = []
+        collapsingMessageIDs = []
         revealedProfileRequests = []
         groupWarning = nil
         dismissedGroupWarningIDs = []
@@ -72,11 +94,17 @@ extension AppModel {
         ignoredUsers.ignoredUserIDs.contains(userID)
     }
 
+    /// Blocking takes precedence over ignoring.
+    func userSuppressionReason(_ userID: UserID) -> UserContentSuppression? {
+        if ignoredUsers.blockedUserIDs.contains(userID) { return .blocked }
+        return isUserIgnored(userID) ? .ignored : nil
+    }
+
     func messageSuppressionReason(_ message: Message) -> UserContentSuppression? {
         let ids = [message.author.id] + (message.interactionMetadata?.user.map { [$0.id] } ?? [])
             + (message.type == .threadStarter ? message.replyPreview.map { [$0.author.id] } ?? [] : [])
-        if ids.contains(where: ignoredUsers.blockedUserIDs.contains) { return .blocked }
-        return ids.contains(where: isUserIgnored) ? .ignored : nil
+        let reasons = ids.compactMap(userSuppressionReason)
+        return reasons.contains(.blocked) ? .blocked : reasons.first
     }
 
     func isMessageSuppressed(_ message: Message) -> Bool {
@@ -88,18 +116,28 @@ extension AppModel {
         return !rings.isEmpty && rings.allSatisfy { isUserIgnored($0.senderID) || ignoredUsers.blockedUserIDs.contains($0.senderID) }
     }
 
-    func toggleIgnoredMessages(_ messageIDs: [MessageID]) {
+    /// Reveals or conceals a run. An animated conceal keeps the rows in the
+    /// timeline until `finishCollapsingSuppressedMessages` ends the motion.
+    func toggleSuppressedMessages(_ messageIDs: [MessageID], holdsCollapsingRows: Bool = false) {
         if messageIDs.allSatisfy(ignoredUsers.revealedMessageIDs.contains) {
             ignoredUsers.revealedMessageIDs.subtract(messageIDs)
+            if holdsCollapsingRows { ignoredUsers.collapsingMessageIDs.formUnion(messageIDs) }
         } else {
             ignoredUsers.revealedMessageIDs.formUnion(messageIDs)
+            ignoredUsers.collapsingMessageIDs.subtract(messageIDs)
         }
-        timelinePresentationRevision &+= 1
     }
 
-    func shouldGateIgnoredProfile(_ presentation: ProfilePresentationState) -> Bool {
-        isUserIgnored(presentation.member.id)
-            && !ignoredUsers.revealedProfileRequests.contains(presentation.id)
+    func finishCollapsingSuppressedMessages(_ messageIDs: [MessageID]) {
+        guard messageIDs.contains(where: ignoredUsers.collapsingMessageIDs.contains) else { return }
+        ignoredUsers.collapsingMessageIDs.subtract(messageIDs)
+    }
+
+    /// The reason a profile is withheld until the viewer asks to see it.
+    func profileSuppression(_ presentation: ProfilePresentationState) -> UserContentSuppression? {
+        guard !presentation.isCurrentUser,
+              !ignoredUsers.revealedProfileRequests.contains(presentation.id) else { return nil }
+        return userSuppressionReason(presentation.member.id)
     }
 
     func reconcileIgnoredVoiceParticipants(previous: [UserID: VoiceParticipantState] = [:]) {

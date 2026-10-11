@@ -47,14 +47,13 @@ nonisolated struct NativeMemberListPresentation: Equatable, Sendable {
     var interfaceScale = InterfaceScale.factor
     /// Member lists fade offline rows; a friends list does not.
     var dimsOfflineMembers = true
-    var ignoredUserIDs: Set<UserID> = []
     /// Rows such as pending friend requests that show no presence.
     var presenceHiddenUserIDs: Set<UserID> = []
     /// Space reserved for hover controls on wider people lists.
     var trailingAccessoryWidth: CGFloat = 0
 
     func opacity(for member: Member) -> CGFloat {
-        ignoredUserIDs.contains(member.id) || (dimsOfflineMembers && !member.isListedOnline) ? 0.55 : 1
+        dimsOfflineMembers && !member.isListedOnline ? 0.55 : 1
     }
 
     func status(for member: Member) -> PresenceStatus? {

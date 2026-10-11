@@ -162,22 +162,19 @@ private struct DirectMessageInboxRow: View {
                 animates: animatesAvatar,
                 isHovered: isHovered
             )
-            .opacity(dimsMutedConversation ? 0.3 : 1)
+            .opacity(suppression != nil ? 0.5 : dimsMutedConversation ? 0.3 : 1)
 
             VStack(alignment: .leading, spacing: InterfaceScale.metric(2)) {
                 Text(channel.name)
                     .accessibilityLabel(isMuted ? "\(channel.name), Muted" : channel.name)
                     .fontWeight(
-                        channel.unreadCount > 0 && !isMuted
+                        channel.unreadCount > 0 && !isMuted && suppression == nil
                             ? .semibold
                             : .regular
                     )
                     .foregroundStyle(nameColor)
                     .lineLimit(1)
-                if isIgnored {
-                    Label("Ignored", systemImage: "eye.slash")
-                        .font(.interface(.caption)).foregroundStyle(.secondary)
-                } else if let callStatus =
+                if suppression == nil, let callStatus =
                     DirectMessageInboxPolicy.callStatus(for: call)
                 {
                     Label(callStatus, systemImage: "bell.fill")
@@ -191,7 +188,7 @@ private struct DirectMessageInboxRow: View {
                         .foregroundStyle(.secondary)
                         .opacity(dimsMutedConversation ? 0.65 : 1)
                         .lineLimit(1)
-                } else if let secondaryText =
+                } else if suppression == nil, let secondaryText =
                     DirectMessageInboxPolicy.secondaryText(for: channel, member: member)
                 {
                     ProfileStatusTextView(
@@ -228,6 +225,12 @@ private struct DirectMessageInboxRow: View {
                     .fill(.primary)
                     .frame(width: InterfaceScale.metric(7), height: InterfaceScale.metric(7))
                     .accessibilityLabel("Unread")
+            }
+
+            if let suppression {
+                Image(systemName: suppression.systemImage)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
         }
         .contentShape(Rectangle())
@@ -283,8 +286,9 @@ private struct DirectMessageInboxRow: View {
         }
     }
 
-    private var isIgnored: Bool {
-        channel.kind == .directMessage && channel.recipients.first.map { model.isUserIgnored($0.id) } == true
+    private var suppression: UserContentSuppression? {
+        guard channel.kind == .directMessage, let recipient = channel.recipients.first else { return nil }
+        return model.userSuppressionReason(recipient.id)
     }
 
     private var isMuted: Bool {
@@ -292,17 +296,18 @@ private struct DirectMessageInboxRow: View {
     }
 
     private var dimsMutedConversation: Bool {
-        (isMuted || isIgnored) && model.selectedChannelID != channel.id
+        isMuted && !isSelected
     }
 
     private var nameColor: Color {
-        if model.selectedChannelID == channel.id { return .primary }
-        if isMuted || isIgnored { return .primary.opacity(0.3) }
+        if suppression != nil { return .primary.opacity(0.45) }
+        if isSelected { return .primary }
+        if isMuted { return .primary.opacity(0.3) }
         return channel.unreadCount > 0 ? .primary : .secondary
     }
 
     private var accessibilityValue: String {
-        var states: [String] = isIgnored ? ["Ignored"] : []
+        var states: [String] = suppression.map { [$0.rawValue.capitalized] } ?? []
         if channel.mentionCount > 0 {
             states.append(channel.mentionCount == 1
                 ? "1 unread mention"

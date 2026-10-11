@@ -26,7 +26,8 @@ Supported invite and discoverable-server join hCaptcha retains the original
 body/context and permits one replay after human completion on the same provider and Gateway session. Empty
 solutions, cancellation, account replacement, another challenge or ambiguous
 failure terminate that attempt. Unsupported/malformed challenges and account
-restrictions retain the session safety circuit. Widget test-token verification does not establish successful handling of a live
+restrictions report a join error without stopping unrelated account traffic.
+Widget test-token verification does not establish successful handling of a live
 join CAPTCHA.
 
 Onboarding invites can enter the native membership flow. Member screening and

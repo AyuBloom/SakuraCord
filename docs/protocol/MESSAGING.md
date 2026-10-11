@@ -116,8 +116,8 @@ omitted fields; non-personalized final `me_voted:false` values must not erase a
 known personal selection. Natural expiry and rendering send no expiry request.
 An explicit results read can repeat once if overlapping votes make its unversioned
 tally ambiguous; a second overlap reports failure rather than starting polling.
-Expected route-scoped poll errors stay local, while account restrictions retain
-the shared safety circuit.
+Poll rejections follow the shared operation-scoped error policy; they do not
+stop unrelated REST or Gateway traffic.
 
 ## Forums, threads and commands
 

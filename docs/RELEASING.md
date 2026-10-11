@@ -264,6 +264,48 @@ assets, or source.
 
 ## Publication and recovery
 
+### Quiet same-version hotfix
+
+A manual `CI` dispatch can rebuild the existing latest regular release without
+creating another GitHub Release or posting or editing a Discord announcement.
+Supply its existing `tag` and a full `hotfix_commit` SHA. The app retains the
+tag's public version; the CI run number becomes its newer internal build number.
+Normal tag releases and repairs keep their existing announcement behaviour.
+
+Prepare the hotfix from the regular release, backport only the reviewed fixes,
+and retain its original tag unchanged. The hotfix source must descend from that
+tag and already be present on `nightly`. Incorporate the hotfix into `main` and
+`nightly` without rewriting either branch, preserving the ancestry and atomic
+push requirements above. The current workflow/control scripts must include the
+hotfix support before dispatch:
+
+```sh
+: "${release_tag:?Set the existing latest regular tag}"
+: "${hotfix_commit:?Set the reviewed full hotfix commit SHA}"
+gh workflow run ci.yml --ref main \
+  -f tag="$release_tag" -f hotfix_commit="$hotfix_commit"
+```
+
+Hotfixes run full validation and signed packaging. Publication takes the normal
+Sparkle release lock and rechecks the latest release and build number. It adds
+an immutable `hotfix-build-N.dmg.backup` recovery copy and
+`hotfix-build-N.json` source/hash manifest, refreshes the canonical DMG used by
+the website and Homebrew, verifies the download, and replaces the signed
+appcast last. The first hotfix preserves the original DMG as a `.backup` asset.
+It does not edit the release
+title, body, tag, release-copy asset, or Discord checkpoint. The recovery copy
+uses a `.backup` suffix so download discovery still sees exactly one DMG.
+
+After publication, refresh the Homebrew cask checksum through its **Update
+cask** workflow and verify the public downloads and an installed stable app's
+update check. Cached original appcasts or Homebrew metadata can briefly refer
+to the previous canonical DMG checksum during replacement; signature failures
+must be retried after refreshing metadata, never bypassed. An already published
+build cannot be replaced: use a new dispatch for a new build, rather than
+rerunning that build.
+
+### Regular release recovery
+
 The workflow publishes Discord last. A Discord failure therefore leaves the
 verified GitHub Release intact, and a retry reuses the exact committed copy.
 Successful Discord delivery is checkpointed to prevent duplicate posts.

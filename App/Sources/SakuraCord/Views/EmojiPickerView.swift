@@ -261,6 +261,11 @@ nonisolated enum NativeEmojiSkinTone: String, CaseIterable, Identifiable, Sendab
     case mediumDark
     case dark
 
+    /// The picker's stored tone, shared by autocomplete and quick reactions.
+    static var preferred: NativeEmojiSkinTone {
+        NativeEmojiSkinTone(rawValue: PRBuildProfile.defaults.string(forKey: "emojiSkinTone") ?? "") ?? .standard
+    }
+
     var id: String {
         rawValue
     }
@@ -324,7 +329,7 @@ struct EmojiPickerView: View {
     @State private var visibleGuildLoadTask: Task<Void, Never>?
     @State private var emojiLockMessage: String?
     @FocusState private var keyboardNavigationIsFocused: Bool
-    @AppStorage("emojiSkinTone") private var skinToneRawValue = NativeEmojiSkinTone.standard.rawValue
+    @AppStorage("emojiSkinTone", store: PRBuildProfile.defaults) private var skinToneRawValue = NativeEmojiSkinTone.standard.rawValue
 
     init(
         model: AppModel,
@@ -1083,7 +1088,7 @@ final class EmojiPickerDocumentStore {
         // folding can reduce the displayed count without filling those slots.
         let candidates = discordFrequentlyUsed.filter {
             EmojiFrecencyKeys.value(for: $0) != nil || knownCustomIDs.contains($0)
-        }.prefix(42)
+        }.prefix(EmojiFrecencyKeys.frequentlyUsedCandidateLimit)
         let frequentItems = orderedItems(for: Array(candidates), in: allItems)
         showsFavorites = !favoriteItems.isEmpty
         showsFrequentlyUsed = !frequentItems.isEmpty

@@ -17,6 +17,7 @@ struct RootView: View {
                     model: model,
                     toolbarSearchFieldMetrics: toolbarSearchFieldMetrics
                 )
+                .modifier(FriendsActionPresentation(model: model))
                 .windowModal(
                     item: Binding(
                         get: { model.issueReports.presentation },
@@ -95,7 +96,8 @@ struct RootView: View {
             ZStack {
                 MessageSearchToolbarBridge(
                     model: model,
-                    isVisible: showsMessageSearchToolbar || (model.isBrowsingGuildChannels && !model.hasOpenGuildSupplementaryConversation),
+                    isVisible: showsMessageSearchToolbar || model.isFriendsSearchActive
+                        || (model.isBrowsingGuildChannels && !model.hasOpenGuildSupplementaryConversation),
                     metrics: $toolbarSearchFieldMetrics
                 )
                 ToolbarSearchFieldLoadingStyler(isActive: showsSessionLoadingChrome)
@@ -163,7 +165,8 @@ struct RootView: View {
     }
 
     private var messageSearchPrompt: Text {
-        Text(showsSessionLoadingChrome ? "" : (model.isBrowsingGuildChannels ? "Search Channels" : model.messageSearchPromptTitle))
+        Text(showsSessionLoadingChrome ? "" : model.isFriendsSearchActive ? "Search"
+            : (model.isBrowsingGuildChannels ? "Search Channels" : model.messageSearchPromptTitle))
     }
 
     private var showsSessionLoadingChrome: Bool {
@@ -394,8 +397,10 @@ private struct ChatRootView: View {
                 )
                 .interfaceScaleRoot()
                 .allowsHitTesting(false)
+                .transition(.opacity)
             }
         }
+        .animation(.smooth(duration: 0.22), value: showsFileDropEffect)
     }
 
     var body: some View {
@@ -506,6 +511,11 @@ private struct ChatRootView: View {
                 .interfaceScaleRoot()
             }
         }
+        .alert("Whoa there. Way too spicy!", isPresented: $model.isSendQueueFullAlertPresented) {
+            Button("Enter the chill zone") {}
+        } message: {
+            Text("You’re sending messages too quickly!")
+        }
         .alert("SakuraCord", isPresented: Binding(get: { model.errorMessage != nil }, set: {
             if !$0 {
                 model.dismissError()
@@ -576,21 +586,21 @@ private struct ChatRootView: View {
         ToolbarSpacer(.fixed, placement: .navigation)
 
         if !model.isSwitchingAccounts {
+            if model.isFriendsPresented {
+                FriendsToolbarSections(model: model)
+            }
             if model.guildWorkspacePage == .channelsAndRoles, model.featuresSettings.channelManagement,
                let guildID = model.selectedGuildID, model.hasCustomizationQuestions(in: guildID) {
-                ToolbarItemGroup(placement: .principal) {
-                    Toggle("Customize", systemImage: "slider.horizontal.3", isOn: Binding(
-                        get: { !model.isBrowsingGuildChannels },
-                        set: { if $0 { model.showGuildCustomizationChannels(false) } }
-                    ))
-                    .labelStyle(.titleAndIcon)
-                    .tint(SakuraCordAccentColor.color)
-                    Toggle("Browse Channels", systemImage: "list.bullet", isOn: Binding(
+                ToolbarItem(placement: .principal) {
+                    Picker("Channels & Roles", selection: Binding(
                         get: { model.isBrowsingGuildChannels },
-                        set: { if $0 { model.showGuildCustomizationChannels(true) } }
-                    ))
-                    .labelStyle(.titleAndIcon)
-                    .tint(SakuraCordAccentColor.color)
+                        set: { model.showGuildCustomizationChannels($0) }
+                    )) {
+                        Text("Customize").tag(false)
+                        Text("Browse Channels").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
             }
             if let presentation = supplementaryToolbarPresentation {
@@ -770,7 +780,7 @@ private struct ChatRootView: View {
         }
 
         if model.isSwitchingAccounts
-            || (model.guildWorkspacePage == nil && model.onboardingEntryGuildID == nil
+            || (model.guildWorkspacePage == nil && model.onboardingEntryGuildID == nil && !model.isFriendsPresented
                 && !hasOpenSupplementaryToolbarConversation && selectedVoiceChannel == nil)
         {
             if !model.isSwitchingAccounts {
@@ -988,6 +998,7 @@ private struct ChatRootView: View {
             return .init(title: page == .guide ? "Server Guide" : model.customizationTitle(in: model.selectedGuildID),
                          systemImage: page == .guide ? "signpost.right" : "slider.horizontal.3")
         }
+        if model.isFriendsPresented { return .init(title: "Friends", systemImage: "person.2.fill") }
         guard let channel = model.selectedChannel else { return nil }
         return .init(title: channel.name, systemImage: channelToolbarSymbol(channel),
                      subtitle: isDirectMessageSelected ? directMessageToolbarSubtitle(for: channel) : nil,
@@ -1164,18 +1175,33 @@ private struct MessageSearchToolbarBridge: View {
         @Bindable var model = model
         @Bindable var search = model.messageSearch
         @Bindable var onboarding = model.onboarding
-        let local = model.isBrowsingGuildChannels
+        @Bindable var friends = model.friends
+        let friendsSearch = model.isFriendsSearchActive
+        let local = friendsSearch || model.isBrowsingGuildChannels
         ToolbarSearchFieldGeometryReader(
-            searchText: local ? $onboarding.channelSearch : $model.messageSearchInputText,
+            searchText: friendsSearch ? $model.friendsSearchText : local ? $onboarding.channelSearch : $model.messageSearchInputText,
             searchTokens: local ? .constant([]) : $search.tokens,
-            isSearchFocused: local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
+            isSearchFocused: friendsSearch ? $friends.isSearchFocused
+                : local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
             isToolbarItemVisible: isVisible,
             preferredFieldWidth: ChatChromeMetrics.toolbarSearchMaximumFieldWidth,
             didUseBuiltInClear: {
-                if local { onboarding.channelSearch = "" } else { model.clearMessageSearchUsingBuiltInButton() }
+                if friendsSearch {
+                    model.friendsSearchText = ""
+                } else if local {
+                    onboarding.channelSearch = ""
+                } else {
+                    model.clearMessageSearchUsingBuiltInButton()
+                }
             },
             didEndEditing: {
-                if local { onboarding.isChannelSearchFocused = false } else { model.messageSearchEditingDidEnd() }
+                if friendsSearch {
+                    friends.isSearchFocused = false
+                } else if local {
+                    onboarding.isChannelSearchFocused = false
+                } else {
+                    model.messageSearchEditingDidEnd()
+                }
             },
             pasteCanonicalSyntax: { value in
                 if local { return .init(tokens: [], text: value) }
@@ -1199,12 +1225,15 @@ private struct MessageSearchToolbarModifier: ViewModifier {
         @Bindable var model = model
         @Bindable var search = search
         @Bindable var onboarding = model.onboarding
-        let local = model.isBrowsingGuildChannels
+        @Bindable var friends = model.friends
+        let friendsSearch = model.isFriendsSearchActive
+        let local = friendsSearch || model.isBrowsingGuildChannels
         content
             .searchable(
-                text: local ? $onboarding.channelSearch : $model.messageSearchInputText,
+                text: friendsSearch ? $model.friendsSearchText : local ? $onboarding.channelSearch : $model.messageSearchInputText,
                 tokens: local ? .constant([]) : $search.tokens,
-                isPresented: local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
+                isPresented: friendsSearch ? $friends.isSearchFocused
+                    : local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
                 placement: .toolbar,
                 prompt: prompt
             ) { token in
@@ -1217,6 +1246,7 @@ private struct MessageSearchToolbarModifier: ViewModifier {
 }
 
 private struct ComposerFileDropOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let model: AppModel
     let workspaceFrame: CGRect
     let supplementaryPaneFrame: CGRect
@@ -1246,6 +1276,7 @@ private struct ComposerFileDropOverlay: View {
                     )
                 }
             }
+            .animation(.smooth(duration: 0.22), value: hoveredDestination)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -1263,6 +1294,7 @@ private struct ComposerFileDropOverlay: View {
         if hoveredDestination == destination, model.isComposerDropEligible(destination) {
             ZStack {
                 Color.black.opacity(0.6)
+                    .transition(.opacity)
 
                 GlassEffectContainer(spacing: InterfaceScale.metric(14)) {
                     VStack(spacing: InterfaceScale.metric(18)) {
@@ -1273,6 +1305,7 @@ private struct ComposerFileDropOverlay: View {
                         .font(.interfaceSystem(size: 50, weight: .semibold))
                         .foregroundStyle(.primary)
                         .symbolEffect(.bounce, value: isInstantUpload)
+                        .symbolEffectsRemoved(reduceMotion)
 
                         Text(isInstantUpload ? "Upload directly to" : "Upload to")
                             .font(.interface(.title2).weight(.bold))
@@ -1330,8 +1363,12 @@ private struct ComposerFileDropOverlay: View {
                         in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(28), style: .continuous)
                     )
                     .padding(InterfaceScale.metric(24))
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: isInstantUpload)
                 }
+                // The card lifts toward the pointer as files come over it.
+                .transition(reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity))
             }
+            .transition(.opacity)
         } else {
             Color.clear
         }
@@ -1467,5 +1504,34 @@ private struct ChannelTopicPopover: View {
             .padding(InterfaceScale.metric(16))
             .frame(width: InterfaceScale.metric(320), alignment: .leading)
             .interfaceScaleRoot()
+    }
+}
+
+/// Friends categories use the same principal placement as Channels & Roles.
+private struct FriendsToolbarSections: ToolbarContent {
+    let model: AppModel
+
+    var body: some ToolbarContent {
+        ToolbarItem(id: "friends-categories", placement: .principal) {
+            Picker("Friends", selection: Binding(
+                get: { model.friendsSection },
+                set: { model.selectFriendsSection($0) }
+            )) {
+                ForEach(model.visibleFriendsSections, id: \.self) { section in
+                    Text(title(section)).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+    }
+
+    private func title(_ section: FriendsSection) -> String {
+        switch section {
+        case .online: "Online"
+        case .all: "All"
+        case .pending: model.incomingFriendRequestCount > 0 ? "Pending (\(model.incomingFriendRequestCount))" : "Pending"
+        case .addFriend: "Add Friend"
+        }
     }
 }

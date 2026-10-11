@@ -69,7 +69,7 @@ struct ServerRailContainer: View {
         .windowModal(item: Bindable(invites.creation).presentation, cornerRadius: InterfaceScale.metric(32), cornerStyle: .circular) {
             ServerInviteCreationView(model: model, presentation: $0)
         }
-        .modifier(ServerInviteCaptchaPresentation(store: invites.captcha))
+        .modifier(HumanCaptchaPresentation(store: invites.captcha))
         .alert("Leave \(invites.leaveConfirmation?.name ?? "Server")?",
                isPresented: Binding(get: { invites.leaveConfirmation != nil },
                                     set: { if !$0 { invites.leaveConfirmation = nil } }),
@@ -243,7 +243,7 @@ struct ServerRailView: View {
             }).first {
                 ServerFolderRailHeader(
                     entry: entry,
-                    isExpanded: UserDefaults.standard.bool(forKey: ServerFolderRailView.expansionKey(entry.folder.id)),
+                    isExpanded: PRBuildProfile.defaults.bool(forKey: ServerFolderRailView.expansionKey(entry.folder.id)),
                     contextMenuActions: contextMenuActions,
                     toggle: {}
                 )

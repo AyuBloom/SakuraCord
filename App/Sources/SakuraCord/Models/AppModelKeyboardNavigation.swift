@@ -20,21 +20,42 @@ extension AppModel {
     }
 
     func navigateShortcutServer(direction: Int) {
-        if let guildID = keyboardShortcutServerDestination(direction: direction) {
-            selectGuild(guildID)
+        switch keyboardShortcutServerDestination(direction: direction) {
+        case .directMessages: selectGuild(nil)
+        case .guild(let guildID): selectGuild(guildID)
+        case nil: break
         }
     }
 
-    func keyboardShortcutServerDestination(direction: Int) -> GuildID? {
-        let guildIDs = orderedNavigationGuildIDs
-        guard !guildIDs.isEmpty else { return nil }
-        let currentIndex = guildIDs.firstIndex { $0 == selectedGuildID }
-        let start = currentIndex ?? (direction > 0 ? -1 : 0)
-        let destination = guildIDs[(start + direction + guildIDs.count) % guildIDs.count]
-        return destination == selectedGuildID ? nil : destination
+    func keyboardShortcutServerDestination(direction: Int) -> ServerRailNavigationDestination? {
+        let destinations: [ServerRailNavigationDestination] = [.directMessages]
+            + orderedNavigationGuildIDs.map { .guild($0) }
+        let current = selectedGuildID.map { ServerRailNavigationDestination.guild($0) } ?? .directMessages
+        let start = destinations.firstIndex(of: current) ?? 0
+        let destination = destinations[(start + direction + destinations.count) % destinations.count]
+        return destination == current ? nil : destination
+    }
+
+    func keyboardShortcutDirectMessageDestination(direction: Int) -> DirectMessageSidebarSelection? {
+        let channels = DirectMessageInboxPolicy.conversations(in: visibleChannels, pinnedChannelIDs: pinnedDirectMessageIDs)
+            .filter { !hiddenChannelIDs.contains($0.id) && !checkingChannelIDs.contains($0.id) }
+        let destinations: [DirectMessageSidebarSelection] = [.friends] + channels.map { .channel($0.id) }
+        let current: DirectMessageSidebarSelection = isFriendsPresented ? .friends
+            : selectedChannelID.map { .channel($0) } ?? .friends
+        let start = destinations.firstIndex(of: current) ?? 0
+        let destination = destinations[(start + direction + destinations.count) % destinations.count]
+        return destination == current ? nil : destination
     }
 
     func navigateShortcutConversation(direction: Int, unreadOnly: Bool, mentionsOnly: Bool = false) {
+        if selectedGuildID == nil, !unreadOnly {
+            switch keyboardShortcutDirectMessageDestination(direction: direction) {
+            case .friends: openFriends()
+            case .channel(let channelID): navigate(to: channelID)
+            case nil: break
+            }
+            return
+        }
         if let channelID = keyboardShortcutConversationDestination(direction: direction, unreadOnly: unreadOnly, mentionsOnly: mentionsOnly) {
             navigate(to: channelID)
         }
@@ -73,6 +94,13 @@ extension AppModel {
     func hasKeyboardShortcutConversationDestination(unreadOnly: Bool, mentionsOnly: Bool = false) -> Bool {
         let selectedID = isThreadFullWidth ? openThread?.id : selectedChannelID
         if !unreadOnly {
+            if selectedGuildID == nil {
+                return !isFriendsPresented || visibleChannels.contains { channel in
+                    (channel.kind == .directMessage || channel.kind == .groupDirectMessage)
+                        && !hiddenChannelIDs.contains(channel.id)
+                        && !checkingChannelIDs.contains(channel.id)
+                }
+            }
             if visibleChannelGroups.contains(where: { group in
                 group.channels.contains { channel in
                     channel.guildID == selectedGuildID && channel.id != selectedID
@@ -143,12 +171,18 @@ extension AppModel {
 
     private func shortcutConversationChannels(acrossServers: Bool) -> [Channel] {
         guard acrossServers else {
+            if selectedGuildID == nil {
+                return DirectMessageInboxPolicy.conversations(in: visibleChannels, pinnedChannelIDs: pinnedDirectMessageIDs)
+            }
             return shortcutChannelsWithThreads(groups: visibleChannelGroups, guildID: selectedGuildID)
         }
         let channelsByGuild = Dictionary(grouping: snapshot?.channels ?? [], by: \.guildID)
         let scopes: [GuildID?] = [nil] + orderedNavigationGuildIDs.map { $0 }
         return scopes.flatMap { guildID in
-            shortcutChannelsWithThreads(
+            if guildID == nil {
+                return DirectMessageInboxPolicy.conversations(in: channelsByGuild[nil] ?? [], pinnedChannelIDs: pinnedDirectMessageIDs)
+            }
+            return shortcutChannelsWithThreads(
                 groups: ChannelGroup.make(from: channelsByGuild[guildID] ?? []), guildID: guildID
             )
         }

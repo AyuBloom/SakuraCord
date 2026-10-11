@@ -33,7 +33,7 @@ enum NativeTimelineBubbleLayout {
         model: AppModel?
     ) -> Context {
         let isEnabled =
-            model?.appearanceSettings.messageAppearance == .bubbles
+            model?.messageAppearance(for: message.channelID) == .bubbles
                 && !message.type.hasGeneratedContent
         // Standard message layout never consumes bubble identity. Avoid an
         // account-wide channel search for every newly paginated message.

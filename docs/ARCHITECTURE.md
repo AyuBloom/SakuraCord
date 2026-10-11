@@ -32,11 +32,19 @@ are mapped in [Testing](TESTING.md#choose-the-verification-boundary).
 | Send, retry, drafts | [MessageComposerState.swift](../App/Sources/SakuraCord/Models/MessageComposerState.swift); [AppModelOutgoing.swift](../App/Sources/SakuraCord/Models/AppModelOutgoing.swift) | [DiscordRESTProvider.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTProvider.swift) | [ComposerView.swift](../App/Sources/SakuraCord/Views/ComposerView.swift) |
 | History and rendering | [AppModelHistory.swift](../App/Sources/SakuraCord/Models/AppModelHistory.swift) | [History provider](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTProviderMessageHistory.swift); [MessageRendering](../Packages/MessageRendering/Sources) | [NativeMessageTimelineView.swift](../App/Sources/SakuraCord/Views/NativeMessageTimelineView.swift) |
 | Inbox and read state | [InboxState.swift](../App/Sources/SakuraCord/Models/InboxState.swift); [AccountReadStateModel.swift](../App/Sources/SakuraCord/Models/AccountReadStateModel.swift) | [DiscordRESTInbox.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTInbox.swift) | [InboxPopoverView.swift](../App/Sources/SakuraCord/Views/InboxPopoverView.swift) |
+| Friends and relationships | [FriendsState.swift](../App/Sources/SakuraCord/Models/FriendsState.swift); [AppModelFriends.swift](../App/Sources/SakuraCord/Models/AppModelFriends.swift) | [DiscordRESTRelationships.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTRelationships.swift) | [FriendsView.swift](../App/Sources/SakuraCord/Views/FriendsView.swift) |
 | Joining, onboarding, Guide | [AppModelOnboarding.swift](../App/Sources/SakuraCord/Models/AppModelOnboarding.swift); [AppModelGuildGuide.swift](../App/Sources/SakuraCord/Models/AppModelGuildGuide.swift) | [DiscordRESTOnboarding.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTOnboarding.swift); [DiscordRESTGuildGuide.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTGuildGuide.swift) | [GuildCustomizationView.swift](../App/Sources/SakuraCord/Views/GuildCustomizationView.swift) |
 | Profiles and account settings | [ProfileEditorState.swift](../App/Sources/SakuraCord/Models/Settings/ProfileEditorState.swift) | [DiscordRESTProfileSaving.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTProfileSaving.swift) | [ProfilesSettingsPage.swift](../App/Sources/SakuraCord/Views/Settings/ProfilesSettingsPage.swift) |
 | Attachment preparation | [AppModelComposerAttachments.swift](../App/Sources/SakuraCord/Models/AppModelComposerAttachments.swift) | [MediaPipeline](../Packages/MediaPipeline/Sources) | [AttachmentSettingsSection.swift](../App/Sources/SakuraCord/Views/Settings/AttachmentSettingsSection.swift) |
 | Bug reports and suggestions | [IssueReportStore.swift](../App/Sources/SakuraCord/Models/IssueReportStore.swift); [AppModelIssueReports.swift](../App/Sources/SakuraCord/Models/AppModelIssueReports.swift) | [IssueReportHubClient.swift](../App/Sources/SakuraCord/Services/IssueReportHubClient.swift) (sakuracord.app); [report-service sign-in](protocol/SESSION.md#report-service-sign-in) | [IssueReportView.swift](../App/Sources/SakuraCord/Views/IssueReport/IssueReportView.swift) |
 | Voice and screen sharing | [AppModelVoice.swift](../App/Sources/SakuraCord/Models/AppModelVoice.swift); [AppModelScreenSharing.swift](../App/Sources/SakuraCord/Models/AppModelScreenSharing.swift) | [DiscordVoiceSession.swift](../Packages/MediaPipeline/Sources/MediaPipeline/DiscordVoiceSession.swift) | [ScreenShareWindowOverlay.swift](../App/Sources/SakuraCord/Views/ScreenShareWindowOverlay.swift) |
+
+Friends uses the existing native member canvas for visible-row drawing, media
+reuse and accessibility. `FriendsState` sorts hydrated relationships when their
+records change, applies presence deltas by identity, and caches each category's
+search projection. `FriendsProjection` adapts those rows to the canvas; the
+provider remains authoritative for relationship metadata and mutations. These
+caches and request-note reveal state are session-scoped.
 
 ## Runtime and account lifetime
 
@@ -171,6 +179,24 @@ not start network work merely because a row redraws.
 | Media cache | Disposable LRU; shares the configured storage budget with drafts, which reserve space first and are never automatically evicted. |
 | Report drafts and report-service session | Session memory; drafts are discarded once filed, and both are cleared when the account changes. Attachments use the existing upload-privacy preparation and are read when attached. |
 | Diagnostics | Bounded memory and optional/specific disk output. See the single [retention and redaction contract](protocol/SESSION.md#diagnostics). |
+
+Pull request builds select an isolated preferences suite and account-database
+folder from the PR number in their packaged build identity before opening either
+store. No regular database is copied or migrated in place; updates within a PR
+retain that PR’s settings and drafts, while different PRs stay separate.
+Returning to Regular or Nightly reopens the original stores. Invalid preview identity metadata still selects an isolated
+profile. Keychain credentials remain shared deliberately. An empty preview
+profile seeds saved-account picker metadata and the preferred account once,
+without copying credentials or writing subsequent changes back. Update-track and
+recovery preferences also stay outside the per-PR profile. Disposable media
+and derived caches remain shared.
+
+Before the first switch into a pull request build, `PRBuildRecovery` asks for a
+folder and saves a signature-validated Regular or Nightly app there, outside the
+bundle Sparkle replaces. The retained app and Finder recovery instructions work
+without launching the experimental executable. Further switches from a preview
+require that saved recovery app to remain intact. Recovery copies are never
+automatically deleted.
 
 Clear Local Activity drains pending writes before removing derived caches and
 learning history. Existing live identities remain available; clearing history

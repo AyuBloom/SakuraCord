@@ -213,10 +213,17 @@ The tap's README owns its local checks and workflow setup.
 ## One-time Sparkle setup
 
 SakuraCord pins the `SakuraCordApp/Sparkle` fork at
-`2.9.6-sakuracord.2`, based on upstream Sparkle 2.9.6. The fork preserves
+`2.10.0-sakuracord.1`, based on upstream Sparkle 2.10.0. The fork preserves
 Sparkle's signed-feed, archive, bundle-identity, and installation verification.
-Its only behavioral change lets a currently installed build opt in to replacing
-itself with a signed update whose `CFBundleVersion` is lower. Packaging adds the
+Its explicit-version API installs the selected signed full archive even when
+its version is older or equal. Authorization lasts for one update operation;
+the installer authenticates the direct XPC caller against the installed host's
+running code identity and executable path before permitting replacement.
+Cancelled selections are not reused by ordinary update checks. SakuraCord
+binds the selected catalog entry to the signed feed's version and archive URL.
+
+The earlier installed-build downgrade opt-in remains for the existing
+Nightly-to-Regular flow. Packaging adds the
 `SUAllowsVersionDowngrades` opt-in only to Nightly builds so they can return to
 the Regular track; Regular builds retain upstream downgrade protection.
 
@@ -257,6 +264,48 @@ assets, or source.
 
 ## Publication and recovery
 
+### Quiet same-version hotfix
+
+A manual `CI` dispatch can rebuild the existing latest regular release without
+creating another GitHub Release or posting or editing a Discord announcement.
+Supply its existing `tag` and a full `hotfix_commit` SHA. The app retains the
+tag's public version; the CI run number becomes its newer internal build number.
+Normal tag releases and repairs keep their existing announcement behaviour.
+
+Prepare the hotfix from the regular release, backport only the reviewed fixes,
+and retain its original tag unchanged. The hotfix source must descend from that
+tag and already be present on `nightly`. Incorporate the hotfix into `main` and
+`nightly` without rewriting either branch, preserving the ancestry and atomic
+push requirements above. The current workflow/control scripts must include the
+hotfix support before dispatch:
+
+```sh
+: "${release_tag:?Set the existing latest regular tag}"
+: "${hotfix_commit:?Set the reviewed full hotfix commit SHA}"
+gh workflow run ci.yml --ref main \
+  -f tag="$release_tag" -f hotfix_commit="$hotfix_commit"
+```
+
+Hotfixes run full validation and signed packaging. Publication takes the normal
+Sparkle release lock and rechecks the latest release and build number. It adds
+an immutable `hotfix-build-N.dmg.backup` recovery copy and
+`hotfix-build-N.json` source/hash manifest, refreshes the canonical DMG used by
+the website and Homebrew, verifies the download, and replaces the signed
+appcast last. The first hotfix preserves the original DMG as a `.backup` asset.
+It does not edit the release
+title, body, tag, release-copy asset, or Discord checkpoint. The recovery copy
+uses a `.backup` suffix so download discovery still sees exactly one DMG.
+
+After publication, refresh the Homebrew cask checksum through its **Update
+cask** workflow and verify the public downloads and an installed stable app's
+update check. Cached original appcasts or Homebrew metadata can briefly refer
+to the previous canonical DMG checksum during replacement; signature failures
+must be retried after refreshing metadata, never bypassed. An already published
+build cannot be replaced: use a new dispatch for a new build, rather than
+rerunning that build.
+
+### Regular release recovery
+
 The workflow publishes Discord last. A Discord failure therefore leaves the
 verified GitHub Release intact, and a retry reuses the exact committed copy.
 Successful Discord delivery is checkpointed to prevent duplicate posts.
@@ -290,9 +339,13 @@ manual-download migration rather than weakening validation.
 PR CI packages the **debug** app with secure credentials, all resources and
 frameworks, an ad-hoc code signature, and a matching dSYM. The downloadable
 `pr-build-<run ID>-<attempt>` Actions artifact contains `SakuraCord.app.zip`,
-`SakuraCord.dSYM.zip`, and `build.json`; Actions retains it for 90 days. CI does
-not receive release-signing credentials. A failed test or packaging step cannot
-produce a published build.
+`SakuraCord.dSYM.zip`, and `build.json`; Actions retains it for 90 days. The app
+archive keeps that asset name but contains the debug identity,
+`SakuraCord Debug.app`. Publication validates with default-branch code, which
+also accepts archives made before that rename, so changes to the app name must
+reach `main` in the validator before PR builds use them. CI does not receive
+release-signing credentials. A failed test or packaging step cannot produce a
+published build.
 
 The separate `Publish PR build` workflow runs only trusted default-branch
 control code on an ephemeral hosted runner. It binds the artifact digest to the
@@ -351,9 +404,11 @@ switching protocol cannot be published into the catalog.
    Install the existing SakuraCord bot GitHub App on it with **Contents: write**.
    The publisher requests a short-lived token limited to that repository; no
    personal access token or source-repository write grant is needed.
-2. Set source-repository **variable** `SPARKLE_ED_PUBLIC_KEY` to the same public
-   key embedded in released apps. Fork builds must read this public value, so
-   using the secret alone is insufficient. Keep `SPARKLE_ED_PRIVATE_KEY` secret.
+2. Keep the public key in the PR packaging step of `.github/workflows/ci.yml`
+   equal to the key embedded in released apps. The workflow supplies it directly
+   because fork PR workflows cannot read repository variables. Set source-repository **variable**
+   `SPARKLE_ED_PUBLIC_KEY` to the same value for the trusted publisher's independent
+   archive verification. Keep `SPARKLE_ED_PRIVATE_KEY` secret.
    Existing `SAKURACORD_BOT_APP_ID` and `SAKURACORD_BOT_PRIVATE_KEY` supply the
    publisher's GitHub App credentials.
 3. Land the trusted publication workflow on `main` before relying on its

@@ -13,7 +13,7 @@ extension AppModel {
         guard sessionState == .workspace else { return }
         inbox.isPresented = true
         if !isOfflineTesting {
-            let preferences = UserDefaults.standard
+            let preferences = PRBuildProfile.defaults
             inbox.query = InboxMentionQuery(
                 guildID: preferences.bool(forKey: "dev.sakuracord.inbox-current-server") ? selectedGuildID : nil,
                 includesRoles: preferences.object(forKey: "dev.sakuracord.inbox-include-roles") as? Bool ?? true,
@@ -29,7 +29,7 @@ extension AppModel {
 
     func inboxMentionQueryDidChange() {
         if !isOfflineTesting {
-            let preferences = UserDefaults.standard
+            let preferences = PRBuildProfile.defaults
             if selectedChannel?.guildID != nil {
                 preferences.set(inbox.query.guildID != nil, forKey: "dev.sakuracord.inbox-current-server")
             }
@@ -103,8 +103,8 @@ extension AppModel {
             inbox.mentionsQuery = inbox.query
         }
         publishInbox()
-        // Retained mentions page further only as the user scrolls.
-        if inbox.tab == .unread || inbox.mentions.isEmpty || inbox.needsMentionRevalidation { loadMoreInbox() }
+        // Page past hidden mentions even when retained pages are nonempty.
+        if inbox.tab == .unread || inbox.visibleMentions.isEmpty || inbox.needsMentionRevalidation { loadMoreInbox() }
     }
 
     func retryInboxLoad() {
@@ -370,20 +370,20 @@ extension AppModel {
 
     private func acceptsLiveInboxMention(_ message: Message) -> Bool {
         !inbox.removedIDs.contains(message.id)
-            && snapshot?.blockedOrIgnoredUserIDs.contains(message.author.id) != true
             && readState.isInboxMention(message, query: inbox.query)
             && (inbox.query.guildID == nil || inbox.query.guildID == (message.guildID ?? readState.entries[message.channelID]?.guildID))
     }
 
     func reconcileInboxEligibility() {
+        refreshInboxMentionRestrictions()
         guard inbox.isPresented else { return }
         let eligible = Set(makeInboxUnreadGroups().map(\.id))
         inbox.groups.removeAll { !eligible.contains($0.id) }
         inbox.mentions.removeAll {
             readState.entries[$0.channelID]?.isAccessible == false
-                || snapshot?.blockedOrIgnoredUserIDs.contains($0.author.id) == true
         }
         publishInbox()
+        if inbox.tab == .mentions, inbox.visibleMentions.isEmpty { loadMoreInbox() }
     }
 
     func reconcileInboxReadState() {

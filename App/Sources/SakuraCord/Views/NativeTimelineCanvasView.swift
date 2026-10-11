@@ -237,12 +237,18 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
     var inboxEventHosts: [ScheduledEventID: NSHostingView<InboxScheduledEventView>] = [:]
     var inboxForumPostHosts: [ChannelID: NSHostingView<InboxForumPostView>] = [:]
     var inboxHeaderHosts: [ChannelID: NSHostingView<InboxGroupHeaderView>] = [:]
-    var inboxDisclosure: NativeTimelineInboxDisclosure?
-    var inboxDisclosureRange: Range<Int> = 0 ..< 0
-    var inboxDisclosureShift: CGFloat = 0
-    var inboxDisclosureClipMaxY = CGFloat.greatestFiniteMagnitude
-    var inboxDisclosureMaskedViews: [NSView] = []
-    let inboxDisclosureTicker = NativeTimelineDisplayLinkTicker()
+    var rowDisclosure: NativeTimelineRowDisclosure?
+    var disclosureRange: Range<Int> = 0 ..< 0
+    var disclosureShiftBefore: CGFloat = 0
+    var disclosureShiftAfter: CGFloat = 0
+    /// The visible span of the group's rows, relative to its first row, so a
+    /// content-origin change can never leave the clip behind the rows.
+    var disclosureRelativeClipMinY = -CGFloat.greatestFiniteMagnitude
+    var disclosureRelativeClipMaxY = CGFloat.greatestFiniteMagnitude
+    var disclosureMaskedViews: [NSView] = []
+    /// A header whose viewport position the next structural update keeps.
+    var pendingDisclosureScrollAnchor: NativeTimelineRowDisclosure.Key?
+    let disclosureTicker = NativeTimelineDisplayLinkTicker()
     var model: AppModel?
     var accessibilitySettingsSnapshot = AccessibilitySettingsSnapshot.defaults
     var presentedConversationID: ChannelID?
@@ -313,6 +319,11 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
         [LottieStickerOverlayKey: NativeTimelineLottieStickerOverlay] = [:]
     var animatedMediaOverlays:
         [AnimatedMediaOverlayKey: NativeTimelineAnimatedMediaOverlay] = [:]
+    var voiceMessageOverlay: NativeTimelineVoiceMessageOverlay?
+    var voiceMessageActiveMessageID: MessageID?
+    var voiceMessageSpeed: Float = 1
+    var voiceMessagePress: VoiceMessagePointerHit?
+    var hoveredVoiceMessage: VoiceMessageHover?
     struct ActivityIndicatorKey: Hashable {
         let row: NativeMessageTimelineItem.Identifier
         let index: Int
@@ -350,6 +361,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        pressureConfiguration = NSPressureConfiguration(pressureBehavior: .primaryDeepClick)
         postsFrameChangedNotifications = true
         wantsLayer = true
         // The document height changes whenever history is prepended or live
@@ -377,6 +389,8 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
                                        name: ComposerOverlayPointerRegion.changed, object: nil)
         notificationCenter.addObserver(self, selector: #selector(restoreInboxKeyboardFocus),
                                        name: NSApplication.didBecomeActiveNotification, object: nil)
+        notificationCenter.addObserver(self, selector: #selector(voiceMessagePlaybackDidChange(_:)),
+                                       name: VoiceMessagePlaybackStore.didChange, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(mediaPlaybackVisibilityDidChange(_:)),
@@ -410,7 +424,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
             NSWorkspace.shared.notificationCenter.removeObserver(self)
             pollClockTask?.cancel()
             pollAnimationTicker.stop()
-            inboxDisclosureTicker.stop()
+            clearDisclosure(redraws: false)
             pollPopover?.close()
             mediaInvalidationTask?.cancel()
             visibleMediaRequestTask?.cancel()
@@ -482,6 +496,7 @@ enum NativeTimelineRowPainter {
         isForwardedSourceHovered: Bool = false,
         isEphemeralDismissHovered: Bool = false,
         isTranslationActionHovered: Bool = false,
+        isSuppressedToggleHovered: Bool = false,
         hidesMessageContent: Bool = false,
         hoveredReactionID: String? = nil,
         isAddReactionHovered: Bool = false,
@@ -521,6 +536,12 @@ enum NativeTimelineRowPainter {
             isHovered: isHovered
         )
         switch item {
+        case let .suppressedMessages(group):
+            if let day = group.day, let frame = layout.daySeparatorFrame { dateSeparator(date: day, frame: frame) }
+            if let frame = layout.unreadSeparatorFrame { newMessagesSeparator(frame: frame) }
+            if let header = layout.suppressedHeader {
+                drawSuppressedHeader(group, layout: header, isToggleHovered: isSuppressedToggleHovered)
+            }
         case .inboxGroup, .inboxForumPost, .inboxEvent:
             break
         case let .beginning(beginning):
@@ -570,7 +591,7 @@ enum NativeTimelineRowPainter {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    private static func drawStripedHighlight(
+    static func drawStripedHighlight(
         in frame: CGRect,
         color: NSColor,
         backgroundAlpha: CGFloat

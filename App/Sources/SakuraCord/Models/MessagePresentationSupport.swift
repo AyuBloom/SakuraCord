@@ -72,6 +72,7 @@ struct NativeTimelineTextPlan: Equatable, Sendable {
     nonisolated static func make(
         for message: Message,
         currentUserID: UserID? = nil,
+        systemRecipient: User? = nil,
         systemActorColor: NSColor? = nil
     ) -> Self {
         let baseFontSize: CGFloat =
@@ -84,7 +85,8 @@ struct NativeTimelineTextPlan: Equatable, Sendable {
             if message.type.hasGeneratedContent {
                 SystemMessagePresentation.label(
                     for: message,
-                    currentUserID: currentUserID
+                    currentUserID: currentUserID,
+                    recipient: systemRecipient
                 )
             } else {
                 MessageEmbedPresentation.visibleMessageContent(
@@ -118,6 +120,7 @@ struct NativeTimelineTextPlan: Equatable, Sendable {
                 SystemMessagePresentation.attributedLabel(
                     for: message,
                     currentUserID: currentUserID,
+                    recipient: systemRecipient,
                     baseFontSize: baseFontSize,
                     actorColor: systemActorColor
                 )
@@ -844,12 +847,15 @@ nonisolated enum MessageGrouping {
         calendar: Calendar,
         continuationInterval: TimeInterval
     ) -> Bool {
-        isGroupable(previous)
+        // An unconfirmed local send always follows the row above it, but its
+        // local timestamp can trail a confirmation's server timestamp.
+        let interval = message.timestamp.timeIntervalSince(previous.timestamp)
+        return isGroupable(previous)
             && isGroupable(message)
             && sharesAuthorIdentity(previous, message)
             && message.replyTo == nil
-            && message.timestamp.timeIntervalSince(previous.timestamp) >= 0
-            && message.timestamp.timeIntervalSince(previous.timestamp) < continuationInterval
+            && (interval >= 0 || message.isUnconfirmedLocalSend)
+            && abs(interval) < continuationInterval
             && calendar.isDate(previous.timestamp, inSameDayAs: message.timestamp)
     }
 

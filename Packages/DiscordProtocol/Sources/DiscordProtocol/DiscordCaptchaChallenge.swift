@@ -37,7 +37,7 @@ public struct DiscordCaptchaChallenge: Equatable, Identifiable, Sendable {
     }
 
     /// A supported challenge on a route with an explicit human-completion
-    /// path. Unknown services and other routes keep the safety boundary.
+    /// path. Unknown services and other routes fail without replay.
     static func routeChallenge(data: Data, status: Int, method: String, path: String) -> Self? {
         guard status == 400, isJoinRoute(method: method, path: path) || isRelationshipRequestRoute(method: method, path: path),
               let payload = try? JSONDecoder().decode(Payload.self, from: data),

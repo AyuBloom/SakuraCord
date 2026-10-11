@@ -1193,6 +1193,10 @@ extension NativeTimelineCanvasView {
         let canDelete = model?.canDeleteMessage(row.message) == true
         let menu = NSMenu()
         menu.autoenablesItems = false
+        if let lookup = dictionaryLookupAction(at: point, usesSelection: true) {
+            menu.addItem(actionItem("Look Up", systemImage: "character.book.closed", action: lookup))
+            menu.addItem(.separator())
+        }
         var insertedFailedMediaActions = false
         for entry in NativeTimelineMessageMenuPolicy.entries(
             canEdit: canEdit,

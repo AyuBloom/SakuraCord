@@ -174,7 +174,17 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
         SettingsPreferenceRegistration(
             id: .messageAppearance,
             page: .interface,
-            storage: .appWide(key: "settings.appearance.messages"),
+            storage: .appWide(key: "settings.appearance.serverMessages"),
+            defaultValue: .string(MessageAppearance.defaultStyle.rawValue)
+        ),
+        SettingsPreferenceRegistration(
+            id: .directMessageAppearance, page: .interface,
+            storage: .appWide(key: "settings.appearance.directMessages"),
+            defaultValue: .string(MessageAppearance.defaultStyle.rawValue)
+        ),
+        SettingsPreferenceRegistration(
+            id: .groupMessageAppearance, page: .interface,
+            storage: .appWide(key: "settings.appearance.groupMessages"),
             defaultValue: .string(MessageAppearance.defaultStyle.rawValue)
         ),
         SettingsPreferenceRegistration(
@@ -538,6 +548,12 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
         ),
 
         SettingsPreferenceRegistration(
+            id: .accessibilityDisableSendAnimations,
+            page: .accessibility,
+            storage: .appWide(key: "settings.accessibility.disableMessageSendingAnimations"),
+            defaultValue: .bool(false)
+        ),
+        SettingsPreferenceRegistration(
             id: .accessibilityDisableOwnCosmetics,
             page: .accessibility,
             storage: .appWide(key: "settings.accessibility.disableOwnCosmetics"),
@@ -784,6 +800,15 @@ final class SettingsPreferenceStore {
             defaults.set(enabled ? RoleColorDisplay.inNames.rawValue : RoleColorDisplay.hidden.rawValue, forKey: roleKey)
         }
         defaults.removeObject(forKey: legacyRoleKey)
+        let legacyMessagesKey = "settings.appearance.messages"
+        if let raw = defaults.object(forKey: legacyMessagesKey) as? String,
+           MessageAppearance(rawValue: raw) != nil {
+            for id: SettingsControlID in [.messageAppearance, .directMessageAppearance, .groupMessageAppearance]
+                where !containsStoredValue(for: id) {
+                set(.string(raw), for: id)
+            }
+        }
+        defaults.removeObject(forKey: legacyMessagesKey)
         seedTrustedDomains()
     }
 

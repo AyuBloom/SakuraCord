@@ -39,6 +39,9 @@ func `timeline layout preparation commits a complete update or discards supersed
     scrollView.layoutSubtreeIfNeeded()
     coordinator.update(parent: timeline, scrollView: scrollView)
     coordinator.reconcileViewportGeometryForTesting()
+    // This fixture drives updates explicitly. AppKit notifications must not
+    // overwrite the completed update's cache statistics while it is awaited.
+    coordinator.stopObserving()
     let canvas = try #require(coordinator.canvas)
     canvas.suppressesHoverPresentation = true
 

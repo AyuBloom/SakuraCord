@@ -58,9 +58,9 @@ without a body and Gateway often arrives first, so responses never write records
 
 Each is one attempt. Code 80013 on accept asks the user to confirm; only that
 confirmation repeats it with `true`. Codes 80000–80007, 80013, 30002, 30059 and
-30078 show Discord's copy and stay operation-scoped; account restrictions such as
-40002 and 40068 keep the safety circuit. A 404 DELETE means another session
-already removed it. Bulk pending clears, game relationships and
+30078 show Discord's copy and stay operation-scoped. Account restrictions such as
+40002 and 40068 also fail the action without stopping unrelated traffic. A 404
+DELETE means another session already removed it. Bulk pending clears, game relationships and
 suggestions are not implemented.
 
 Add Friend trims, drops one leading `@` from an untagged name and accepts
@@ -89,7 +89,7 @@ accept or block route is presented for human completion. The identical request
 and context is replayed once with `X-Captcha-Key`, plus the original
 `captcha_rqtoken` and `captcha_session_id` as `X-Captcha-Rqtoken` and
 `X-Captcha-Session-Id`. Cancellation, an empty solution, an account change or a
-second challenge ends the attempt. Unknown services keep the safety circuit.
+second challenge ends the attempt. Unknown services fail the action without replay.
 hCaptcha uses its SDK; other services render their vendor's explicit widget in
 an ephemeral discord.com-origin web view that never receives credentials.
 Mocked transport tests cover every service; no live challenge has been served,

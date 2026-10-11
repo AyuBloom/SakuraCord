@@ -33,9 +33,13 @@ Development owns [launch and verification procedures](DEVELOPMENT.md).
 - Keep retries bounded. A lost mutation response does not establish that the
   server rejected the action. Reconcile through returned state/Gateway rather
   than replaying an ambiguous mutation automatically.
-- Permission/not-found errors remain operation-scoped when they do not indicate
-  an account/session failure. Authentication, restrictions, unsupported challenges
-  and malformed mutation responses retain the shared safety boundary.
+- Non-rate-limit REST rejections remain operation-scoped, including restrictions, unsupported
+  challenges, invalid mutation payloads and repeated not-found responses. Surface
+  the operation's error and keep unrelated REST/Gateway work available; do not
+  replay rejected mutations automatically. Only invalid authentication stops the
+  account session. Local event-delivery overflow still invalidates an incomplete
+  session projection. This is SakuraCord's recovery policy; wire contracts and
+  attempt budgets are unchanged.
 - Preserve typed snowflakes and unknown protobuf fields. Presentation order,
   cache presence and missing optional fields are not substitutes for permission
   checks or authoritative state.

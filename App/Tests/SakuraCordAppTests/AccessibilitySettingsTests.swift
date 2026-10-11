@@ -17,6 +17,7 @@ private final class VoiceOverAnnouncementTestState {
 
     var value = store.load()
     #expect(value == .defaults)
+    value.disablesMessageSendingAnimations = true
     value.disablesProfileEffects = true
     value.disablesNameplates = true
     value.disablesAvatarDecorations = true

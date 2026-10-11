@@ -267,10 +267,6 @@ struct RelationshipContractTests {
             .object(["confirm_stranger_request": .bool(false)]), .object(["confirm_stranger_request": .bool(true)]),
         ])
         #expect(await !provider.requestSafetyCircuitIsOpen)
-        // Account restrictions keep the shared safety boundary.
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: 40068, method: "POST", data: Data(), path: "/users/@me/relationships"))
-        #expect(!DiscordRESTProvider.isSafetyStop(status: 400, discordCode: 80007, method: "POST", data: Data(), path: "/users/@me/relationships"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: 80007, method: "POST", data: Data(), path: "/channels/1/messages"))
         await provider.disconnect()
     }
 
@@ -343,12 +339,6 @@ struct RelationshipContractTests {
         }
         #expect(fixture.requests.withLock { $0.count } == (outcome == "repeated" ? 2 : 1))
         #expect(await !provider.requestSafetyCircuitIsOpen)
-        // Unknown services and other routes keep the safety boundary.
-        let challenge = Data(RelationshipURLProtocol.challenge(service: "hcaptcha").utf8)
-        let unknown = Data(RelationshipURLProtocol.challenge(service: "unknown").utf8)
-        #expect(!DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "PUT", data: challenge, path: "/users/@me/relationships/2"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "POST", data: unknown, path: "/users/@me/relationships"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "PATCH", data: challenge, path: "/users/@me/relationships/2"))
         await provider.disconnect()
     }
 

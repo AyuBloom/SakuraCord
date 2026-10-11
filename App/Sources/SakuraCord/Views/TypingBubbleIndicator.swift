@@ -536,7 +536,16 @@ final class TypingIndicator: NSView {
             move(slot.layer, to: avatarPosition(at: index), animated: animated)
             load(typist, into: slot, arrives: isNew && animated)
         }
-        stack = joiningFront + stack + joiningBack
+        if animated {
+            stack = joiningFront + stack + joiningBack
+        } else {
+            // Channel replacement can reorder the same typists. Rebuild the
+            // drawing and masking order, discarding any departures in flight.
+            for slot in stack where !order.contains(where: { slots[$0] === slot }) {
+                remove(slot)
+            }
+            stack = order.compactMap { slots[$0] }
+        }
         restack()
         let countWidth = updateCount(typists.count - visible.count, after: visible.count, animated: animated)
         bubble.setBodyWidth(

@@ -442,7 +442,7 @@ private struct ThreadMessageTimelineView: View {
                     if let threadID = model.openThread?.id {
                         model.reportTimelineUserInteraction(channelID: threadID)
                     }
-                    requestScroll(.bottom)
+                    requestScroll(.bottom, glides: true)
                 } label: {
                     Label("New replies", systemImage: "arrow.down")
                         .font(.interface(.callout).weight(.semibold))
@@ -483,7 +483,7 @@ private struct ThreadMessageTimelineView: View {
                       $0.id == request.messageID
                   })
             else { return }
-            requestScroll(.message(request.messageID, anchor: .center))
+            requestScroll(.message(request.messageID, anchor: .center), glides: request.glides)
             highlight(request.messageID)
             model.completeMessageNavigation(requestID: request.requestID)
         }
@@ -496,7 +496,7 @@ private struct ThreadMessageTimelineView: View {
         }
         .onChange(of: model.threadReplyingTo?.id) { _, messageID in
             guard let messageID else { return }
-            requestScroll(.message(messageID, anchor: .center))
+            requestScroll(.message(messageID, anchor: .center), glides: true)
         }
         .onDisappear {
             if let conversationID {
@@ -564,7 +564,7 @@ private struct ThreadMessageTimelineView: View {
         guard model.threadMessages.contains(where: { $0.id == messageID }) else {
             return
         }
-        requestScroll(.message(messageID, anchor: .center))
+        requestScroll(.message(messageID, anchor: .center), glides: true)
     }
 
     private var unreadSummary: AccountReadStateModel.TimelineUnreadSummary? {
@@ -691,8 +691,8 @@ private struct ThreadMessageTimelineView: View {
         handleScrollState(state)
     }
 
-    private func requestScroll(_ target: MessageTimelineScrollRequest.Target) {
-        scrollRequest = MessageTimelineScrollRequest(target: target)
+    private func requestScroll(_ target: MessageTimelineScrollRequest.Target, glides: Bool = false) {
+        scrollRequest = MessageTimelineScrollRequest(target: target, isAnimated: glides)
     }
 
     private func highlight(_ messageID: MessageID) {

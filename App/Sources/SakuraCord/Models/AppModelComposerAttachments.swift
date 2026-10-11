@@ -128,11 +128,26 @@ extension AppModel {
         guard attachmentBatchFits(urls.count, besides: composerAttachments(for: destination).count) else {
             return true
         }
-        let acceptedURLs = await attachmentURLsWithinDiscordLimit(
+        guard !urls.isEmpty else { return true }
+        // Show the files at once. Their privacy preparation and size check
+        // can take a while, so it finishes behind the tiles, and anything it
+        // rejects leaves again. Uploading prepares each file afresh; until
+        // the check ends, the tiles only hold sending back.
+        let staged = urls.map { ForumPostAttachment(url: $0) }
+        let stagedIDs = Set(staged.map(\.id))
+        setComposerAttachments(composerAttachments(for: destination) + staged, for: destination)
+        composer.checkingAttachmentIDs.formUnion(stagedIDs)
+        defer { composer.checkingAttachmentIDs.subtract(stagedIDs) }
+        let acceptedURLs = Set(await attachmentURLsWithinDiscordLimit(
             urls,
             offeringExternalUploadFor: destination
-        )
-        return appendCheckedComposerAttachments(acceptedURLs, to: destination)
+        ))
+        let rejectedIDs = Set(staged.filter { !acceptedURLs.contains($0.url) }.map(\.id))
+        let current = composerAttachments(for: destination)
+        if current.contains(where: { rejectedIDs.contains($0.id) }) {
+            setComposerAttachments(current.filter { !rejectedIDs.contains($0.id) }, for: destination)
+        }
+        return true
     }
 
     @discardableResult

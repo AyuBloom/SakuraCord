@@ -54,6 +54,8 @@ struct MessageTimelineScrollRequest: Equatable {
 
     let id = UUID()
     let target: Target
+    /// Glides to a loaded target instead of cutting to it.
+    var isAnimated = false
 }
 
 struct MessageTimelineEditRequest: Equatable {

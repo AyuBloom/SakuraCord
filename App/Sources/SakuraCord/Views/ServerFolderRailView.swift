@@ -74,7 +74,9 @@ struct ServerFolderRailHeader: View {
     let isExpanded: Bool
     let contextMenuActions: ServerRailContextMenuActions
     let toggle: () -> Void
+    var loadsImageWhenOffscreen = false
     @State private var isHovering = false
+    @State private var iconIsVisible = false
 
     var body: some View {
         HStack(spacing: InterfaceScale.metric(5)) {
@@ -125,6 +127,7 @@ struct ServerFolderRailHeader: View {
         .anchorPreference(key: ServerRailHoverPreferenceKey.self, value: .bounds) { bounds in
             isHovering ? ServerRailHoverItem(name: displayName, bounds: bounds) : nil
         }
+        .onScrollVisibilityChange(threshold: 0.01) { iconIsVisible = $0 }
         .onModalHover { isHovering = $0 }
         .animation(.snappy(duration: 0.18), value: isHovering)
     }
@@ -152,7 +155,8 @@ struct ServerFolderRailHeader: View {
                 iconURL: guild.iconURL,
                 size: InterfaceScale.metric(18),
                 cornerRadius: InterfaceScale.metric(5),
-                animates: false
+                animates: false,
+                loadsImage: loadsImageWhenOffscreen || iconIsVisible
             )
         } else {
             Color.clear.frame(width: InterfaceScale.metric(18), height: InterfaceScale.metric(18))

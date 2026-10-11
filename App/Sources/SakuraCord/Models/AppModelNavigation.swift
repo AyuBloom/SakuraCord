@@ -335,6 +335,8 @@ extension AppModel {
         messageID: MessageID?,
         session: AppModelAccountSession
     ) async {
+        let wasShowingMessage = openThread?.id == post.id
+            && threadMessages.contains(where: { $0.id == messageID })
         if initialMessages.isEmpty {
             open(post)
         } else {
@@ -388,7 +390,8 @@ extension AppModel {
         messageNavigationRequest = MessageNavigationRequest(
             requestID: messageNavigationRequestID,
             channelID: post.id,
-            messageID: messageID
+            messageID: messageID,
+            glides: wasShowingMessage
         )
     }
 
@@ -406,6 +409,8 @@ extension AppModel {
                 errorMessage = "That message's channel has not been discovered yet."
                 return
             }
+            let wasShowingMessage = selectedChannelID == channel.id
+                && messages.contains(where: { $0.id == messageID })
             if selectedChannelID != channel.id {
                 selectedChannelID = channel.id
             }
@@ -453,7 +458,8 @@ extension AppModel {
             messageNavigationRequest = MessageNavigationRequest(
                 requestID: messageNavigationRequestID,
                 channelID: channel.id,
-                messageID: messageID
+                messageID: messageID,
+                glides: wasShowingMessage
             )
         }
     }

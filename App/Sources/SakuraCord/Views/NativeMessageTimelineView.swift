@@ -8,9 +8,11 @@ private final class NativeTimelineInputShieldScrollView: NSScrollView {
     let inputPerformanceProbe = ScrollInputPerformanceProbe(
         surface: .timeline
     )
+    var onScrollWheel: (() -> Void)?
 
     override func scrollWheel(with event: NSEvent) {
         guard WindowModalCoordinator.allowsInput(for: self) else { return }
+        onScrollWheel?()
         super.scrollWheel(with: event)
     }
 }
@@ -301,6 +303,7 @@ final class NativeMessageTimelineCoordinator: NSObject {
         var layoutPreparationTask: Task<Void, Never>?
         var layoutPreparation: LayoutPreparation?
         var scrollIdleTask: Task<Void, Never>?
+        var activeGlide: NativeTimelineGlideScroll?
         var lastScrollActivityUptime = 0.0
         var widthRelayoutTask: Task<Void, Never>?
         var pendingLayoutWidth: CGFloat?
@@ -339,6 +342,8 @@ extension NativeMessageTimelineCoordinator {
 
             let scrollView = NativeTimelineInputShieldScrollView()
             scrollView.inputPerformanceProbe.install(on: scrollView)
+            // The reader's own scrolling always wins over a jump's glide.
+            scrollView.onScrollWheel = { [weak self] in self?.cancelGlide() }
             scrollView.documentView = documentView
             scrollView.drawsBackground = false
             scrollView.borderType = .noBorder
@@ -937,6 +942,7 @@ extension NativeMessageTimelineCoordinator {
         }
 
         func stopObserving() {
+            cancelGlide()
             cancelLayoutPreparation()
             pendingModelRowsUpdateTask?.cancel()
             pendingModelRowsUpdateTask = nil

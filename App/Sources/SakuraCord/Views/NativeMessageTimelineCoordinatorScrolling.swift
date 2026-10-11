@@ -1286,6 +1286,7 @@ extension NativeMessageTimelineCoordinator {
                     interval
                 )
             }
+            cancelGlide()
             canvas?.dismissHoverPresentationForScroll()
             noteScrollActivity()
             isEarlierHistoryScrollGestureActive = true
@@ -1527,9 +1528,13 @@ extension NativeMessageTimelineCoordinator {
                   request.id != lastScrollRequestID,
                   let scrollView
             else { return }
-            guard scroll(to: request.target, in: scrollView) else {
-                return
-            }
+            let glides = request.isAnimated
+                && initialPositionConversation == parent.conversation
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            let didScroll = glides
+                ? glide(to: request.target, in: scrollView)
+                : scroll(to: request.target, in: scrollView)
+            guard didScroll else { return }
             lastScrollRequestID = request.id
         }
 
@@ -1538,33 +1543,59 @@ extension NativeMessageTimelineCoordinator {
             to target: MessageTimelineScrollRequest.Target,
             in scrollView: NSScrollView
         ) -> Bool {
+            guard let targetY = documentY(for: target, in: scrollView) else {
+                return false
+            }
+            cancelGlide()
+            scroll(toDocumentY: targetY, scrollView: scrollView)
+            return true
+        }
+
+        /// Where the clip view's origin rests for `target`, or `nil` while
+        /// its row is not laid out.
+        func documentY(
+            for target: MessageTimelineScrollRequest.Target,
+            in scrollView: NSScrollView
+        ) -> CGFloat? {
             let viewportHeight = scrollView.contentView.bounds.height
+            let proposedY: CGFloat
             switch target {
             case .top:
-                scroll(toDocumentY: 0, scrollView: scrollView)
+                proposedY = 0
             case .bottom:
-                scroll(toDocumentY: .greatestFiniteMagnitude, scrollView: scrollView)
+                proposedY = .greatestFiniteMagnitude
             case let .message(messageID, anchor):
                 guard let index = items.firstIndex(where: {
                     $0.containsMessage(messageID)
-                }) else { return false }
+                }), rowOrigins.indices.contains(index), layouts.indices.contains(index)
+                else { return nil }
                 let rowY =
                     contentOriginY(viewportHeight: viewportHeight)
                     + rowOrigins[index]
                 let rowHeight = layouts[index].height
-                scroll(
-                    toDocumentY:
-                        rowY - (viewportHeight - rowHeight) * anchor.y,
-                    scrollView: scrollView
-                )
+                proposedY = rowY - (viewportHeight - rowHeight) * anchor.y
             }
-            return true
+            return clampedDocumentY(proposedY, scrollView: scrollView)
         }
 
         func scroll(
             toDocumentY targetY: CGFloat,
             scrollView: NSScrollView
         ) {
+            scrollView.contentView.scroll(
+                to: NSPoint(
+                    x: 0,
+                    y: clampedDocumentY(targetY, scrollView: scrollView)
+                )
+            )
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            positionViewportCanvas()
+        }
+
+        func clampedDocumentY(
+            _ targetY: CGFloat,
+            scrollView: NSScrollView
+        ) -> CGFloat {
             let clampedY = NativeMessageTimelineLayoutPolicy.clampedDocumentY(
                 proposedY: targetY,
                 contentHeight: scrollableDocumentHeight,
@@ -1590,14 +1621,7 @@ extension NativeMessageTimelineCoordinator {
                         scrollableDocumentHeight
                             - scrollView.contentView.bounds.height
                     )
-            scrollView.contentView.scroll(
-                to: NSPoint(
-                    x: 0,
-                    y: min(maximumY, max(minimumY, clampedY))
-                )
-            )
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-            positionViewportCanvas()
+            return min(maximumY, max(minimumY, clampedY))
         }
 
         func reportScrollState(force: Bool = false) {

@@ -3,11 +3,17 @@ import Foundation
 nonisolated extension SettingsCatalog {
     static let accessibilityPage = page(
         .accessibility, group: .preferences, title: "Accessibility", image: "accessibility",
-        help: "Choose cosmetic, link, role colour, and VoiceOver preferences.",
+        help: "Choose motion, cosmetic, link, role colour, and VoiceOver preferences.",
         keywords: ["cosmetics", "profiles", "VoiceOver", "links", "role colors"]
     )
 
     static let accessibilityControls: [SettingsControlMetadata] = [
+        control(
+            .accessibilityDisableSendAnimations, page: .accessibility,
+            section: .accessibilityMotion, label: "Disable message sending animations",
+            help: "Show sent messages immediately in both bubble and normal appearance. macOS Reduce Motion also disables these animations.",
+            keywords: ["motion", "send", "animation", "bubbles", "attachments"], scope: .appWideLocal
+        ),
         control(
             .accessibilityDisableProfileEffects, page: .accessibility,
             section: .accessibilityCosmetics, label: "Profile effects",

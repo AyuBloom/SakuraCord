@@ -1246,6 +1246,7 @@ private struct MessageSearchToolbarModifier: ViewModifier {
 }
 
 private struct ComposerFileDropOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let model: AppModel
     let workspaceFrame: CGRect
     let supplementaryPaneFrame: CGRect
@@ -1304,6 +1305,7 @@ private struct ComposerFileDropOverlay: View {
                         .font(.interfaceSystem(size: 50, weight: .semibold))
                         .foregroundStyle(.primary)
                         .symbolEffect(.bounce, value: isInstantUpload)
+                        .symbolEffectsRemoved(reduceMotion)
 
                         Text(isInstantUpload ? "Upload directly to" : "Upload to")
                             .font(.interface(.title2).weight(.bold))
@@ -1361,10 +1363,10 @@ private struct ComposerFileDropOverlay: View {
                         in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(28), style: .continuous)
                     )
                     .padding(InterfaceScale.metric(24))
-                    .animation(.snappy(duration: 0.25), value: isInstantUpload)
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: isInstantUpload)
                 }
                 // The card lifts toward the pointer as files come over it.
-                .transition(.scale(scale: 0.9).combined(with: .opacity))
+                .transition(reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity))
             }
             .transition(.opacity)
         } else {

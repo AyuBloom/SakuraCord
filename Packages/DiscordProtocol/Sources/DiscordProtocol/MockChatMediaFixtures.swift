@@ -64,13 +64,18 @@ enum MockChatMediaFixtures {
         let properties = CGImageSourceCreateWithURL(destination as CFURL, nil).flatMap {
             CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [CFString: Any]
         }
+        let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue
+        let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue
+        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        // The decoder rotates these orientations by a quarter turn.
+        let swapsDimensions = (5 ... 8).contains(orientation)
         return Attachment(
             id: "\(messageID)-\(index)",
             filename: filename,
             url: destination,
             mediaType: mediaType,
-            width: (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
-            height: (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+            width: swapsDimensions ? height : width,
+            height: swapsDimensions ? width : height,
             size: values.fileSize ?? 0
         )
     }

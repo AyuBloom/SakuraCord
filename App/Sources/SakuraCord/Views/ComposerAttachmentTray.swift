@@ -103,6 +103,7 @@ private struct ComposerAttachmentTile: View {
     let edit: (UUID) -> Void
     let remove: (UUID) -> Void
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var tileSize: CGFloat { ComposerAttachmentTray.tileSize }
     private var filenameRowHeight: CGFloat { ComposerAttachmentTray.filenameRowHeight }
@@ -166,7 +167,7 @@ private struct ComposerAttachmentTile: View {
             if isChecking {
                 ProgressView()
                     .controlSize(.mini)
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.5).combined(with: .opacity))
             }
         }
         .padding(.horizontal, InterfaceScale.metric(14))
@@ -218,7 +219,7 @@ private struct ComposerAttachmentTile: View {
                 actions
                     .padding(InterfaceScale.metric(7))
                     .transition(
-                        .scale(scale: 0.7, anchor: .topTrailing)
+                        reduceMotion ? .opacity : .scale(scale: 0.7, anchor: .topTrailing)
                             .combined(with: .opacity)
                     )
             }
@@ -240,7 +241,7 @@ private struct ComposerAttachmentTile: View {
             ) {
                 toggleSpoiler(attachment.id)
             }
-            .contentTransition(.symbolEffect(.replace))
+            .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
             if anonymisesFileNames {
                 HoverActionButton(
                     systemImage: "shuffle",

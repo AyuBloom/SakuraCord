@@ -12,6 +12,7 @@ struct LocalAttachmentThumbnail: View {
     var imageCornerRadius: CGFloat = 0
     var onImageLoaded: ((NSImage) -> Void)?
     @State private var image: NSImage?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -31,7 +32,7 @@ struct LocalAttachmentThumbnail: View {
                 .clipShape(
                     ConcentricRectangle(cornerRadius: imageCornerRadius, style: .continuous)
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
                 if isVideoFile {
                     Image(systemName: "play.fill")
                         .font(.interfaceSystem(size: 14, weight: .semibold))

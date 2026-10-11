@@ -206,14 +206,18 @@ nonisolated enum OptimisticAttachmentPresentation {
         let properties = source.flatMap {
             CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [CFString: Any]
         }
+        let width = (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue
+        let height = (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue
+        let orientation = (properties?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        let swapsDimensions = (5 ... 8).contains(orientation)
         let resourceValues = try? url.resourceValues(forKeys: [.fileSizeKey])
         return Attachment(
             id: id ?? "pending-\(index)",
             filename: url.lastPathComponent,
             url: url,
             mediaType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType,
-            width: (properties?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
-            height: (properties?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+            width: swapsDimensions ? height : width,
+            height: swapsDimensions ? width : height,
             size: resourceValues?.fileSize ?? 0
         )
     }

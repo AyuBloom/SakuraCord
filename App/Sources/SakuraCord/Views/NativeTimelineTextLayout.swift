@@ -137,7 +137,7 @@ enum NativeTimelineTextPresentation {
         }
 
         let preservesCompactSystemStyle = message.type.hasGeneratedContent
-            && model?.appearanceSettings.messageAppearance != .bubbles
+            && model?.messageAppearance(for: message.channelID) != .bubbles
         let resolvedBaseFontSize = InterfaceScale.fontSize(
             preservesCompactSystemStyle
                 ? plan.baseFontSize

@@ -17,7 +17,7 @@ func `bubble reactions flow in one line beyond a short bubble`(isOutgoing: Bool)
     )
     let model = AppModel(launchMode: .offlineTesting)
     model.snapshot = BootstrapSnapshot(currentUser: you, guilds: [], channels: [channel], members: [])
-    model.appearanceSettings.messageAppearance = .bubbles
+    model.appearanceSettings.groupMessageAppearance = .bubbles
 
     var message = Message(
         id: MessageID(rawValue: 99_504), channelID: channel.id,

@@ -330,6 +330,7 @@ final class TypingIndicator: NSView {
     /// stays behind everyone who was in front of it while it leaves.
     private var stack: [AvatarSlot] = []
     private var appliedAvatarDiameter = Metrics.avatarDiameter
+    private var themeObserver: NSObjectProtocol?
     private var state: State?
     private var isShown: Bool { state?.isTyping == true }
 
@@ -349,11 +350,20 @@ final class TypingIndicator: NSView {
         bubble.body.addSublayer(count)
         setAccessibilityElement(false)
         setAccessibilityRole(.staticText)
+        themeObserver = NotificationCenter.default.addObserver(
+            forName: .sakuraCordThemeDidCommit, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateColors() }
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    isolated deinit {
+        if let themeObserver { NotificationCenter.default.removeObserver(themeObserver) }
     }
 
     override var isFlipped: Bool { true }
@@ -728,6 +738,7 @@ final class TypingIndicator: NSView {
     }
 
     private static var fallbackImages: [String: CGImage] = [:]
+    private static var fallbackTheme: SakuraCordGradientTheme?
 
     private func fallbackImage(name: String) -> CGImage? {
         let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -735,6 +746,11 @@ final class TypingIndicator: NSView {
     }
 
     private static func fallbackImage(name: String, colorScheme: ColorScheme, scale: CGFloat) -> CGImage? {
+        let theme = SakuraCordThemeStore.shared.committedTheme
+        if fallbackTheme != theme {
+            fallbackImages.removeAll()
+            fallbackTheme = theme
+        }
         let key = "\(name.prefix(1).uppercased())@\(scale)-\(colorScheme)-\(Metrics.avatarDiameter)"
         if let image = fallbackImages[key] { return image }
         let renderer = ImageRenderer(

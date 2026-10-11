@@ -536,6 +536,7 @@ extension NativeTimelineCanvasView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil {
+            clearDisclosure(redraws: false)
             finishSendTransitions()
             cancelTranscriptGlide()
             cancelReactionPreviewLoads()
@@ -627,9 +628,7 @@ extension NativeTimelineCanvasView {
         var upper = rowOrigins.count
         while lower < upper {
             let middle = (lower + upper) / 2
-            if displayedRowOrigin(at: middle) + displayedRowHeight(at: middle)
-                <= documentY
-            {
+            if visibleRowSpan(at: middle).upperBound <= documentY {
                 lower = middle + 1
             } else {
                 upper = middle

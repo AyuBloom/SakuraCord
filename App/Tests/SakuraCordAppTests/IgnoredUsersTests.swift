@@ -38,6 +38,22 @@ struct IgnoredUsersTests {
         #expect(items().compactMap(\.messageRow).count == 2)
         model.finishCollapsingSuppressedMessages(Array(messages.prefix(2)).map(\.id))
         #expect(items().count == 1)
+        // Dismissing a timeline during Hide must also release the held rows.
+        let scrollView = coordinator.makeScrollView()
+        let canvas = try #require(coordinator.canvas)
+        canvas.model = model
+        model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id))
+        model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id), holdsCollapsingRows: true)
+        canvas.rowDisclosure = .init(
+            key: .suppressedMessages(messages[0].id), isCollapsing: true, requestedUptime: 0,
+            heldMessageIDs: Array(messages.prefix(2)).map(\.id), startHeight: 100, revealedHeight: 50,
+            startBeforeShift: 0, targetBeforeShift: 100, beforeShift: 50
+        )
+        model.replaceSelectedMessages(with: messages)
+        #expect(items().compactMap(\.messageRow).map(\.id) == Array(messages.prefix(2)).map(\.id))
+        NativeMessageTimelineView.dismantleNSView(scrollView, coordinator: coordinator)
+        #expect(model.ignoredUsers.collapsingMessageIDs.isEmpty)
+        #expect(items().allSatisfy { $0.messageRow == nil })
         model.toggleSuppressedMessages(Array(messages.prefix(2)).map(\.id))
         model.replaceSelectedMessages(with: messages)
         #expect(items().compactMap(\.messageRow).count == 2)

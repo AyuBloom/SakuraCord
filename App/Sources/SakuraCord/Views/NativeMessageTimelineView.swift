@@ -132,6 +132,7 @@ struct NativeMessageTimelineView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        coordinator.canvas?.clearDisclosure(redraws: false)
         (scrollView as? NativeTimelineInputShieldScrollView)?
             .inputPerformanceProbe.invalidate()
         coordinator.stopObserving()
@@ -1088,7 +1089,7 @@ extension NativeMessageTimelineCoordinator {
                        oldItems[index] == item,
                        oldLayouts[index].fontRevision == ProfileNameFontCache.revision,
                        oldLayouts[index].matchesAuthorPrimaryGuild(for: item, model: parent.model) {
-                        recentLayoutCacheHits += 1
+                        // Retained live rows are not reads from a layout cache.
                         return oldLayouts[index]
                     }
                     return layoutUsingRecentConversationCache(

@@ -147,13 +147,13 @@ extension NativeTimelineCanvasView {
         clearDisclosure()
     }
 
-    func clearDisclosure() {
+    func clearDisclosure(redraws: Bool = true) {
         let disclosure = rowDisclosure
         rowDisclosure = nil
         disclosureTicker.stop()
         resetDisclosureGeometry()
         guard let disclosure else { return }
-        redrawForDisclosure()
+        if redraws { redrawForDisclosure() }
         // Drops held rows from the next published item list.
         if disclosure.isCollapsing, !disclosure.isFinished { releaseHeldRows(of: disclosure) }
     }
@@ -189,16 +189,28 @@ extension NativeTimelineCanvasView {
     /// Visits displayed rows intersecting `rect` in index order. Rows hidden
     /// outside an animating group's clip do not end the walk early.
     func forEachDisplayedRow(in rect: CGRect, _ body: (Int) -> Void) {
-        guard !items.isEmpty, var index = rowIndex(at: max(0, rect.minY - max(0, disclosureShiftBefore))) else { return }
+        guard !items.isEmpty, var index = rowIndex(at: max(0, rect.minY)) else { return }
         while items.indices.contains(index) {
-            if displayedRowOrigin(at: index) >= rect.maxY {
-                guard disclosureRange.contains(index) else { return }
+            let span = visibleRowSpan(at: index)
+            if span.lowerBound >= rect.maxY { return }
+            if disclosureRange.contains(index), span.lowerBound >= disclosureClipMaxY {
                 index = disclosureRange.upperBound
                 continue
             }
-            body(index)
+            if span.upperBound > span.lowerBound { body(index) }
             index += 1
         }
+    }
+
+    /// Clip both ends into the reveal interval, including empty rows. The
+    /// resulting spans remain ordered while the surrounding rows move.
+    func visibleRowSpan(at index: Int) -> Range<CGFloat> {
+        let minY = displayedRowOrigin(at: index)
+        let maxY = minY + displayedRowHeight(at: index)
+        guard disclosureRange.contains(index) else { return minY ..< maxY }
+        let clippedMin = min(disclosureClipMaxY, max(disclosureClipMinY, minY))
+        let clippedMax = min(disclosureClipMaxY, max(disclosureClipMinY, maxY))
+        return clippedMin ..< clippedMax
     }
 
     func disclosureHeaderIndex(for key: NativeTimelineRowDisclosure.Key, hint: Int? = nil) -> Int? {
@@ -234,7 +246,10 @@ extension NativeTimelineCanvasView {
               displayedRowOrigin(at: headerIndex) < visibleRect.maxY,
               displayedRowOrigin(at: headerIndex) + layouts[headerIndex].height > visibleRect.minY
         else {
-            if previous != nil { clearDisclosure() }
+            if let previous {
+                rowDisclosure = previous
+                clearDisclosure()
+            }
             return nil
         }
         let range = disclosureContentRange(for: key, headerIndex: headerIndex)

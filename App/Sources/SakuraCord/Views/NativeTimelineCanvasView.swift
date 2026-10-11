@@ -423,7 +423,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
             NSWorkspace.shared.notificationCenter.removeObserver(self)
             pollClockTask?.cancel()
             pollAnimationTicker.stop()
-            disclosureTicker.stop()
+            clearDisclosure(redraws: false)
             pollPopover?.close()
             mediaInvalidationTask?.cancel()
             visibleMediaRequestTask?.cancel()

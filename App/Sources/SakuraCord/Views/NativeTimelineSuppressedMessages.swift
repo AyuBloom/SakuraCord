@@ -36,23 +36,24 @@ struct NativeTimelineSuppressedHeaderLayout: Equatable {
         let textWidth = max(0, width - textX - horizontalInset)
         let prefixWidth = ceil(prefix(for: group).size().width)
         let toggleWidth = ceil(toggle(for: group, isHovered: false).size().width)
+        let visiblePrefixWidth = min(prefixWidth, max(0, textWidth - toggleWidth))
+        let labelWidth = prefixWidth <= visiblePrefixWidth ? prefixWidth : max(0, visiblePrefixWidth - InterfaceScale.metric(4))
         return Self(
             highlightFrame: CGRect(x: 0, y: originY, width: width, height: contentHeight),
             iconFrame: CGRect(
                 x: horizontalInset + InterfaceScale.metric(36), y: lineY,
                 width: InterfaceScale.metric(16), height: lineHeight
             ),
-            textFrame: CGRect(x: textX, y: lineY, width: textWidth, height: lineHeight),
+            textFrame: CGRect(x: textX, y: lineY, width: labelWidth, height: lineHeight),
             toggleFrame: CGRect(
-                x: textX + min(prefixWidth, max(0, textWidth - toggleWidth)), y: lineY - InterfaceScale.metric(2),
+                x: textX + visiblePrefixWidth, y: lineY - InterfaceScale.metric(2),
                 width: toggleWidth, height: lineHeight + InterfaceScale.metric(4)
             )
         )
     }
 
-    static func text(for group: SuppressedMessageGroup, isToggleHovered: Bool) -> NSAttributedString {
+    static func label(for group: SuppressedMessageGroup) -> NSAttributedString {
         let value = NSMutableAttributedString(attributedString: prefix(for: group))
-        value.append(toggle(for: group, isHovered: isToggleHovered))
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         value.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: value.length))
@@ -67,7 +68,7 @@ struct NativeTimelineSuppressedHeaderLayout: Equatable {
         ])
     }
 
-    private static func toggle(for group: SuppressedMessageGroup, isHovered: Bool) -> NSAttributedString {
+    static func toggle(for group: SuppressedMessageGroup, isHovered: Bool) -> NSAttributedString {
         var attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
             .foregroundColor: NSColor.labelColor,
@@ -84,8 +85,10 @@ extension NativeTimelineRowPainter {
         isToggleHovered: Bool
     ) {
         systemSymbol(group.reason.systemImage, in: layout.iconFrame, color: .secondaryLabelColor, inset: 1)
-        NativeTimelineSuppressedHeaderLayout.text(for: group, isToggleHovered: isToggleHovered)
+        NativeTimelineSuppressedHeaderLayout.label(for: group)
             .draw(in: layout.textFrame)
+        NativeTimelineSuppressedHeaderLayout.toggle(for: group, isHovered: isToggleHovered)
+            .draw(in: layout.toggleFrame.insetBy(dx: 0, dy: InterfaceScale.metric(2)))
     }
 
     /// One area spans a header and its revealed rows, in the timeline's
@@ -111,11 +114,13 @@ extension NativeMessageTimelineCoordinator {
                 continue
             }
             let isRevealed = state.revealedMessageIDs.contains(row.id)
+            let isCollapsing = state.collapsingMessageIDs.contains(row.id)
             var end = index + 1
             while end < rows.count, !rows[end].startsDay,
                   rows[end].id != parent.unreadMessageID,
                   rows[end].message.channelID == row.message.channelID,
                   model.messageSuppressionReason(rows[end].message) == reason,
+                  state.collapsingMessageIDs.contains(rows[end].id) == isCollapsing,
                   state.revealedMessageIDs.contains(rows[end].id) == isRevealed { end += 1 }
             let run = rows[index ..< end]
             let ids = run.map(\.id)
@@ -128,7 +133,7 @@ extension NativeMessageTimelineCoordinator {
                 contextTitle: row.searchContext?.sectionTitle
             )))
             // A closing run keeps its rows until the motion ends.
-            if isRevealed || ids.contains(where: state.collapsingMessageIDs.contains) {
+            if isRevealed || isCollapsing {
                 for (offset, row) in run.enumerated() {
                     result.append(revealedItem(
                         row, startsRun: offset == 0, endsRun: offset == run.count - 1, from: parent

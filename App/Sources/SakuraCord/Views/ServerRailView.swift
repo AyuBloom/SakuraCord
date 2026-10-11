@@ -7,11 +7,13 @@ import SwiftUI
 /// rebuilding or comparing every server row.
 struct ServerRailContainer: View {
     let model: AppModel
+    let sidebarWidth: CGFloat
     @State private var folderSettings: GuildFolder?
 
     var body: some View {
         @Bindable var invites = model.serverInvites
         ServerRailView(
+            sidebarWidth: sidebarWidth,
             items: model.serverRailPresentation.items,
             directMessages: model.serverRailPresentation.directMessages,
             home: model.serverRailPresentation.home,
@@ -67,7 +69,7 @@ struct ServerRailContainer: View {
         .windowModal(item: Bindable(invites.creation).presentation, cornerRadius: InterfaceScale.metric(32), cornerStyle: .circular) {
             ServerInviteCreationView(model: model, presentation: $0)
         }
-        .modifier(ServerInviteCaptchaPresentation(store: invites.captcha))
+        .modifier(HumanCaptchaPresentation(store: invites.captcha))
         .alert("Leave \(invites.leaveConfirmation?.name ?? "Server")?",
                isPresented: Binding(get: { invites.leaveConfirmation != nil },
                                     set: { if !$0 { invites.leaveConfirmation = nil } }),
@@ -91,6 +93,7 @@ struct ServerRailContainer: View {
 }
 
 struct ServerRailView: View {
+    let sidebarWidth: CGFloat
     let items: [ServerRailPresentationItem]
     let directMessages: [ServerRailDirectMessageEntry]
     let home: ServerRailHomeEntry
@@ -158,7 +161,10 @@ struct ServerRailView: View {
         .overlayPreferenceValue(ServerRailHoverPreferenceKey.self) { hoverItem in
             GeometryReader { proxy in
                 if let hoverItem, drag.draggedID == nil {
-                    ServerRailHoverLabel(name: hoverItem.name)
+                    ServerRailHoverLabel(
+                        name: hoverItem.name,
+                        maximumWidth: max(0, sidebarWidth - ChatChromeMetrics.serverRailWidth - 7 - InterfaceScale.metric(16))
+                    )
                         .offset(
                             x: ChatChromeMetrics.serverRailWidth + 7,
                             y: proxy[hoverItem.bounds].midY - 16
@@ -237,7 +243,7 @@ struct ServerRailView: View {
             }).first {
                 ServerFolderRailHeader(
                     entry: entry,
-                    isExpanded: UserDefaults.standard.bool(forKey: ServerFolderRailView.expansionKey(entry.folder.id)),
+                    isExpanded: PRBuildProfile.defaults.bool(forKey: ServerFolderRailView.expansionKey(entry.folder.id)),
                     contextMenuActions: contextMenuActions,
                     toggle: {},
                     loadsImageWhenOffscreen: true
@@ -483,13 +489,16 @@ struct GuildRailButton: View {
 
 private struct ServerRailHoverLabel: View {
     let name: String
+    let maximumWidth: CGFloat
 
     var body: some View {
         Text(name)
             .font(.interface(.callout).weight(.semibold))
             .lineLimit(1)
-            .fixedSize()
+            .truncationMode(.tail)
             .padding(.horizontal, InterfaceScale.metric(11))
+            .frame(maxWidth: maximumWidth)
+            .fixedSize(horizontal: true, vertical: false)
             .frame(height: InterfaceScale.metric(32))
             .glassEffect(.regular, in: Capsule())
             .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))

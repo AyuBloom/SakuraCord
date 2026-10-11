@@ -41,6 +41,10 @@ extension NativeMessageTimelineCoordinator {
         parent newParent: NativeMessageTimelineView,
         scrollView: NSScrollView
     ) -> Bool {
+        guard newParent.model.ignoredUsers.ignoredUserIDs.isEmpty, newParent.model.ignoredUsers.blockedUserIDs.isEmpty else {
+            cancelLayoutPreparation()
+            return false
+        }
         let width = max(220, scrollView.contentView.bounds.width.rounded())
         guard timestampDay == Calendar.autoupdatingCurrent.startOfDay(for: .now),
               newParent.model === parent.model,

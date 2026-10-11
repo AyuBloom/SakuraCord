@@ -5,6 +5,8 @@ nonisolated struct NativeTimelineFooterActionTarget: Equatable {
     enum Kind {
         case ephemeralDismiss
         case translation
+        /// Keyed by the run's first message, which a revealed header shares with its first row.
+        case suppressedToggle
     }
 
     let messageID: MessageID
@@ -96,6 +98,7 @@ nonisolated enum TimelineButtonActivationPolicy {
 
 nonisolated enum NativeTimelinePointerActivationTarget: Hashable {
     case loader
+    case suppressedMessages(MessageID)
     case message(MessageID)
     case componentReveal(MessageID, String)
     case componentImage(MessageID, String)

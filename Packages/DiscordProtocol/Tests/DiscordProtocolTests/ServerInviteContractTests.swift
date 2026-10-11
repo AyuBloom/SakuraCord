@@ -44,9 +44,6 @@ struct ServerInviteContractTests {
         }
         let expectedWrites = code == "invalid" ? 0 : 1
         #expect(capture.requests.filter { $0.httpMethod == "POST" }.count == expectedWrites)
-        #expect(!DiscordRESTProvider.isSafetyStop(status: 400, discordCode: 40007, method: "POST", data: Data(), path: "/invites/banned"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: 40007, method: "POST",
-            data: Data(#"{"captcha_key":["challenge"]}"#.utf8), path: "/invites/banned"))
         #expect(await !provider.requestSafetyCircuitIsOpen)
         _ = try await provider.serverInvite(try #require(ServerInviteReference("valid")))
         await provider.disconnect()
@@ -122,16 +119,6 @@ struct ServerInviteContractTests {
         await provider.disconnect()
     }
 
-    @Test func `only supported invite challenges bypass the account safety circuit`() {
-        let data = Data(InviteURLProtocol.challenge.utf8)
-        #expect(!DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "POST", data: data, path: "/invites/code"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "POST", data: data, path: "/channels/900/messages"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: 40002, method: "POST", data: data, path: "/invites/code"))
-        for body in [#"{"captcha_key":["required"]}"#, InviteURLProtocol.challenge.replacingOccurrences(of: "hcaptcha", with: "unsupported")] {
-            #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "POST", data: Data(body.utf8), path: "/invites/code"))
-        }
-    }
-
     @Test func `discoverable profile join sends one full membership request and resumes CAPTCHA once`() async throws {
         let capture = InviteRequestCapture()
         let provider = try await makeProvider(capture.id)
@@ -160,11 +147,6 @@ struct ServerInviteContractTests {
         #expect(capture.requests.filter { $0.httpMethod == "PUT" }.count == 4)
         #expect(await !provider.requestSafetyCircuitIsOpen)
 
-        let challenge = Data(InviteURLProtocol.challenge.utf8)
-        #expect(!DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "PUT", data: challenge, path: "/guilds/950/members/@me"))
-        #expect(!DiscordRESTProvider.isSafetyStop(status: 400, discordCode: 30001, method: "PUT", data: Data(), path: "/guilds/950/members/@me"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "PUT", data: challenge, path: "/guilds/950/members/960"))
-        #expect(DiscordRESTProvider.isSafetyStop(status: 400, discordCode: nil, method: "PATCH", data: challenge, path: "/guilds/950/members/@me"))
         await provider.disconnect()
     }
 
@@ -173,7 +155,6 @@ struct ServerInviteContractTests {
         let provider = try await makeProvider(capture.id)
         await #expect(throws: GuildProfileError.restricted) { _ = try await provider.guildProfile(in: .init(rawValue: 953)) }
         #expect(capture.requests.last?.url?.path == "/api/v9/guilds/953/profile")
-        #expect(DiscordRESTProvider.isExpectedResourceNotFound(method: "GET", path: "/guilds/953/profile"))
         #expect(await !provider.requestSafetyCircuitIsOpen)
         #expect(try await provider.guildProfile(in: .init(rawValue: 950)).name == "Parks")
         await provider.disconnect()

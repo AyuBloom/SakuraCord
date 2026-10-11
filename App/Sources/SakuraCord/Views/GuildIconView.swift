@@ -31,8 +31,6 @@ struct GuildIconView: View {
     var body: some View {
         let displayedCornerRadius = iconURL == nil ? size * 0.25 : cornerRadius
         ZStack {
-            ConcentricRectangle(cornerRadius: displayedCornerRadius, style: .continuous)
-                .fill(iconURL == nil ? fallbackBackground : Color.secondary.opacity(0.16))
             if let iconURL {
                 if loadsImage {
                     StaticRemoteImage(
@@ -52,6 +50,8 @@ struct GuildIconView: View {
                     }
                 }
             } else {
+                ConcentricRectangle(cornerRadius: displayedCornerRadius, style: .continuous)
+                    .fill(fallbackBackground)
                 Text(initials)
                     .font(.system(size: size * 0.43, weight: .medium))
                     .foregroundStyle(isSelected ? .white : fallbackForeground)

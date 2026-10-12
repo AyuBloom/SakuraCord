@@ -10,7 +10,7 @@ let package = Package(
     name: "SakuraCordApp",
     platforms: [.macOS(.v27)],
     products: [
-        .executable(name: "SakuraCord", targets: ["SakuraCord"]),
+        .executable(name: "SakuraCord", targets: ["SakuraCordLauncher"]),
         .executable(name: "SakuraCordPluginHost", targets: ["SakuraCordPluginHost"])
     ],
     dependencies: [
@@ -28,7 +28,7 @@ let package = Package(
         )
     ],
     targets: [
-        .executableTarget(
+        .target(
             name: "SakuraCord",
             dependencies: [
                 "SakuraCordModels", "DiscordProtocol", "SakuraCordPersistence",
@@ -43,6 +43,11 @@ let package = Package(
                 .defaultIsolation(MainActor.self),
                 .interoperabilityMode(.Cxx)
             ]
+        ),
+        .executableTarget(
+            name: "SakuraCordLauncher",
+            dependencies: ["SakuraCord"],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
         .executableTarget(name: "SakuraCordPluginHost", dependencies: ["SakuraCordPluginSDK"]),
         .testTarget(

@@ -21,6 +21,11 @@ For commands, use [Development](DEVELOPMENT.md). For wire behaviour, use the
 Views consume domain state and invoke owners. They do not construct Discord
 requests, open authenticated transports, or import DaveKit directly.
 
+The App package keeps its implementation and resources in the `SakuraCord`
+library target. The `SakuraCordLauncher` executable target calls its launch entry
+point and produces the `SakuraCord` executable. App tests import the same library,
+so building the executable and tests does not compile a second copy of the app.
+
 ## Find the owner
 
 Start at these files and follow their neighbouring extensions. This is an entry

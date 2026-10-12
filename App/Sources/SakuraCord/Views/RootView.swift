@@ -736,14 +736,17 @@ private struct ChatRootView: View {
                     Button {
                         if model.inbox.isPresented { model.dismissInbox() } else { model.presentInbox() }
                     } label: {
-                        Label("Inbox", systemImage: "tray.fill")
+                        Label("Inbox", systemImage: model.inbox.isPresented ? "tray.fill" : "tray")
+                            .symbolVariant(.none)
+                            .animation(.smooth(duration: 0.24), value: model.inbox.isPresented)
                     }
                     .help("Inbox")
                     .background {
                         StableAnchoredPopoverPresenter(
                             isPresented: model.inbox.isPresented,
                             configuration: .toolbarPanel,
-                            onDismiss: model.dismissInbox
+                            onDismiss: model.dismissInbox,
+                            onWillDismiss: model.dismissInbox
                         ) { InboxPopoverView(model: model) }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -759,14 +762,17 @@ private struct ChatRootView: View {
                             model.presentPinnedMessages(channelID: pinsChannelID)
                         }
                     } label: {
-                        Label("Pinned Messages", systemImage: "pin.fill")
+                        Label("Pinned Messages", systemImage: model.pinnedMessages.isPresented ? "pin.fill" : "pin")
+                            .symbolVariant(.none)
+                            .animation(.smooth(duration: 0.24), value: model.pinnedMessages.isPresented)
                     }
                     .help("Pinned Messages")
                     .background {
                         StableAnchoredPopoverPresenter(
                             isPresented: model.pinnedMessages.isPresented,
                             configuration: .toolbarPanel,
-                            onDismiss: model.dismissPinnedMessages
+                            onDismiss: model.dismissPinnedMessages,
+                            onWillDismiss: model.dismissPinnedMessages
                         ) {
                             PinnedMessagesPopoverView(model: model)
                         }
@@ -920,6 +926,8 @@ private struct ChatRootView: View {
                 ? (model.showInspector ? "person.fill" : "person")
                 : (model.showInspector ? "person.2.fill" : "person.2")
         )
+        .symbolVariant(.none)
+        .animation(.smooth(duration: 0.24), value: model.showInspector)
     }
 
     private var selectedPrivateChannel: Channel? {

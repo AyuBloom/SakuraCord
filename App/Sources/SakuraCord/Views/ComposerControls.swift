@@ -78,7 +78,7 @@ struct UploadProgressView: View {
                 Image(systemName: "clock")
                 Text("Waiting for confirmation — do not resend")
             case .completed:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: "checkmark.circle").foregroundStyle(.green)
                 Text("Sent")
             }
         }
@@ -141,6 +141,8 @@ struct ComposerActionButton: View {
 
     private var buttonLabel: some View {
         icon
+            // The grinning face otherwise substitutes filled artwork in dark mode.
+            .environment(\.colorScheme, icon == SakuraCordSystemSymbol.emojiFaceGrinningImage ? .light : colorScheme)
             .symbolVariant(.none)
             .font(.interfaceSystem(size: iconSize, weight: iconWeight))
             .foregroundStyle(iconColor)
@@ -205,7 +207,7 @@ struct ComposerSendButton: View {
     }
 
     private var buttonLabel: some View {
-        Image(systemName: "paperplane.circle.fill")
+        Image(systemName: "paperplane.circle")
             .font(.interfaceSystem(size: 21, weight: .medium))
             .foregroundStyle(
                 isEnabled && !isSlowmodeBlocked

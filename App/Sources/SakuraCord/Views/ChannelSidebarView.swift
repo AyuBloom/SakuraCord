@@ -605,7 +605,6 @@ private struct ChannelGroupRows: View {
             } else if followsPageDestinations {
                 categoryHeader
                     .font(.interface(.subheadline).weight(.semibold))
-                    .foregroundStyle(.tertiary)
                     .selectionDisabled()
                 channelRows
             } else {
@@ -684,12 +683,13 @@ private struct ChannelGroupRows: View {
                         )
                     } label: {
                         HStack(spacing: InterfaceScale.metric(5)) {
+                            Text(name)
                             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                                 .font(.interface(.caption2).weight(.semibold))
                                 .frame(width: InterfaceScale.metric(8))
-                            Text(name)
                             Spacer(minLength: 0)
                         }
+                        .foregroundStyle(Color.primary.opacity(0.5))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1322,23 +1322,12 @@ private struct ChannelRow: View {
                 .frame(width: InterfaceScale.metric(8))
             Image(systemName: systemImage)
                 .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
-                .fontWeight(
-                    showsUnread && !isMuted
-                        ? .medium
-                        : .regular
-                )
-                .foregroundStyle(
-                    isVoiceConnected ? Color.green
-                        : channelIconForegroundStyle
-                )
+                .fontWeight(.medium)
+                .foregroundStyle(channelIconForegroundStyle)
                 .frame(width: ChannelSidebarLayoutMetrics.iconWidth)
             Text(channel.name)
-                .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
-                .fontWeight(
-                    showsUnread && !isMuted
-                        ? .medium
-                        : .regular
-                )
+                .font(.interfaceSystem(size: 14, weight: .medium))
+                .fontWeight(.medium)
                 .foregroundStyle(channelNameForegroundStyle)
                 .lineLimit(1)
             Spacer()
@@ -1440,21 +1429,15 @@ private struct ChannelRow: View {
     }
 
     private var channelIconForegroundStyle: Color {
-        if isMuted {
-            return .primary.opacity(0.32)
-        }
-        return showsUnread
-            ? .primary
-            : .primary.opacity(0.66)
+        if model.selectedChannelID == channel.id { return .primary }
+        if isMuted { return .primary.opacity(0.32) }
+        return showsUnread ? .primary : .primary.opacity(0.70)
     }
 
     private var channelNameForegroundStyle: Color {
-        if isMuted {
-            return .primary.opacity(0.35)
-        }
-        return showsUnread
-            ? .primary
-            : .primary.opacity(0.78)
+        if model.selectedChannelID == channel.id { return .primary }
+        if isMuted { return .primary.opacity(0.32) }
+        return showsUnread ? .primary : .primary.opacity(0.70)
     }
 
     private var accessibilityValue: String {
@@ -1501,8 +1484,8 @@ private struct ThreadRow: View {
                 )
                 .frame(width: ChannelSidebarLayoutMetrics.iconWidth)
             Text(row.thread.name)
-                .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
-                .fontWeight(row.isUnread && !row.isMuted ? .medium : .regular)
+                .font(.interfaceSystem(size: 14, weight: .medium))
+                .fontWeight(.medium)
                 .foregroundStyle(nameForegroundStyle)
                 .lineLimit(1)
             Spacer()

@@ -2222,6 +2222,10 @@ struct AccountReadStateModelTests {
                 == model.guildMentions(guildID)
         )
         #expect(projection.totalMentions == model.totalMentions)
+
+        model.applyAccessibility([forumID: false])
+        #expect(model.unreadPresentationProjection().newForumPostsByChannelID[forumID, default: 0] == 0)
+        #expect(model.forumNewPostCount(channelID: forumID) == 0)
     }
 
     @Test func `guild unread comes from unseen forum posts not the forum boundary`() {
@@ -2247,6 +2251,7 @@ struct AccountReadStateModelTests {
         #expect(model.unreadPresentationProjection().unreadByGuildID[guildID] != true)
         #expect(!model.guildUnread(guildID))
         #expect(model.unreadCategoryIDs(in: guildID).isEmpty)
+        #expect(model.unreadPresentationProjection().unreadCategoryIDsByGuild[guildID, default: []].isEmpty)
 
         model.merge(
             forumPost: ForumPost(
@@ -2261,6 +2266,24 @@ struct AccountReadStateModelTests {
         )
         #expect(model.unreadPresentationProjection().unreadByGuildID[guildID] == true)
         #expect(model.guildUnread(guildID))
+        #expect(model.unreadCategoryIDs(in: guildID) == [categoryID])
+        #expect(model.unreadPresentationProjection().unreadCategoryIDsByGuild[guildID] == [categoryID])
+        #expect(model.bulkAcknowledgements(for: categoryID, guildID: guildID).map(\.channelID) == [forumID])
+
+        model.apply(GuildNotificationSettings(
+            guildID: guildID,
+            messageNotifications: .inherit,
+            channelOverrides: [ChannelNotificationOverride(channelID: forumID, isMuted: true)]
+        ))
+        #expect(!model.guildUnread(guildID))
+        #expect(model.unreadPresentationProjection().unreadByGuildID[guildID] != true)
+        // Muting hides the server dot but still permits marking the category read.
+        #expect(model.unreadCategoryIDs(in: guildID) == [categoryID])
+        #expect(model.unreadPresentationProjection().unreadCategoryIDsByGuild[guildID] == [categoryID])
+        model.apply(GuildNotificationSettings(
+            guildID: guildID,
+            messageNotifications: .inherit
+        ))
 
         // A joined thread keeps lighting the server after its forum's
         // boundary has moved past it.
@@ -2295,6 +2318,7 @@ struct AccountReadStateModelTests {
         model.apply(
             GuildNotificationSettings(
                 guildID: guildID,
+                messageNotifications: .inherit,
                 channelOverrides: [
                     ChannelNotificationOverride(channelID: forumID, isMuted: true)
                 ]

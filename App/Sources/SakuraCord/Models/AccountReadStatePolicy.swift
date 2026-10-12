@@ -131,10 +131,12 @@ extension AccountReadStateModel {
         in guildID: GuildID
     ) -> Set<ChannelID> {
         var result: Set<ChannelID> = []
+        let source = unreadPresentationSource()
         for entry in entries.values {
             guard entry.guildID == guildID,
                   entry.isAccessible,
-                  entry.countsAsUnreadConversation,
+                  entry.countsAsUnreadConversation
+                    || source.newForumPostParentID(of: entry) != nil,
                   !isGuildResourceChannel(entry),
                   let parentID = entry.parentID
             else { continue }

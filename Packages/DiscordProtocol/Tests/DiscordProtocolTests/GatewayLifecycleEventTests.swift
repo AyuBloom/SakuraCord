@@ -71,6 +71,37 @@ struct GatewayLifecycleEventTests {
         #expect(channels.map(\.id) == [forumChannelID])
     }
 
+    @Test(arguments: [
+        (#"[{"id":"1","name":"Bug"},{"id":2,"name":null},"tag"]"#, ["Bug"]),
+        (#"{"unexpected":"object"}"#, []),
+        (#""tags""#, []),
+    ])
+    func `forum with malformed tag and reaction metadata still decodes`(
+        tags: String, expectedNames: [String]
+    ) throws {
+        let data = Data(
+            #"""
+            [
+              {
+                "id":"201","guild_id":"100","type":15,"name":"forum",
+                "available_tags":\#(tags),
+                "default_reaction_emoji":"🌸",
+                "default_sort_order":"latest",
+                "default_forum_layout":{},
+                "default_tag_setting":7
+              }
+            ]
+            """#.utf8
+        )
+        let values = try JSONDecoder().decode([ChannelDTO].self, from: data)
+
+        let channels = try DiscordRESTProvider.domainChannels(values, guildID: guildID)
+
+        #expect(channels.map(\.id) == [forumChannelID])
+        #expect(channels.first?.availableTags.map(\.name) == expectedNames)
+        #expect(channels.first?.defaultReaction == nil)
+    }
+
     @Test func `guild channel role member and user lifecycle reconciles cached state`() async {
         let provider = makeProvider()
         await provider.receiveGatewayDispatchForTesting(

@@ -250,7 +250,8 @@ extension AppModel {
         to guildID: GuildID?,
         linkedChannelID channelID: ChannelID,
         messageID: MessageID? = nil,
-        initialMessages: [Message] = []
+        initialMessages: [Message] = [],
+        fullWidthThread: Bool = false
     ) {
         let isKnownRootChannel =
             snapshot?.channels.contains(where: { $0.id == channelID }) == true
@@ -324,6 +325,7 @@ extension AppModel {
                 post,
                 initialMessages: initialMessages,
                 messageID: messageID,
+                fullWidth: fullWidthThread,
                 session: session
             )
         }
@@ -333,21 +335,27 @@ extension AppModel {
         _ post: ForumPost,
         initialMessages: [Message],
         messageID: MessageID?,
+        fullWidth: Bool,
         session: AppModelAccountSession
     ) async {
         let wasShowingMessage = openThread?.id == post.id
             && threadMessages.contains(where: { $0.id == messageID })
-        if initialMessages.isEmpty {
-            open(post)
-        } else {
+        // Search keeps the results beside the destination conversation, so
+        // establish the thread's primary-pane presentation before loading it.
+        if !initialMessages.isEmpty || openThread?.id != post.id {
             readState.merge(forumPost: post)
             openThreadConversation(
                 post.thread,
                 starter: post.owner ?? post.firstMessage?.author,
                 startedAt: post.firstMessage?.timestamp ?? post.createdAt,
                 starterMessageID: post.firstMessage?.id,
-                initialMessages: initialMessages
+                initialMessages: initialMessages.isEmpty
+                    ? post.firstMessage.map { [$0] } ?? [] : initialMessages,
+                fullWidth: fullWidth
             )
+        } else if fullWidth {
+            isThreadFullWidth = true
+            suspendSelectedConversationPresentation()
         }
         guard let messageID else { return }
         await threadLoadTask?.value
@@ -395,7 +403,11 @@ extension AppModel {
         )
     }
 
-    func navigate(to guildID: GuildID?, channelID: ChannelID, messageID: MessageID) {
+    func navigate(
+        to guildID: GuildID?,
+        channelID: ChannelID,
+        messageID: MessageID
+    ) {
         startConversationNavigation { [weak self] _, session in
             guard let self else { return }
             if selectedGuildID != guildID {
@@ -409,8 +421,9 @@ extension AppModel {
                 errorMessage = "That message's channel has not been discovered yet."
                 return
             }
-            let wasShowingMessage = selectedChannelID == channel.id
+            let wasShowingMessage = !isThreadFullWidth && selectedChannelID == channel.id
                 && messages.contains(where: { $0.id == messageID })
+            closeThread()
             if selectedChannelID != channel.id {
                 selectedChannelID = channel.id
             }

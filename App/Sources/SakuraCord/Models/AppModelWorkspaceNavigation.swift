@@ -75,6 +75,7 @@ final class MessageSearchState {
 
     func clear() {
         requestTask?.cancel()
+        isPresented = false
         AppPerformanceSignposts.endResourceWindow(named: "MessageSearchBenchmark")
         AppPerformanceSignposts.endResourceWindow(named: "MessageSearchPaginationBenchmark")
         AppPerformanceSignposts.cancelMessageSearchRequest()
@@ -104,6 +105,27 @@ final class MessageSearchState {
 
 @MainActor
 extension AppModel {
+    var retainedMessageSearches: [MessageSearchState] {
+        [messageSearch] + Array(messageSearchesByGuildID.values)
+    }
+
+    func switchMessageSearchScope(from previousGuildID: GuildID?) {
+        // Timings belong to the visible search, while requests may finish off-screen.
+        cancelMessageSearchMeasurement("MessageSearchBenchmark", measuresPagination: false)
+        cancelMessageSearchMeasurement("MessageSearchPaginationBenchmark", measuresPagination: true)
+        AppPerformanceSignposts.endMessageSearchScroll()
+        messageSearch.isInputFocused = false
+        messageSearch.isFilterModalPresented = false
+        messageSearchesByGuildID[previousGuildID] = messageSearch
+        messageSearch = messageSearchesByGuildID.removeValue(forKey: selectedGuildID) ?? MessageSearchState()
+    }
+
+    func resetMessageSearches() {
+        for search in retainedMessageSearches { search.clear() }
+        messageSearchesByGuildID.removeAll()
+        messageSearch = MessageSearchState()
+    }
+
     var messageSearchInputText: String {
         get { messageSearch.queryText }
         set {
@@ -147,6 +169,18 @@ extension AppModel {
         workspaceNavigationOverlay = .quickSwitcher
     }
 
+    var canShowMessageSearch: Bool {
+        MessageSearchSurfacePolicy.showsToolbar(
+            channelKind: selectedChannel?.kind,
+            hasOpenThread: hasThreadPane && !isThreadFullWidth
+        )
+    }
+
+    var isMessageSearchVisible: Bool {
+        messageSearch.isPresented && canShowMessageSearch
+            && !isFriendsPresented && onboardingEntryGuildID == nil && guildWorkspacePage == nil
+    }
+
     func presentMessageSearch() {
         if isBrowsingGuildChannels {
             onboarding.isChannelSearchFocused = true
@@ -158,25 +192,21 @@ extension AppModel {
         }
         guard sessionState == .workspace,
               selectedChannelID != nil,
-              MessageSearchSurfacePolicy.showsToolbar(
-                  channelKind: selectedChannel?.kind,
-                  hasOpenThread: hasThreadPane
-              )
+              canShowMessageSearch
         else { return }
-        let currentScope = selectedGuildID.map(MessageSearchScope.guild) ?? .directMessages
-        if messageSearch.submittedQuery?.scope != currentScope {
-            messageSearch.clear()
-        }
         workspaceNavigationOverlay = nil
         messageSearch.requestInputFocus()
     }
 
     func presentMessageSearchFromCommand() {
         presentMessageSearch()
-        guard !isBrowsingGuildChannels, messageSearch.isInputFocused,
-              let selectedChannelID,
-              let channel = messageSearchChannels.first(where: { $0.id == selectedChannelID })
-        else { return }
+        guard !isBrowsingGuildChannels, messageSearch.isInputFocused else { return }
+        let channel: Channel? = if isThreadFullWidth, let openThread {
+            threadNavigationChannel(openThread)
+        } else {
+            messageSearchChannels.first(where: { $0.id == selectedChannelID })
+        }
+        guard let channel else { return }
         messageSearch.tokens.removeAll { token in
             if case .channel = token.kind { return true }
             return false
@@ -208,7 +238,7 @@ extension AppModel {
 
     @discardableResult
     func consumeEscapeForUnfocusedMessageSearch() -> Bool {
-        guard messageSearch.isPresented, !messageSearch.isInputFocused else { return false }
+        guard isMessageSearchVisible, !messageSearch.isInputFocused else { return false }
         clearMessageSearchInput()
         dismissMessageSearch()
         return true
@@ -321,28 +351,29 @@ extension AppModel {
     }
 
     private func startMessageSearchRequest(_ query: MessageSearchQuery, measuresPagination: Bool) {
-        messageSearch.requestTask?.cancel()
+        let search = messageSearch
+        search.requestTask?.cancel()
         AppPerformanceSignposts.endResourceWindow(named: "MessageSearchBenchmark")
         AppPerformanceSignposts.endResourceWindow(
             named: "MessageSearchPaginationBenchmark"
         )
         AppPerformanceSignposts.cancelMessageSearchRequest()
         AppPerformanceSignposts.cancelMessageSearchPagination()
-        messageSearch.isSearching = true
+        search.isSearching = true
         conversationRefreshJournalRevision &+= 1
-        messageSearch.pollRefreshJournal = ConversationRefreshJournal(revision: conversationRefreshJournalRevision)
-        messageSearch.errorMessage = nil
+        search.pollRefreshJournal = ConversationRefreshJournal(revision: conversationRefreshJournalRevision)
+        search.errorMessage = nil
         let resourceWindowName = beginMessageSearchMeasurement(
             measuresPagination: measuresPagination
         )
         let startedAt = ProcessInfo.processInfo.systemUptime
         let session = accountSession()
-        messageSearch.requestTask = Task { [weak self] in
+        search.requestTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let fetchedPage = try await session.provider.searchMessages(query)
                 try Task.checkCancellation()
-                let page = self.messageSearchPagePreservingPollVotes(fetchedPage)
+                let page = self.messageSearchPagePreservingPollVotes(fetchedPage, search: search)
                 let channelsByID = self.messageSearchChannelsByID(
                     additionalChannels: page.channels
                 )
@@ -359,40 +390,38 @@ extension AppModel {
                 self.mergeMessageSearchPrivateChannels(page.channels)
                 // Replay from the original response so vote deltas are applied
                 // once even when more events arrived during row preparation.
-                let latestPage = self.messageSearchPagePreservingPollVotes(fetchedPage)
-                self.messageSearch.page = latestPage
-                self.messageSearch.submittedQuery = query
-                self.messageSearch.rows = latestPage == page ? rows : MessageSearchPresentation.rows(
+                let latestPage = self.messageSearchPagePreservingPollVotes(fetchedPage, search: search)
+                search.page = latestPage
+                search.submittedQuery = query
+                search.rows = latestPage == page ? rows : MessageSearchPresentation.rows(
                     for: latestPage, channelsByID: channelsByID
                 )
-                self.messageSearch.rowsRevision &+= 1
-                self.messageSearch.errorMessage = nil
-                self.messageSearch.isSearching = false
-                self.messageSearch.pollRefreshJournal = nil
-                self.messageSearch.lastCompletedLatencyMilliseconds = Int(
+                search.rowsRevision &+= 1
+                search.errorMessage = nil
+                search.isSearching = false
+                search.pollRefreshJournal = nil
+                search.lastCompletedLatencyMilliseconds = Int(
                     (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
                 )
-                self.messageSearch.requestTask = nil
-                self.finishMessageSearchMeasurement(
-                    resourceWindowName,
-                    measuresPagination: measuresPagination
-                )
+                search.requestTask = nil
+                if self.messageSearch === search {
+                    self.finishMessageSearchMeasurement(resourceWindowName, measuresPagination: measuresPagination)
+                }
             } catch is CancellationError {
                 return
             } catch {
                 guard !Task.isCancelled, self.isCurrentAccountSession(session) else { return }
-                self.messageSearch.page = nil
-                self.messageSearch.rows = []
-                self.messageSearch.rowsRevision &+= 1
+                search.page = nil
+                search.rows = []
+                search.rowsRevision &+= 1
                 DiscordAPIDiagnosticStore.shared.recordClientFailure(error)
-                self.messageSearch.errorMessage = error.localizedDescription
-                self.messageSearch.isSearching = false
-                self.messageSearch.pollRefreshJournal = nil
-                self.messageSearch.requestTask = nil
-                self.cancelMessageSearchMeasurement(
-                    resourceWindowName,
-                    measuresPagination: measuresPagination
-                )
+                search.errorMessage = error.localizedDescription
+                search.isSearching = false
+                search.pollRefreshJournal = nil
+                search.requestTask = nil
+                if self.messageSearch === search {
+                    self.cancelMessageSearchMeasurement(resourceWindowName, measuresPagination: measuresPagination)
+                }
             }
         }
     }
@@ -763,7 +792,8 @@ extension AppModel {
             source: result.hit,
             messageID: messageID,
             initialMessages: result.messages,
-            isKnownThread: isGuildThreadResult
+            isKnownThread: isGuildThreadResult,
+            fullWidthThread: true
         )
     }
 
@@ -771,7 +801,8 @@ extension AppModel {
         source: Message,
         messageID: MessageID,
         initialMessages: [Message]?,
-        isKnownThread: Bool
+        isKnownThread: Bool,
+        fullWidthThread: Bool = false
     ) {
         let guildID = source.guildID
             ?? snapshot?.channels.first(where: { $0.id == source.channelID })?.guildID
@@ -780,7 +811,8 @@ extension AppModel {
                 to: guildID,
                 linkedChannelID: source.channelID,
                 messageID: messageID,
-                initialMessages: initialMessages ?? [source]
+                initialMessages: initialMessages ?? [source],
+                fullWidthThread: fullWidthThread
             )
         } else {
             navigate(

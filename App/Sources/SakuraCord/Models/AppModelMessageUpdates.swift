@@ -36,7 +36,7 @@ extension AppModel {
         if let resource = presentedGuideResource, resource.channelID == channelID,
            let message = resource.messages.first(where: { $0.id == messageID }) { return message }
         if let pinned = pinnedMessages.items.first(where: { $0.id == messageID })?.message { return pinned }
-        if let search = messageSearch.page?.results.lazy.flatMap(\.messages).first(where: { $0.id == messageID && $0.channelID == channelID }) {
+        if let search = retainedMessageSearches.lazy.flatMap({ $0.page?.results.flatMap(\.messages) ?? [] }).first(where: { $0.id == messageID && $0.channelID == channelID }) {
             return search
         }
         return inbox.retainedMessages.first { $0.id == messageID }
@@ -48,7 +48,7 @@ extension AppModel {
             + pinnedMessages.items.map(\.message)
             + (presentedGuideResource?.messages ?? [])
             + Array(inbox.retainedMessages)
-            + (messageSearch.page?.results.flatMap(\.messages) ?? [])
+            + retainedMessageSearches.flatMap { $0.page?.results.flatMap(\.messages) ?? [] }
             + forumCataloguePosts.flatMap { [$0.firstMessage, $0.mostRecentMessage].compactMap { $0 } }
     }
 

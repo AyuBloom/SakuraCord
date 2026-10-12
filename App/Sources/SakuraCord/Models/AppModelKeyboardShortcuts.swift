@@ -179,10 +179,7 @@ extension AppModel {
         case .quickSwitch, .toggleChannelSidebar, .toggleMemberList:
             true
         case .messageSearch:
-            isFriendsSearchActive || isBrowsingGuildChannels || MessageSearchSurfacePolicy.showsToolbar(
-                channelKind: selectedChannel?.kind,
-                hasOpenThread: hasThreadPane
-            )
+            isFriendsSearchActive || isBrowsingGuildChannels || canShowMessageSearch
         case .previousConversation, .nextConversation:
             hasKeyboardShortcutConversationDestination(unreadOnly: false)
         case .previousUnread, .nextUnread:
@@ -208,10 +205,7 @@ extension AppModel {
     private func messagingShortcutIsEnabled(_ action: KeyboardShortcutAction) -> Bool {
         switch action {
         case .searchCurrentConversation:
-            isFriendsSearchActive || isBrowsingGuildChannels || MessageSearchSurfacePolicy.showsToolbar(
-                channelKind: selectedChannel?.kind,
-                hasOpenThread: hasThreadPane
-            )
+            isFriendsSearchActive || isBrowsingGuildChannels || canShowMessageSearch
         case .copyChannelLink:
             openThread != nil || selectedChannelID != nil
         case .togglePins:

@@ -189,7 +189,8 @@ final class AppModel {
     var checkingChannelIDs: Set<ChannelID> = []
     var selectedChannel: Channel?
     var workspaceNavigationOverlay: WorkspaceNavigationOverlay?
-    let messageSearch = MessageSearchState()
+    var messageSearch = MessageSearchState()
+    @ObservationIgnored var messageSearchesByGuildID: [GuildID?: MessageSearchState] = [:]
     let pinnedMessages = PinnedMessagesState()
     let inbox = InboxState()
     @ObservationIgnored var lastDirectMessageSelection: DirectMessageSidebarSelection?
@@ -569,6 +570,7 @@ final class AppModel {
     }
     var selectedGuildID: GuildID? {
         didSet {
+            if oldValue != selectedGuildID { switchMessageSearchScope(from: oldValue) }
             refreshServerRailSelection()
             refreshSelectedGuildPresentation()
         }
@@ -916,9 +918,6 @@ final class AppModel {
                 AppPerformanceSignposts.cancelConversationNavigation()
             }
             dismissInspectorProfile()
-            if messageSearch.isPresented, !messageSearch.isNavigatingToResult {
-                dismissMessageSearch()
-            }
             if let oldValue {
                 cancelConversationRefresh(in: oldValue)
                 unreadDividerMessageIDs[oldValue] = nil

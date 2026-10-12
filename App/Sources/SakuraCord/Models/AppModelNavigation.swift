@@ -33,7 +33,6 @@ extension AppModel {
         set {
             onboarding.presentedGuildID = nil
             cancelConversationNavigation()
-            if messageSearch.isPresented { dismissMessageSearch() }
             selectedChannelID = newValue
             recordConversationNavigation()
         }
@@ -42,37 +41,22 @@ extension AppModel {
     func cancelConversationNavigation() {
         guildActivationTask?.cancel()
         guildActivationTask = nil
-        messageSearch.resultNavigationGeneration &+= 1
-        messageSearch.isNavigatingToResult = false
         conversationNavigationHistory.cancelNavigation()
     }
 
     func startConversationNavigation(
         to destination: ConversationNavigationHistory.Destination? = nil,
-        preservingMessageSearch: Bool = false,
         operation: @escaping @MainActor (AppModel, AppModelAccountSession) async -> Void
     ) {
         cancelConversationNavigation()
-        if preservingMessageSearch {
-            messageSearch.isNavigatingToResult = true
-        } else if messageSearch.isPresented {
-            dismissMessageSearch()
-        }
         let account = accountSession()
         guildActivationTask = startAccountChildTask(account: account) { model, account in
             // A task cancelled before it starts never opens a history transaction.
             let navigation = model.conversationNavigationHistory.beginNavigation(to: destination)
-            let searchGeneration = model.messageSearch.resultNavigationGeneration
             defer {
                 let channel = !Task.isCancelled && model.isCurrentAccountSession(account)
                     ? model.navigationChannel : nil
                 model.conversationNavigationHistory.finishNavigation(navigation, at: channel)
-                if model.messageSearch.isNavigatingToResult,
-                   model.messageSearch.resultNavigationGeneration == searchGeneration
-                {
-                    model.messageSearch.isNavigatingToResult = false
-                    if !model.canShowMessageSearch { model.dismissMessageSearch() }
-                }
             }
             await operation(model, account)
         }
@@ -267,7 +251,7 @@ extension AppModel {
         linkedChannelID channelID: ChannelID,
         messageID: MessageID? = nil,
         initialMessages: [Message] = [],
-        preservingMessageSearch: Bool = false
+        fullWidthThread: Bool = false
     ) {
         let isKnownRootChannel =
             snapshot?.channels.contains(where: { $0.id == channelID }) == true
@@ -277,7 +261,7 @@ extension AppModel {
             return
         }
 
-        startConversationNavigation(preservingMessageSearch: preservingMessageSearch) { [weak self] _, session in
+        startConversationNavigation { [weak self] _, session in
             guard let self else { return }
             let knownPost =
                 forumCataloguePosts.first(where: { $0.id == channelID })
@@ -341,6 +325,7 @@ extension AppModel {
                 post,
                 initialMessages: initialMessages,
                 messageID: messageID,
+                fullWidth: fullWidthThread,
                 session: session
             )
         }
@@ -350,13 +335,13 @@ extension AppModel {
         _ post: ForumPost,
         initialMessages: [Message],
         messageID: MessageID?,
+        fullWidth: Bool,
         session: AppModelAccountSession
     ) async {
         let wasShowingMessage = openThread?.id == post.id
             && threadMessages.contains(where: { $0.id == messageID })
         // Search keeps the results beside the destination conversation, so
         // establish the thread's primary-pane presentation before loading it.
-        let fullWidth = messageSearch.isPresented && messageSearch.isNavigatingToResult
         if !initialMessages.isEmpty || openThread?.id != post.id {
             readState.merge(forumPost: post)
             openThreadConversation(
@@ -421,10 +406,9 @@ extension AppModel {
     func navigate(
         to guildID: GuildID?,
         channelID: ChannelID,
-        messageID: MessageID,
-        preservingMessageSearch: Bool = false
+        messageID: MessageID
     ) {
-        startConversationNavigation(preservingMessageSearch: preservingMessageSearch) { [weak self] _, session in
+        startConversationNavigation { [weak self] _, session in
             guard let self else { return }
             if selectedGuildID != guildID {
                 await activateGuild(guildID, account: session)

@@ -51,7 +51,6 @@ extension AppModel {
         }
         suspendSelectedConversationPresentation()
         closeThread()
-        dismissMessageSearch()
         friends.isPresented = true
         selectedChannelID = nil
         loadRelationshipsIfNeeded(for: friendsSection)

@@ -5,12 +5,75 @@ import Testing
 
 @MainActor
 struct MessageSearchNavigationTests {
+    @Test func `search is retained per server and across DMs while side threads temporarily hide it`() async throws {
+        let provider = MockChatProvider()
+        let model = AppModel(launchMode: .offlineTesting, provider: provider)
+        await model.start()
+        model.navigate(to: ChannelID(rawValue: 210))
+        await model.guildActivationTask?.value
+        let serverSearch = model.messageSearch
+        serverSearch.queryText = "original server query"
+        serverSearch.isPresented = true
+        model.channelSidebarSelection = ChannelID(rawValue: 211)
+        #expect(model.isMessageSearchVisible)
+        #expect(model.messageSearch === serverSearch)
+
+        let posts = try await provider.forumPosts(in: ChannelID(rawValue: 220), query: .init())
+        let post = try #require(posts.posts.first)
+        model.channelSidebarSelection = ChannelID(rawValue: 220)
+        model.open(post)
+        #expect(!model.isMessageSearchVisible)
+        #expect(!model.consumeEscapeForUnfocusedMessageSearch())
+        #expect(serverSearch.isPresented)
+        model.closeThread()
+        #expect(model.isMessageSearchVisible)
+
+        model.navigate(to: ChannelID(rawValue: 300))
+        await model.guildActivationTask?.value
+        #expect(!model.isMessageSearchVisible)
+        model.messageSearch.queryText = "other server query"
+        model.messageSearch.isPresented = true
+        model.navigate(to: ChannelID(rawValue: 400))
+        await model.guildActivationTask?.value
+        #expect(!model.isMessageSearchVisible)
+        let dmSearch = model.messageSearch
+        dmSearch.queryText = "DM query"
+        dmSearch.isPresented = true
+        model.navigate(to: ChannelID(rawValue: 401))
+        await model.guildActivationTask?.value
+        #expect(model.messageSearch === dmSearch)
+        #expect(model.isMessageSearchVisible)
+
+        model.navigate(to: ChannelID(rawValue: 210))
+        await model.guildActivationTask?.value
+        #expect(model.messageSearch === serverSearch)
+        #expect(model.messageSearch.queryText == "original server query")
+        #expect(model.isMessageSearchVisible)
+        model.dismissMessageSearch()
+        model.navigate(to: ChannelID(rawValue: 400))
+        await model.guildActivationTask?.value
+        #expect(model.messageSearch === dmSearch)
+        #expect(model.isMessageSearchVisible)
+        model.navigate(to: ChannelID(rawValue: 210))
+        await model.guildActivationTask?.value
+        #expect(!model.isMessageSearchVisible)
+
+        model.invalidateAccountSession()
+        #expect(model.retainedMessageSearches.count == 1)
+        #expect(model.messageSearch.page == nil)
+        #expect(model.messageSearch.queryText.isEmpty)
+        #expect(!dmSearch.isPresented)
+        #expect(dmSearch.queryText.isEmpty)
+    }
+
     @Test(arguments: [UInt64(300), 400, 220])
-    func `search results stay beside the destination until manual navigation`(destinationID: UInt64) async throws {
+    func `search stays within its scope and thread results use the primary pane`(destinationID: UInt64) async throws {
         let provider = MockChatProvider()
         let model = AppModel(launchMode: .offlineTesting, provider: provider)
         await model.start()
         let destination = try #require(model.snapshot?.channels.first { $0.id.rawValue == destinationID })
+        model.navigate(to: destination.id)
+        await model.guildActivationTask?.value
         let hit: Message
         var resultChannels: [Channel] = []
         if destination.kind == .forum {
@@ -42,7 +105,6 @@ struct MessageSearchNavigationTests {
 
         #expect(model.messageSearch.isPresented)
         #expect(model.canShowMessageSearch)
-        #expect(!model.messageSearch.isNavigatingToResult)
         #expect(model.messageNavigationRequest?.messageID == hit.id)
         #expect(model.messageNavigationRequest?.channelID == hit.channelID)
         if destination.kind == .forum {
@@ -58,8 +120,7 @@ struct MessageSearchNavigationTests {
             // The sidebar closes the thread before selecting its already-selected parent.
             model.closeThread()
             model.channelSidebarSelection = destination.id
-            #expect(!model.messageSearch.isPresented)
-            model.messageSearch.isPresented = true
+            #expect(model.messageSearch.isPresented)
             model.navigateToSearchResult(hit)
             await model.guildActivationTask?.value
 
@@ -78,10 +139,17 @@ struct MessageSearchNavigationTests {
 
         model.navigate(to: ChannelID(rawValue: 211))
         await model.guildActivationTask?.value
-        #expect(!model.messageSearch.isPresented)
+        if destination.guildID == model.selectedGuildID {
+            #expect(model.messageSearch.isPresented)
+        } else {
+            #expect(!model.messageSearch.isPresented)
+            model.navigate(to: destination.id)
+            await model.guildActivationTask?.value
+            #expect(model.messageSearch.isPresented)
+        }
     }
 
-    @Test func `manual selection cancels pending search result navigation`() async throws {
+    @Test func `manual selection cancels navigation without dismissing its search`() async throws {
         let provider = MockChatProvider()
         let model = AppModel(launchMode: .offlineTesting, provider: provider)
         await model.start()
@@ -96,7 +164,6 @@ struct MessageSearchNavigationTests {
         await pending?.value
 
         #expect(model.selectedChannelID == ChannelID(rawValue: 211))
-        #expect(!model.messageSearch.isPresented)
-        #expect(!model.messageSearch.isNavigatingToResult)
+        #expect(model.messageSearch.isPresented)
     }
 }

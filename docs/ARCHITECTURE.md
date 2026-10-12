@@ -70,6 +70,12 @@ writes capture their original database and drain on teardown; clearing and
 restoring drafts use the same serialized queue. A restoration also checks the
 composer's edit revision so it cannot overwrite a newer edit or clear.
 
+Message search retains its query and results per guild, with all direct messages
+sharing one scope. Channel changes preserve that scope's search. Side-pane threads
+temporarily occupy the results pane; closing them reveals the retained search.
+Search requests publish to their originating scope, and account teardown clears
+every scope.
+
 `GuildOnboardingStore` owns in-memory choices, membership confirmation, Guide
 configuration and progress. `InboxState` owns frozen Inbox groups and loading;
 `AccountReadStateModel` owns channel/thread acknowledgement reconciliation.

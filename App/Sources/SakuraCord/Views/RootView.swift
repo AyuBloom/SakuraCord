@@ -962,7 +962,7 @@ private struct ChatRootView: View {
 
     private var hasOpenSupplementaryConversation: Bool {
         hasOpenSupplementaryToolbarConversation
-            || model.messageSearch.isPresented
+            || model.isMessageSearchVisible
     }
 
     private var hasOpenSupplementaryToolbarConversation: Bool {
@@ -1157,9 +1157,9 @@ private struct MessageSearchExperienceModifier: ViewModifier {
                 }
             }
             .onChange(of: isEnabled) { wasVisible, isVisible in
-                guard wasVisible, !isVisible, !search.isNavigatingToResult else { return }
+                guard wasVisible, !isVisible else { return }
                 search.isFilterModalPresented = false
-                model.dismissMessageSearch()
+                search.isInputFocused = false
             }
     }
 }

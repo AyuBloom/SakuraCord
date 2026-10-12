@@ -110,6 +110,10 @@ extension AppModel {
     }
 
     func switchMessageSearchScope(from previousGuildID: GuildID?) {
+        // Timings belong to the visible search, while requests may finish off-screen.
+        cancelMessageSearchMeasurement("MessageSearchBenchmark", measuresPagination: false)
+        cancelMessageSearchMeasurement("MessageSearchPaginationBenchmark", measuresPagination: true)
+        AppPerformanceSignposts.endMessageSearchScroll()
         messageSearch.isInputFocused = false
         messageSearch.isFilterModalPresented = false
         messageSearchesByGuildID[previousGuildID] = messageSearch

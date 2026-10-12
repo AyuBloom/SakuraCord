@@ -197,7 +197,7 @@ private struct ChatRootView: View {
     @State private var isFileDropTargeted = false
     @State private var isInstantUpload = false
     @State private var hoveredFileDropDestination: MessageComposerDestination?
-    @State private var modifierPollingTask: Task<Void, Never>?
+    @State private var fileDropWatchdogTask: Task<Void, Never>?
     @State private var composerDropInteraction = ComposerDropInteractionState()
 
     @ViewBuilder private var workspace: some View {
@@ -411,32 +411,17 @@ private struct ChatRootView: View {
         } action: { frame in
             workspaceFrame = frame
         }
-        .dropDestination(
-            for: URL.self,
-            action: { urls, location in
-                guard canAcceptWindowDrops,
-                      let destination = composerDestination(at: location)
-                else { return false }
-                hoveredFileDropDestination = destination
-                let isInstant = NSEvent.modifierFlags.contains(.shift)
-                Task {
-                    await model.receiveComposerAttachments(
-                        .external(urls),
-                        to: destination,
-                        sendingImmediately: isInstant
-                    )
-                }
-                return !urls.isEmpty
-            },
-            isTargeted: { targeted in
-                isFileDropTargeted = targeted
-                isInstantUpload = targeted && NSEvent.modifierFlags.contains(.shift)
-                hoveredFileDropDestination =
-                    targeted ? composerDestinationForCurrentPointer() : nil
-                updateModifierPolling(isTargeted: targeted)
+        .overlay { fileDropBridge }
+        .onChange(of: showsFileDropEffect) { _, isShown in
+            // Driven by the combined state, not per-target callbacks: during a
+            // handoff the next target lights up before the previous one exits.
+            if isShown {
+                if fileDropWatchdogTask == nil { startFileDropWatchdog() }
+            } else {
+                fileDropWatchdogTask?.cancel()
+                fileDropWatchdogTask = nil
             }
-        )
-        .overlay { promisedFileDropBridge }
+        }
         .onPreferenceChange(ThreadPaneFramePreferenceKey.self) { frame in
             supplementaryPaneFrame = frame
         }
@@ -468,8 +453,8 @@ private struct ChatRootView: View {
             )
         }
         .onDisappear {
-            modifierPollingTask?.cancel()
-            modifierPollingTask = nil
+            fileDropWatchdogTask?.cancel()
+            fileDropWatchdogTask = nil
             model.mediaViewerPresentation = nil
         }
         .sheet(isPresented: $showAccountSwitcher) {
@@ -543,17 +528,30 @@ private struct ChatRootView: View {
         }
     }
 
-    private func updateModifierPolling(isTargeted: Bool) {
-        modifierPollingTask?.cancel()
-        modifierPollingTask = nil
-        guard isTargeted else { return }
-        modifierPollingTask = Task { @MainActor in
+    private func startFileDropWatchdog() {
+        fileDropWatchdogTask?.cancel()
+        fileDropWatchdogTask = Task { @MainActor in
             while !Task.isCancelled {
-                isInstantUpload = NSEvent.modifierFlags.contains(.shift)
-                hoveredFileDropDestination = composerDestinationForCurrentPointer()
+                // Native destinations send periodic updates even during a
+                // stationary or button-free drag. Ordinary pointer movement
+                // cannot keep a finished session alive.
+                let idle = ContinuousClock.now - composerDropInteraction.lastDragActivity
+                if idle > .seconds(1) {
+                    resetFileDropState()
+                    return
+                }
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+    }
+
+    private func resetFileDropState() {
+        fileDropWatchdogTask?.cancel()
+        fileDropWatchdogTask = nil
+        isFileDropTargeted = false
+        isInstantUpload = false
+        hoveredFileDropDestination = nil
+        composerDropInteraction.reset()
     }
 
     @ToolbarContentBuilder
@@ -824,14 +822,28 @@ private struct ChatRootView: View {
         return guild.name.isEmpty ? "Unnamed Server" : guild.name
     }
 
-    private var promisedFileDropBridge: some View {
-            ComposerPromisedFileDropBridge(
+    private var fileDropBridge: some View {
+            ComposerFileDropBridge(
                 isEnabled: canAcceptWindowDrops,
                 targetChanged: { targeted, location, instant in
+                    if targeted { composerDropInteraction.noteDragActivity() }
                     let destination = targeted ? composerDestination(at: location) : nil
                     isFileDropTargeted = destination != nil
                     isInstantUpload = destination != nil && instant
                     hoveredFileDropDestination = destination
+                },
+                receiveURLs: { urls, location, instant in
+                    guard canAcceptWindowDrops,
+                          let destination = composerDestination(at: location)
+                    else { return false }
+                    Task {
+                        await model.receiveComposerAttachments(
+                            .external(urls),
+                            to: destination,
+                            sendingImmediately: instant
+                        )
+                    }
+                    return true
                 },
                 receiveFiles: { batch, location, instant in
                     guard let destination = composerDestination(at: location) else {
@@ -886,17 +898,6 @@ private struct ChatRootView: View {
             return horizontalPosition >= localThreadLeadingEdge ? .thread : .channel
         }
         return .channel
-    }
-
-    private func composerDestinationForCurrentPointer() -> MessageComposerDestination? {
-        guard let window =
-            NSApp.keyWindow
-                ?? NSApp.mainWindow
-                ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain })
-        else { return nil }
-        let windowPoint = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        let proposed = proposedComposerDestination(atX: windowPoint.x - workspaceFrame.minX)
-        return model.isComposerDropEligible(proposed) ? proposed : nil
     }
 
     private func channelToolbarSymbol(_ channel: Channel) -> String {

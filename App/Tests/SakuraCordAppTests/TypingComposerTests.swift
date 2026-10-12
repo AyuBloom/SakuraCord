@@ -897,8 +897,8 @@ func `composer paste attaches long text as message txt only where files are acce
 
 @MainActor
 @Test func `promised attachment drops use isolated storage and publish successful files once`() throws {
-    let firstDirectory = try ComposerPromisedFileDropView.makeReceivingDirectory()
-    let secondDirectory = try ComposerPromisedFileDropView.makeReceivingDirectory()
+    let firstDirectory = try ComposerFileDropView.makeReceivingDirectory()
+    let secondDirectory = try ComposerFileDropView.makeReceivingDirectory()
     defer {
         try? FileManager.default.removeItem(at: firstDirectory)
         try? FileManager.default.removeItem(at: secondDirectory)

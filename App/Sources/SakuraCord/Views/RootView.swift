@@ -155,10 +155,7 @@ struct RootView: View {
         case .workspace:
             model.onboardingEntryGuildID == nil && model.guildWorkspacePage == nil
                 && (model.isSwitchingAccounts
-                || MessageSearchSurfacePolicy.showsToolbar(
-                    channelKind: model.selectedChannel?.kind,
-                    hasOpenThread: model.hasThreadPane
-                ))
+                || model.canShowMessageSearch)
         case .signedOut:
             model.launchMode != .normal && !model.includesOfflineSignIn
         }
@@ -973,7 +970,7 @@ private struct ChatRootView: View {
 
     private var hasOpenSupplementaryConversation: Bool {
         hasOpenSupplementaryToolbarConversation
-            || model.messageSearch.isPresented
+            || model.isMessageSearchVisible
     }
 
     private var hasOpenSupplementaryToolbarConversation: Bool {
@@ -1170,7 +1167,7 @@ private struct MessageSearchExperienceModifier: ViewModifier {
             .onChange(of: isEnabled) { wasVisible, isVisible in
                 guard wasVisible, !isVisible else { return }
                 search.isFilterModalPresented = false
-                model.dismissMessageSearch()
+                search.isInputFocused = false
             }
     }
 }

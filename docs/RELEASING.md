@@ -157,10 +157,11 @@ Sparkle secret checks, packaging, signature checks and update-notes validation.
 The release workflow starts optimized packaging while it checks for reusable
 validation. A completed, successful `CI` push run on `nightly` or `main` can
 satisfy validation only for the exact release commit, with successful checkout
-verification and the full `Build and test` step in both the `build (packages)`
-and `build (app)` jobs. Pull request runs, skipped
-tests, and other workflows do not qualify. A repair dispatched with a changed
-workflow also runs validation again. An unavailable lookup or missing match
+verification, `Record clean compilation`, and the full `Build and test` step in
+all four build jobs: `packages`, `protocol`, `media`, and `app`. A suite that
+restored compiler outputs cannot supply clean release validation. Pull request
+runs, skipped tests, and other workflows do not qualify. A repair dispatched
+with a changed workflow also runs validation again. An unavailable lookup or missing match
 runs the complete `./script/ci.sh` suite normally.
 
 The publication job requires successful packaging and either fresh or reused
@@ -171,13 +172,16 @@ rechecks release and announcement checkpoints before writing, preserving
 idempotent retries and published DMGs.
 
 SwiftPM dependency caching is enabled for tag runs as well as branch runs.
-Compiler output artifacts retain the six library test builds and the app test
+Compiler output artifacts retain all seven library test builds and the app test
 build as separate per-job caches for branch CI, and optimized app output for
 release CI. Branch CI gives every tracked file and dependency checkout a
 modification time derived from its Git blob hash, so unchanged sources match
-the restored build records and only changed modules recompile. Only pull
-request runs restore branch caches; `main` and `nightly` pushes compile from
-source so reusable validation is never incremental, then save. These caches are
+the restored build records and only changed modules recompile. PAX archives
+preserve the nanosecond output timestamps recorded by Swift Build. Pull requests
+and `main`/`nightly` pushes restore trusted branch caches; successful branch
+pushes save refreshed outputs. Release validation always compiles from source
+unless it can reuse an exact-commit branch run where every suite compiled clean.
+Optimized release packaging has its own compiler cache. These caches are
 kept for seven days and can cross branch/tag boundaries. Restore accepts only
 successful first-party `CI` pushes from `main`/`nightly` for debug output or
 release tags for optimized output, and only when the source commit is an

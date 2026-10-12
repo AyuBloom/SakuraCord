@@ -21,6 +21,11 @@ For commands, use [Development](DEVELOPMENT.md). For wire behaviour, use the
 Views consume domain state and invoke owners. They do not construct Discord
 requests, open authenticated transports, or import DaveKit directly.
 
+The App package keeps its implementation and resources in the `SakuraCord`
+library target. The `SakuraCordLauncher` executable target calls its launch entry
+point and produces the `SakuraCord` executable. App tests import the same library,
+so building the executable and tests does not compile a second copy of the app.
+
 ## Find the owner
 
 Start at these files and follow their neighbouring extensions. This is an entry
@@ -69,6 +74,12 @@ logout and failed startup cancel old work and clear its presentation. Draft
 writes capture their original database and drain on teardown; clearing and
 restoring drafts use the same serialized queue. A restoration also checks the
 composer's edit revision so it cannot overwrite a newer edit or clear.
+
+Message search retains its query and results per guild, with all direct messages
+sharing one scope. Channel changes preserve that scope's search. Side-pane threads
+temporarily occupy the results pane; closing them reveals the retained search.
+Search requests publish to their originating scope, and account teardown clears
+every scope.
 
 `GuildOnboardingStore` owns in-memory choices, membership confirmation, Guide
 configuration and progress. `InboxState` owns frozen Inbox groups and loading;

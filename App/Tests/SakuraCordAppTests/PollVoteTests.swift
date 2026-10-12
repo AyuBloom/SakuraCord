@@ -222,6 +222,10 @@ func `search results preserve poll events before their messages are retained`(sc
     model.messageSearch.queryText = "Lunch"
     model.submitMessageSearch()
     await provider.waitForSearch()
+    let search = model.messageSearch
+    let searchTask = search.requestTask
+    let originalGuildID = model.selectedGuildID
+    model.selectedGuildID = GuildID(rawValue: 99_100)
     #expect(model.retainedMessage(channelID: message.channelID, messageID: message.id) == nil)
     var update = MessageUpdate(messageID: message.id, channelID: message.channelID)
     if scenario.finalizes {
@@ -241,7 +245,11 @@ func `search results preserve poll events before their messages are retained`(sc
         response.poll?.applyVote(answerID: 2, isAddition: true, isCurrentUser: false)
     }
     await provider.resumeSearch(messages: [response])
-    await model.messageSearch.requestTask?.value
+    await searchTask?.value
+    #expect(model.messageSearch.page == nil)
+    #expect(!model.messageSearch.isPresented)
+    model.selectedGuildID = originalGuildID
+    #expect(model.messageSearch === search)
     if !scenario.finalizes {
         let unresolved = try #require(model.messageSearch.page?.messages.first)
         #expect(unresolved.poll?.results == nil)

@@ -65,11 +65,7 @@ struct ChatWorkspaceView: View {
             hasOpenThread: model.hasThreadPane && !model.isThreadFullWidth,
             hasOpenVoiceChat: model.isVoiceChatOpen,
             showsInspector: model.showInspector,
-            showsMessageSearch: model.messageSearch.isPresented
-                && MessageSearchSurfacePolicy.showsToolbar(
-                    channelKind: model.selectedChannel?.kind,
-                    hasOpenThread: model.hasThreadPane
-                )
+            showsMessageSearch: model.isMessageSearchVisible
         )
 
         HStack(spacing: 0) {
@@ -257,6 +253,7 @@ private struct ChatWorkspaceSupplementaryContent: View {
         case .messageSearch:
             if toolbarSearchFieldMetrics.isValid {
                 MessageSearchPanelView(model: model)
+                    .id(ObjectIdentifier(model.messageSearch))
                     .frame(width: ChatChromeMetrics.memberListWidth)
                     .frame(maxHeight: .infinity)
             }

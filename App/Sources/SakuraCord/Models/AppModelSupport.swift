@@ -84,6 +84,7 @@ extension AppModel {
 
     func invalidateAccountSession() {
         accountSessionGeneration &+= 1
+        resetMessageSearches()
         serverInvites.reset()
         friends.reset()
         lastDirectMessageSelection = nil

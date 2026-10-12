@@ -4,7 +4,12 @@ import SakuraCordModels
 import SwiftUI
 import UserNotifications
 
-@main
+/// Starts the application from the executable while keeping its implementation shared with tests.
+@MainActor
+public func runSakuraCord() {
+    SakuraCordApp.main()
+}
+
 struct SakuraCordApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel

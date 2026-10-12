@@ -469,30 +469,32 @@ extension AppModel {
         // This owner commits the pinned list in a batch. Publish its truth to
         // other surfaces without reconciling every item back into that list.
         consumeMessageUpdated(message, preparedTextPlan: nil, updatesPinnedMessages: false)
-        guard var page = messageSearch.page else { return }
-        var changed = false
-        for resultIndex in page.results.indices {
-            for messageIndex in page.results[resultIndex].messages.indices
-            where page.results[resultIndex].messages[messageIndex].id == message.id {
-                page.results[resultIndex].messages[messageIndex].isPinned = isPinned
-                changed = true
+        for search in retainedMessageSearches {
+            guard var page = search.page else { continue }
+            var changed = false
+            for resultIndex in page.results.indices {
+                for messageIndex in page.results[resultIndex].messages.indices
+                where page.results[resultIndex].messages[messageIndex].id == message.id {
+                    page.results[resultIndex].messages[messageIndex].isPinned = isPinned
+                    changed = true
+                }
             }
+            guard changed else { continue }
+            let oldRows = search.rows
+            search.page = page
+            let channels = messageSearchChannelsByID(additionalChannels: page.channels)
+            search.rows = MessageSearchPresentation.rows(
+                for: page,
+                channelsByID: channels
+            )
+            let nextRevision = search.rowsRevision &+ 1
+            search.rowsUpdateJournal.append(MessageRowsUpdateRecordBuilder.make(
+                oldRows: oldRows,
+                newRows: search.rows,
+                revision: nextRevision
+            ))
+            search.rowsRevision = nextRevision
         }
-        guard changed else { return }
-        let oldRows = messageSearch.rows
-        messageSearch.page = page
-        let channels = messageSearchChannelsByID(additionalChannels: page.channels)
-        messageSearch.rows = MessageSearchPresentation.rows(
-            for: page,
-            channelsByID: channels
-        )
-        let nextRevision = messageSearch.rowsRevision &+ 1
-        messageSearch.rowsUpdateJournal.append(MessageRowsUpdateRecordBuilder.make(
-            oldRows: oldRows,
-            newRows: messageSearch.rows,
-            revision: nextRevision
-        ))
-        messageSearch.rowsRevision = nextRevision
     }
 
     func togglePinnedState(for message: Message) {

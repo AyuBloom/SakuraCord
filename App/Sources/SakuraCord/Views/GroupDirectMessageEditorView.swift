@@ -16,12 +16,12 @@ struct GroupDirectMessageEditorView: View {
     var body: some View {
         let store = model.groupDirectMessageEditor
         let isBusy = store.isSaving || isPreparingIcon
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: InterfaceScale.metric(16)) {
             Text("Edit Group")
                 .font(.interface(.title2).weight(.bold))
                 .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 12)
-            VStack(spacing: 10) {
+                .padding(.horizontal, InterfaceScale.metric(12))
+            VStack(spacing: InterfaceScale.metric(10)) {
                 GroupDirectMessageIconEditor(
                     store: store,
                     presentation: presentation,
@@ -38,7 +38,7 @@ struct GroupDirectMessageEditorView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: InterfaceScale.metric(8)) {
                 GroupDirectMessageNameField(
                     placeholder: presentation.placeholder,
                     draft: Bindable(store).draftName,
@@ -49,22 +49,22 @@ struct GroupDirectMessageEditorView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, InterfaceScale.metric(12))
             // Keep the 12-point footer inset that makes the capsules concentric with the panel.
             HStack {
                 ModalGlassButton(symbol: "xmark", label: "Cancel") { modal?.dismiss() }
                     .disabled(store.isSaving)
-                Spacer(minLength: 16)
+                Spacer(minLength: InterfaceScale.metric(16))
                 ModalGlassButton(symbol: "checkmark", label: "Save", primary: true, isLoading: store.isSaving, action: save)
                     .disabled(isBusy || !store.changes.hasChanges)
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.top, 4)
+            .padding(.top, InterfaceScale.metric(4))
         }
         .disabled(store.isSaving)
-        .padding(.top, 12)
-        .padding(12)
-        .frame(width: min(400, availableSize.width))
+        .padding(.top, InterfaceScale.metric(12))
+        .padding(InterfaceScale.metric(12))
+        .frame(width: min(InterfaceScale.metric(400), availableSize.width))
         .windowModalDismissDisabled(isBusy)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Edit Group")
@@ -83,13 +83,13 @@ private struct GroupDirectMessageNameField: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: InterfaceScale.metric(8)) {
             Text("Group Name").font(.interface(.headline))
             TextField(placeholder, text: $draft)
                 .textFieldStyle(.plain).font(.interface(.body))
                 .focused($isFocused)
                 .onSubmit(submit)
-                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(InterfaceScale.metric(14)).frame(maxWidth: .infinity, alignment: .leading)
                 .modifier(ModalInputSurface(isFocused: isFocused) { isFocused = true })
                 .onChange(of: draft) { _, value in
                     let limit = GroupDirectMessageChanges.maximumNameLength
@@ -257,7 +257,7 @@ struct EditGroupPresentationModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .windowModal(item: Bindable(model.groupDirectMessageEditor).presentation, cornerRadius: 32, cornerStyle: .circular) {
+            .windowModal(item: Bindable(model.groupDirectMessageEditor).presentation, cornerRadius: InterfaceScale.metric(32), cornerStyle: .circular) {
                 GroupDirectMessageEditorView(model: model, presentation: $0)
             }
     }

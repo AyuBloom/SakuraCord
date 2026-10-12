@@ -1,46 +1,52 @@
 import AppKit
 import SwiftUI
 
-struct ComposerPromisedFileDropBridge: NSViewRepresentable {
+struct ComposerFileDropBridge: NSViewRepresentable {
     var isEnabled: Bool
     let targetChanged: (_ isTargeted: Bool, _ location: CGPoint, _ isInstant: Bool) -> Void
+    let receiveURLs: (_ urls: [URL], _ location: CGPoint, _ isInstant: Bool) -> Bool
     let receiveFiles: (
         _ batch: ComposerPromisedFileBatch,
         _ location: CGPoint,
         _ isInstant: Bool
     ) -> Void
 
-    func makeNSView(context _: Context) -> ComposerPromisedFileDropView {
-        ComposerPromisedFileDropView(
+    func makeNSView(context _: Context) -> ComposerFileDropView {
+        ComposerFileDropView(
             isEnabled: isEnabled,
             targetChanged: targetChanged,
+            receiveURLs: receiveURLs,
             receiveFiles: receiveFiles
         )
     }
 
-    func updateNSView(_ view: ComposerPromisedFileDropView, context _: Context) {
+    func updateNSView(_ view: ComposerFileDropView, context _: Context) {
         view.isEnabled = isEnabled
         view.targetChanged = targetChanged
+        view.receiveURLs = receiveURLs
         view.receiveFiles = receiveFiles
     }
 }
 
-final class ComposerPromisedFileDropView: NSView {
+final class ComposerFileDropView: NSView {
     var isEnabled: Bool
     var targetChanged: (Bool, CGPoint, Bool) -> Void
+    var receiveURLs: ([URL], CGPoint, Bool) -> Bool
     var receiveFiles: (ComposerPromisedFileBatch, CGPoint, Bool) -> Void
 
     init(
         isEnabled: Bool,
         targetChanged: @escaping (Bool, CGPoint, Bool) -> Void,
+        receiveURLs: @escaping ([URL], CGPoint, Bool) -> Bool,
         receiveFiles: @escaping (ComposerPromisedFileBatch, CGPoint, Bool) -> Void
     ) {
         self.isEnabled = isEnabled
         self.targetChanged = targetChanged
+        self.receiveURLs = receiveURLs
         self.receiveFiles = receiveFiles
         super.init(frame: .zero)
         registerForDraggedTypes(
-            NSFilePromiseReceiver.readableDraggedTypes.map {
+            [.fileURL] + NSFilePromiseReceiver.readableDraggedTypes.map {
                 NSPasteboard.PasteboardType($0)
             }
         )
@@ -63,18 +69,36 @@ final class ComposerPromisedFileDropView: NSView {
         updateTarget(sender)
     }
 
+    override func wantsPeriodicDraggingUpdates() -> Bool {
+        true
+    }
+
     override func draggingExited(_ sender: (any NSDraggingInfo)?) {
         targetChanged(false, .zero, false)
     }
 
-    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        let receivers = promisedFileReceivers(from: sender.draggingPasteboard)
-        guard isEnabled, !receivers.isEmpty,
-              let directory = try? Self.makeReceivingDirectory()
-        else { return false }
+    override func draggingEnded(_ sender: any NSDraggingInfo) {
+        targetChanged(false, .zero, false)
+    }
 
+    override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
+        targetChanged(false, .zero, false)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        // Clear before the guards and before the async promise reads so the
+        // overlay never outlives the drop.
+        targetChanged(false, .zero, false)
+        guard isEnabled else { return false }
         let location = convert(sender.draggingLocation, from: nil)
         let isInstant = NSEvent.modifierFlags.contains(.shift)
+        let receivers = promisedFileReceivers(from: sender.draggingPasteboard)
+        if receivers.isEmpty {
+            let urls = ComposerPasteboardAttachments.fileURLs(from: sender.draggingPasteboard)
+            return !urls.isEmpty && receiveURLs(urls, location, isInstant)
+        }
+        guard let directory = try? Self.makeReceivingDirectory()
+        else { return false }
         // Each receiver represents one promised file. `fileTypes` lists the
         // representations that file can provide; it is not a callback count.
         let collector = ComposerPromisedFileCollector(
@@ -92,7 +116,6 @@ final class ComposerPromisedFileDropView: NSView {
                 collector.receive(url: url, error: error)
             }
         }
-        targetChanged(false, .zero, false)
         return true
     }
 
@@ -106,7 +129,8 @@ final class ComposerPromisedFileDropView: NSView {
         let location = convert(sender.draggingLocation, from: nil)
         let isInstant = NSEvent.modifierFlags.contains(.shift)
         let acceptsDrop = isEnabled
-            && !promisedFileReceivers(from: sender.draggingPasteboard).isEmpty
+            && (!promisedFileReceivers(from: sender.draggingPasteboard).isEmpty
+                || !ComposerPasteboardAttachments.fileURLs(from: sender.draggingPasteboard).isEmpty)
         targetChanged(acceptsDrop, location, isInstant)
         return acceptsDrop ? .copy : []
     }

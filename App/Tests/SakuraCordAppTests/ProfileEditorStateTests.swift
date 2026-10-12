@@ -451,6 +451,20 @@ private actor ProfileEditorCacheProvider: ChatProvider {
         value.mainMetadata.bio = changes.metadata.bio.applying(to: value.mainMetadata.bio)
         await didSave(ProfileSaveConfirmation(stage: .metadata, snapshot: value))
     }
+    private var pendingGroupSave: CheckedContinuation<Void, Never>?
+    private var groupSaveStarted: CheckedContinuation<Void, Never>?
+    func waitForGroupSave() async {
+        if pendingGroupSave != nil { return }
+        await withCheckedContinuation { groupSaveStarted = $0 }
+    }
+    func resumeGroupSave() { pendingGroupSave?.resume(); pendingGroupSave = nil }
+    func editGroupDirectMessage(_ channelID: ChannelID, changes: GroupDirectMessageChanges) async throws -> Channel {
+        await withCheckedContinuation {
+            pendingGroupSave = $0
+            groupSaveStarted?.resume(); groupSaveStarted = nil
+        }
+        return try await fixture.editGroupDirectMessage(channelID, changes: changes)
+    }
     private var widgets: [ProfileWidget]?
     init(widgets: [ProfileWidget]? = nil) { self.widgets = widgets }
     private var cache: [ProfileEditingScope: ProfileEditingSnapshot] = [:]
@@ -691,4 +705,32 @@ private actor ProfileEditorCacheProvider: ChatProvider {
     #expect(model.snapshot?.channels.contains { $0.id == selected && $0.guildID == nil } == true)
     #expect(model.errorMessage == nil)
     #expect(store.leaving.isEmpty)
+}
+
+@MainActor
+@Test func `a temporary account transition cannot leave group saving busy`() async throws {
+    let provider = ProfileEditorCacheProvider()
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    await model.start()
+    let store = model.groupDirectMessageEditor
+    model.presentGroupDirectMessageEditor(for: ChannelID(rawValue: 401))
+    let presentation = try #require(store.presentation)
+    store.draftName = "Trip"
+    model.saveGroupDirectMessage(presentation)
+    await provider.waitForGroupSave()
+    model.accountTransitionIsActive = true
+    await provider.resumeGroupSave()
+    for task in Array(model.accountChildTasks.values) { await task.value }
+    model.accountTransitionIsActive = false
+    #expect(!store.isSaving)
+    #expect(store.presentation == presentation)
+    #expect(store.draftName == "Trip")
+
+    // A transition can also begin before the queued save task starts.
+    model.saveGroupDirectMessage(presentation)
+    model.accountTransitionIsActive = true
+    for task in Array(model.accountChildTasks.values) { await task.value }
+    model.accountTransitionIsActive = false
+    #expect(!store.isSaving)
+    #expect(store.presentation == presentation)
 }

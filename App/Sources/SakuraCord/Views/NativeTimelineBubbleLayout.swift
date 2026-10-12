@@ -25,6 +25,11 @@ enum NativeTimelineBubbleLayout {
     }
 
     static var horizontalPadding: CGFloat { InterfaceScale.metric(12) }
+    static var verticalPadding: CGFloat { InterfaceScale.metric(8) }
+    /// The height of a bubble holding one line of text.
+    static var oneLineHeight: CGFloat {
+        MessageRowLayoutMetrics.compactContentHeight + verticalPadding * 2
+    }
     /// No taller than a one-line bubble, which the avatar is bottom-aligned to.
     static var avatarDiameter: CGFloat { InterfaceScale.metric(32) }
 
@@ -33,7 +38,7 @@ enum NativeTimelineBubbleLayout {
         model: AppModel?
     ) -> Context {
         let isEnabled =
-            model?.appearanceSettings.messageAppearance == .bubbles
+            model?.messageAppearance(for: message.channelID) == .bubbles
                 && !message.type.hasGeneratedContent
         // Standard message layout never consumes bubble identity. Avoid an
         // account-wide channel search for every newly paginated message.
@@ -48,8 +53,13 @@ enum NativeTimelineBubbleLayout {
             isEnabled: isEnabled,
             isOutgoing: isEnabled
                 && message.author.id == model?.snapshot?.currentUser.id,
-            showsAvatar: channel?.kind != .directMessage
+            showsAvatar: showsAvatar(in: channel)
         )
+    }
+
+    /// One-to-one conversations leave incoming bubbles without avatars.
+    static func showsAvatar(in channel: Channel?) -> Bool {
+        channel?.kind != .directMessage
     }
 
     /// The widest a bubble's content column may grow in a timeline row.
@@ -149,13 +159,40 @@ enum NativeTimelineBubbleLayout {
             availableWidth - horizontalInset - horizontalPadding
                 - preferredContentWidth
         } else {
-            horizontalInset
-                + (context.showsAvatar ? avatarWidth + columnGap : 0)
-                + horizontalPadding
+            incomingBubbleMinX(
+                horizontalInset: horizontalInset,
+                avatarWidth: avatarWidth,
+                columnGap: columnGap,
+                showsAvatar: context.showsAvatar
+            ) + horizontalPadding
         }
         return Column(
             contentX: contentX,
             contentWidth: preferredContentWidth
+        )
+    }
+
+    /// Where an incoming bubble's leading edge sits, past the avatar column
+    /// when one shows.
+    static func incomingBubbleMinX(
+        horizontalInset: CGFloat,
+        avatarWidth: CGFloat,
+        columnGap: CGFloat,
+        showsAvatar: Bool
+    ) -> CGFloat {
+        horizontalInset + (showsAvatar ? avatarWidth + columnGap : 0)
+    }
+
+    /// The conversation timeline's incoming bubble edge, so chrome outside
+    /// the timeline can line up with the bubbles.
+    static func incomingBubbleMinX(showsAvatar: Bool, settings: InterfaceSettingsSnapshot) -> CGFloat {
+        incomingBubbleMinX(
+            horizontalInset: MessageRowLayoutMetrics.horizontalInset,
+            avatarWidth: MessageRowLayoutMetrics.avatarDiameter,
+            columnGap: MessageRowLayoutMetrics.columnGap(
+                timestampGutterWidth: NativeTimelineCompactTimestampMetrics.width(settings: settings)
+            ),
+            showsAvatar: showsAvatar
         )
     }
 

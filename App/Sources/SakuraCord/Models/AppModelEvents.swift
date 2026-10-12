@@ -323,6 +323,7 @@ extension AppModel {
              .voiceChannelEffect:
             consumeSoundboardEvent(event)
         case .typing(let channelID, let user):
+            guard !isUserIgnored(user.id), !ignoredUsers.blockedUserIDs.contains(user.id) else { return }
             typingState.receive(
                 channelID: channelID,
                 user: user,
@@ -476,6 +477,7 @@ extension AppModel {
         // Discord saves pending command uses as soon as its connection closes.
         if state == .disconnected, previousState == .ready { flushCommandFrecencyNow() }
         if state == .ready, previousState != .ready, inbox.isPresented { refreshInbox() }
+        if state == .ready, previousState != .ready { friendsConnectionChanged() }
         if state != .ready {
             if previousState == .ready {
                 // A resumed session can reconcile missed messages through the
@@ -526,6 +528,8 @@ extension AppModel {
         if let nonce = message.nonce {
             enrichInteractionResponse(&message)
             composer.outbox.noteConfirmation(nonce: nonce)
+            // Discord has the upload; the recording is no longer needed.
+            if let outgoing = composer.outbox.draftsByNonce[nonce] { discardVoiceMessageFile(for: outgoing) }
             composer.outbox.draftsByNonce[nonce] = nil
             composer.outbox.stickerUploadSourceURLByNonce[nonce] = nil
             pruneOwnedPromisedAttachmentFiles()
@@ -551,7 +555,7 @@ extension AppModel {
         guard let currentUserID = snapshot?.currentUser.id else { return }
         let disposition = readState.receive(message, currentUserID: currentUserID)
         guard disposition.accepted else { return }
-        if message.author.id != currentUserID,
+        if message.author.id != currentUserID, !isMessageSuppressed(message),
            accessibilitySettings.announcesNewMessages
         {
             accessibilityMessageAnnouncer.enqueue()
@@ -892,6 +896,8 @@ extension AppModel {
         let previousGuildsByID = serverRailGuildsByID
         let previousAccessEvidence = readState.authoritativeAccessEvidenceChannelIDs()
         snapshot = value
+        friends.replaceRelationships(value.relationships)
+        ignoredUsers.replaceRelationships(value.relationships)
         for (guildID, member) in value.currentMembersByGuildID {
             receiveOnboardingMember(member, guildID: guildID)
         }
@@ -949,6 +955,7 @@ extension AppModel {
         let retainedGuildID = selectedGuildID.flatMap { selected in
             value.guilds.contains { $0.id == selected } ? selected : value.guilds.first?.id
         }
+        reconcileInboxEligibility()
         selectGuild(retainedGuildID)
     }
 

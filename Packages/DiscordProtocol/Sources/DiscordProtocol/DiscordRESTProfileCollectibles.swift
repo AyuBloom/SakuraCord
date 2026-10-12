@@ -94,6 +94,9 @@ public extension DiscordRESTProvider {
         memberPresentationRevisions = [:]
         relationshipRevisions = [:]
         privateChannelRevisions = [:]
+        cachedUserRevisions = [:]
+        relationshipUserPublicationTask?.cancel()
+        relationshipUserPublicationTask = nil
         profileSaveID = nil
         invalidateSavedProfilePresentation()
         profileEditingResponses = [:]

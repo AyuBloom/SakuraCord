@@ -234,6 +234,7 @@ extension AppModel {
     }
 
     func resetAccountPresentationState() {
+        resetVoiceMessages()
         unreadPresentationRefreshTask?.cancel()
         unreadPresentationRefreshTask = nil
         unreadPresentationPreparationTask?.cancel()
@@ -289,6 +290,7 @@ extension AppModel {
         selectedChannel = nil
         selectedGuildID = nil
         selectedChannelID = nil
+        resetMessageSearches()
         conversationNavigationHistory = ConversationNavigationHistory()
         replaceSelectedMessages(with: [])
         hasCompletedInitialMessageLoad = false
@@ -542,6 +544,7 @@ extension AppModel {
         loadingReactionReactors = []
         failedReactionReactorLoads = [:]
         resetForumLoadAndPresentationState()
+        for outgoing in composer.outbox.draftsByNonce.values { discardVoiceMessageFile(for: outgoing) }
         await composer.reset()
     }
 }

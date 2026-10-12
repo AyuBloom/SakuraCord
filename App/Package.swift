@@ -1,11 +1,16 @@
 // swift-tools-version: 6.4
 import PackageDescription
+import Foundation
+
+let sparkleDependency: Package.Dependency = ProcessInfo.processInfo.environment["SAKURACORD_SPARKLE_PACKAGE_PATH"]
+    .map { .package(path: $0) }
+    ?? .package(url: "https://github.com/SakuraCordApp/Sparkle", exact: "2.10.0-sakuracord.1")
 
 let package = Package(
     name: "SakuraCordApp",
     platforms: [.macOS(.v27)],
     products: [
-        .executable(name: "SakuraCord", targets: ["SakuraCord"]),
+        .executable(name: "SakuraCord", targets: ["SakuraCordLauncher"]),
         .executable(name: "SakuraCordPluginHost", targets: ["SakuraCordPluginHost"])
     ],
     dependencies: [
@@ -16,17 +21,14 @@ let package = Package(
         .package(path: "../Packages/MediaPipeline"),
         .package(path: "../Packages/SakuraCordPluginSDK"),
         .package(url: "https://github.com/airbnb/lottie-ios.git", exact: "4.6.1"),
-        .package(
-            url: "https://github.com/SakuraCordApp/Sparkle",
-            exact: "2.9.6-sakuracord.2"
-        ),
+        sparkleDependency,
         .package(
             url: "https://github.com/llsc12/hcaptcha",
             revision: "29de12bd290c5cc9c61b3e3c15fe9a9d21449465"
         )
     ],
     targets: [
-        .executableTarget(
+        .target(
             name: "SakuraCord",
             dependencies: [
                 "SakuraCordModels", "DiscordProtocol", "SakuraCordPersistence",
@@ -41,6 +43,11 @@ let package = Package(
                 .defaultIsolation(MainActor.self),
                 .interoperabilityMode(.Cxx)
             ]
+        ),
+        .executableTarget(
+            name: "SakuraCordLauncher",
+            dependencies: ["SakuraCord"],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
         .executableTarget(name: "SakuraCordPluginHost", dependencies: ["SakuraCordPluginSDK"]),
         .testTarget(

@@ -112,6 +112,7 @@ enum NativeTimelineTextPresentation {
             NativeTimelineTextPlan.make(
                 for: message,
                 currentUserID: model?.snapshot?.currentUser.id,
+                systemRecipient: model?.systemMessageRecipient(for: message),
                 systemActorColor: systemActorColor,
                 systemLinkColor: SakuraCordAccentColor.nsColor
             )
@@ -137,7 +138,7 @@ enum NativeTimelineTextPresentation {
         }
 
         let preservesCompactSystemStyle = message.type.hasGeneratedContent
-            && model?.appearanceSettings.messageAppearance != .bubbles
+            && model?.messageAppearance(for: message.channelID) != .bubbles
         let resolvedBaseFontSize = InterfaceScale.fontSize(
             preservesCompactSystemStyle
                 ? plan.baseFontSize
@@ -152,8 +153,7 @@ enum NativeTimelineTextPresentation {
                 linkedImages: plan.linkedImages
             )
         }
-        // System messages keep their actor styling and actions at other
-        // interface sizes and in bubbles, where text uses the message size.
+        // Preserve system-message styling and actions at every size, including bubbles.
         if message.type.hasGeneratedContent, let preparedBox = plan.attributedText {
             let scaled = preparedBox.value.scalingTypography(
                 by: resolvedBaseFontSize / plan.baseFontSize

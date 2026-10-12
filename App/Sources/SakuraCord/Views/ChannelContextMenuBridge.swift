@@ -117,12 +117,15 @@ enum ChannelPinMenuAction {
 /// Page destinations share the channel row's native hover and selection tracking.
 struct ChannelRowHoverBridge: NSViewRepresentable {
     let isSelected: Bool
+    var usesCustomSelectionBackground = false
     func makeNSView(context: Context) -> ChannelContextMenuHitView {
         let view = ChannelContextMenuHitView()
+        view.usesCustomSelectionBackground = usesCustomSelectionBackground
         view.isSelected = isSelected
         return view
     }
     func updateNSView(_ view: ChannelContextMenuHitView, context: Context) {
+        view.usesCustomSelectionBackground = usesCustomSelectionBackground
         view.isSelected = isSelected
     }
     static func dismantleNSView(_ view: ChannelContextMenuHitView, coordinator: ()) {
@@ -154,7 +157,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
     var pinAction: ChannelPinMenuAction = .unavailable
     /// Recipient actions for a direct message, such as a friend nickname.
     /// Resolved when the menu opens so rows don't observe relationship state.
-    var userActions: () -> [NicknameMenuAction] = { [] }
+    var userMenu: () -> NSMenu? = { nil }
     /// Edit Group and Leave Group for a group DM.
     var groupActions: GroupDirectMessageMenuActions?
     var usesCustomSelectionBackground = false
@@ -205,7 +208,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
         private var copyChannelID: () -> Void
         private var copyLink: () -> Void
         private var pinAction: ChannelPinMenuAction
-        private var userActions: () -> [NicknameMenuAction]
+        private var userMenu: () -> NSMenu?
         private var groupActions: GroupDirectMessageMenuActions?
 
         init(from bridge: ChannelContextMenuBridge) {
@@ -223,7 +226,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
             copyChannelID = bridge.copyChannelID
             copyLink = bridge.copyLink
             pinAction = bridge.pinAction
-            userActions = bridge.userActions
+            userMenu = bridge.userMenu
             groupActions = bridge.groupActions
         }
 
@@ -242,7 +245,7 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
             copyChannelID = bridge.copyChannelID
             copyLink = bridge.copyLink
             pinAction = bridge.pinAction
-            userActions = bridge.userActions
+            userMenu = bridge.userMenu
             groupActions = bridge.groupActions
         }
 
@@ -274,7 +277,12 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
 
             addGroupItem("Edit Group", systemImage: "pencil", action: #selector(editGroupFromMenu), to: menu)
 
-            let userItems = NicknameContextMenu.items(for: userActions())
+            let personItems = detachedUserMenuItems()
+            let copyIdentifier = "user-\(UserMenuAction.Group.copy.rawValue)"
+            let destructiveIdentifier = "user-\(UserMenuAction.Group.destructive.rawValue)"
+            let userItems = personItems.filter {
+                !$0.isSeparatorItem && $0.identifier?.rawValue != copyIdentifier && $0.identifier?.rawValue != destructiveIdentifier
+            }
             if !userItems.isEmpty {
                 userItems.forEach(menu.addItem)
                 menu.addItem(.separator())
@@ -335,6 +343,13 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
                 "Leave Group", systemImage: "rectangle.portrait.and.arrow.right",
                 action: #selector(leaveGroupFromMenu), isDestructive: true, to: menu
             )
+            personItems.filter { $0.identifier?.rawValue == copyIdentifier }.forEach(menu.addItem)
+            appendChannelCopyItems(to: menu)
+            UserContextMenu.append(personItems.filter { $0.identifier?.rawValue == destructiveIdentifier }, to: menu)
+            return menu
+        }
+
+        private func appendChannelCopyItems(to menu: NSMenu) {
             menu.addItem(
                 menuItem(
                     subject.copyIDTitle,
@@ -351,7 +366,6 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
                     )
                 )
             }
-            return menu
         }
 
         /// A group DM action in its own section, as Discord's group menu lists it.
@@ -363,6 +377,13 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
                 menuItem(title, systemImage: systemImage, action: action, isEnabled: allowsMutations, isDestructive: isDestructive)
             )
             menu.addItem(.separator())
+        }
+
+        private func detachedUserMenuItems() -> [NSMenuItem] {
+            let menu = userMenu()
+            let items = menu?.items ?? []
+            menu?.removeAllItems()
+            return items
         }
 
         private var isDirectlyMuted: Bool {
@@ -478,8 +499,8 @@ extension MessageNotificationLevel {
 }
 
 final class ChannelContextMenuHitView: NSView {
-    var menuProvider: (() -> NSMenu?)?
     var usesCustomSelectionBackground = false
+    var menuProvider: (() -> NSMenu?)?
     var isSelected = false {
         didSet {
             updateNativeHoverPresentation()
@@ -488,6 +509,7 @@ final class ChannelContextMenuHitView: NSView {
 
     private weak var nativeRowView: NSTableRowView?
     private let nativeHoverView = ChannelNativeHoverRowView()
+    private let neutralSelectionView = ChannelNeutralSelectionView()
     private let interactionView = ChannelNativeRowInteractionView()
     private var isHovering = false
 
@@ -530,6 +552,7 @@ final class ChannelContextMenuHitView: NSView {
         interactionView.resetHoverTracking()
         interactionView.removeFromSuperview()
         nativeHoverView.removeFromSuperview()
+        neutralSelectionView.removeFromSuperview()
         nativeRowView = nil
         isHovering = false
     }
@@ -561,6 +584,7 @@ final class ChannelContextMenuHitView: NSView {
             positioned: .below,
             relativeTo: nil
         )
+        rowView.addSubview(neutralSelectionView, positioned: .below, relativeTo: nil)
         rowView.addSubview(
             interactionView,
             positioned: .above,
@@ -593,12 +617,13 @@ final class ChannelContextMenuHitView: NSView {
            let tableView = enclosingNativeTableView(near: nativeRowView),
            tableView.selectionHighlightStyle != .none
         {
-            // Keep native selection and keyboard navigation while the inbox
-            // draws its own neutral selection background.
+            // Preserve native keyboard navigation, but draw a neutral selection
+            // using exactly the same geometry as the hover highlight.
             tableView.selectionHighlightStyle = .none
         }
+        neutralSelectionView.isHidden = !(usesCustomSelectionBackground && isSelected)
         nativeHoverView.showsHover = isHovering && !isSelected
-        guard nativeHoverView.showsHover else { return }
+        guard nativeHoverView.showsHover || !neutralSelectionView.isHidden else { return }
         synchronizeNativeHoverGeometry()
     }
 
@@ -626,6 +651,14 @@ final class ChannelContextMenuHitView: NSView {
         }
 
         template.apply(to: nativeHoverView, in: nativeRowView.bounds)
+        if usesCustomSelectionBackground {
+            // A reused sidebar table may carry a template from a shorter guild row.
+            nativeHoverView.frame.size.height = max(0, nativeRowView.bounds.height - 2 * template.verticalInset)
+        }
+        neutralSelectionView.frame = nativeHoverView.frame
+        neutralSelectionView.layer?.cornerRadius = template.cornerRadius
+        neutralSelectionView.layer?.cornerCurve = template.cornerCurve
+        neutralSelectionView.layer?.maskedCorners = template.maskedCorners
     }
 
     private func enclosingNativeTableView(
@@ -781,6 +814,33 @@ final class ChannelNativeHoverTemplateStore {
     ) {
         templates.setObject(Box(template), forKey: tableView)
     }
+}
+
+/// The inbox's neutral selection fill, sharing the hover template's bounds and corners.
+private final class ChannelNeutralSelectionView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        isHidden = true
+        updateFill()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateFill()
+    }
+
+    private func updateFill() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    nonisolated override func accessibilityIsIgnored() -> Bool { true }
 }
 
 private final class ChannelNativeHoverRowView: NSVisualEffectView {

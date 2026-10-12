@@ -154,6 +154,8 @@ final class AppModel {
         ServerRailPresentationStore()
     @ObservationIgnored let onboarding = GuildOnboardingStore()
     @ObservationIgnored let serverInvites = ServerInvitePresentationStore()
+    @ObservationIgnored let friends = FriendsState()
+    @ObservationIgnored let ignoredUsers = IgnoredUsersState()
     @ObservationIgnored let serverTagCards = ServerTagCardStore()
     @ObservationIgnored let issueReports = IssueReportStore()
     @ObservationIgnored let nicknameEditor = NicknameEditorStore()
@@ -189,9 +191,11 @@ final class AppModel {
     var checkingChannelIDs: Set<ChannelID> = []
     var selectedChannel: Channel?
     var workspaceNavigationOverlay: WorkspaceNavigationOverlay?
-    let messageSearch = MessageSearchState()
+    var messageSearch = MessageSearchState()
+    @ObservationIgnored var messageSearchesByGuildID: [GuildID?: MessageSearchState] = [:]
     let pinnedMessages = PinnedMessagesState()
     let inbox = InboxState()
+    @ObservationIgnored var lastDirectMessageSelection: DirectMessageSidebarSelection?
     @ObservationIgnored var lastOpenedChannelIDsByGuild: [GuildID: ChannelID] = [:]
     @ObservationIgnored var messages: [Message] = []
     @ObservationIgnored var messageRows: [MessageRowPresentation] = []
@@ -435,6 +439,9 @@ final class AppModel {
             || threadErrorScope == .earlierPage
     }
     @ObservationIgnored let composer = MessageComposerState()
+    @ObservationIgnored let voiceMessagePlayback = VoiceMessagePlaybackStore()
+    @ObservationIgnored let channelVoiceMessageComposer = VoiceMessageComposerState(destination: .channel)
+    @ObservationIgnored let threadVoiceMessageComposer = VoiceMessageComposerState(destination: .thread)
     var gifResults: [GIFSearchResult] = []
     var gifCategories: [GIFPickerCategory] = []
     var gifTrendingPreviewURL: URL?
@@ -503,6 +510,7 @@ final class AppModel {
         didSet {
             guard !defersVoiceSidebarPresentation, oldValue != voiceStates else { return }
             refreshVoiceSidebarPresentation()
+            reconcileIgnoredVoiceParticipants(previous: oldValue)
         }
     }
     var privateCallsByChannel: [ChannelID: PrivateCall] = [:]
@@ -564,6 +572,7 @@ final class AppModel {
     }
     var selectedGuildID: GuildID? {
         didSet {
+            if oldValue != selectedGuildID { switchMessageSearchScope(from: oldValue) }
             refreshServerRailSelection()
             refreshSelectedGuildPresentation()
         }
@@ -881,6 +890,8 @@ final class AppModel {
     var selectedChannelID: ChannelID? {
         didSet {
             guard selectedChannelID != oldValue else { return }
+            // Only a conversation in Direct Messages replaces its Friends home.
+            if selectedChannelID != nil, selectedGuildID == nil { friends.isPresented = false }
             if onboarding.previewChannelID != selectedChannelID {
                 onboarding.presentedGuildID = nil
                 onboarding.previewChannelID = nil
@@ -936,6 +947,9 @@ final class AppModel {
                let guildID = selectedChannel.guildID
             {
                 lastOpenedChannelIDsByGuild[guildID] = selectedChannel.id
+            }
+            if let selectedChannel, selectedChannel.kind == .directMessage || selectedChannel.kind == .groupDirectMessage {
+                lastDirectMessageSelection = .channel(selectedChannel.id)
             }
             builtInExpressionPickerRequest = nil
             cancelApplicationCommandAutocompleteTask()
@@ -1300,6 +1314,7 @@ final class AppModel {
                 await self?.installMediaDeviceSnapshot(snapshot)
             }
         }
+        configureVoiceMessagePlayback()
     }
 }
 
@@ -1320,6 +1335,7 @@ extension AppModel {
         currentUser = snapshot?.currentUser
         refreshServerRailDirectMessages(replacing: previous)
         refreshSelectedGuildPresentation()
+        invalidateChangedSystemMessageRecipients(replacing: previous)
         if previous?.relationshipNicknamesByUserID != snapshot?.relationshipNicknamesByUserID {
             invalidateTimelinePresentation()
         }
@@ -1340,6 +1356,7 @@ extension AppModel {
             .filter {
                 !$0.isUnavailable
                     && $0.isRinging(currentUserID)
+                    && !isIncomingCallSuppressed($0)
                     && activeVoiceChannel?.id != $0.channelID
             }
             .sorted { $0.channelID.rawValue < $1.channelID.rawValue }

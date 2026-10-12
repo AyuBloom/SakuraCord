@@ -35,7 +35,7 @@ extension AppModel {
     /// draft for another try.
     func saveGroupDirectMessage(_ presentation: GroupDirectMessageEditorStore.Presentation) {
         let store = groupDirectMessageEditor
-        guard store.presentation == presentation, !store.isSaving else { return }
+        guard store.presentation == presentation, !store.isSaving, !accountTransitionIsActive else { return }
         let changes = store.changes
         guard changes.hasChanges else {
             store.presentation = nil
@@ -44,14 +44,18 @@ extension AppModel {
         let revision = store.revision
         store.isSaving = true
         store.error = nil
-        startAccountChildTask(account: accountSession()) { model, session in
+        startAccountChildTask(account: accountSession(allowsTransition: true)) { model, session in
+            defer {
+                if store.revision == revision { store.isSaving = false }
+            }
+            guard !model.accountTransitionIsActive else { return }
             do {
                 _ = try await session.provider.editGroupDirectMessage(presentation.channel.id, changes: changes)
-                guard model.isCurrentAccountSession(session), store.revision == revision else { return }
+                guard model.isCurrentAccountSession(session), !model.accountTransitionIsActive, store.revision == revision else { return }
                 store.isSaving = false
                 store.presentation = nil
             } catch {
-                guard model.isCurrentAccountSession(session), store.revision == revision else { return }
+                guard model.isCurrentAccountSession(session), !model.accountTransitionIsActive, store.revision == revision else { return }
                 if !(error is CancellationError) {
                     DiscordAPIDiagnosticStore.shared.recordClientFailure(error)
                 }
@@ -78,17 +82,18 @@ extension AppModel {
     func leaveGroupDirectMessage(_ confirmation: GroupDirectMessageLeaveStore.Confirmation, silently: Bool) {
         let store = groupDirectMessageLeave
         let channel = confirmation.channel
-        guard store.leaving.insert(channel.id).inserted else { return }
-        startAccountChildTask(account: accountSession()) { model, session in
+        guard !accountTransitionIsActive, store.leaving.insert(channel.id).inserted else { return }
+        startAccountChildTask(account: accountSession(allowsTransition: true)) { model, session in
             defer {
                 if model.isCurrentAccountSession(session) { store.leaving.remove(channel.id) }
             }
+            guard !model.accountTransitionIsActive else { return }
             do {
                 try await session.provider.leaveGroupDirectMessage(channel.id, silently: silently)
             } catch is CancellationError {
                 return
             } catch {
-                guard model.isCurrentAccountSession(session) else { return }
+                guard model.isCurrentAccountSession(session), !model.accountTransitionIsActive else { return }
                 DiscordAPIDiagnosticStore.shared.recordClientFailure(error)
                 model.errorMessage = "SakuraCord couldn’t leave \(channel.name). \(error.localizedDescription)"
             }

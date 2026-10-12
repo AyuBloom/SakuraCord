@@ -339,7 +339,7 @@ struct MessageReactionPill: View {
     }
 }
 
-private struct MessageReactionEmoji: View {
+struct MessageReactionEmoji: View {
     let reaction: Reaction
     let url: URL?
     let size: CGFloat
@@ -366,12 +366,14 @@ private struct MessageReactionEmoji: View {
                 }
                 .frame(width: size, height: size)
             } else {
-                Text(reaction.emoji)
-                    .font(.system(size: size))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: true)
-                    .scaleEffect(MessageReactionMetrics.nativeEmojiVisualScale)
-                    .frame(width: size, height: size)
+                // Match timeline reactions: center the visible glyph, not its text line box.
+                Image(nsImage: ComponentUnicodeEmojiRenderer.image(for: reaction.emoji))
+                    .resizable()
+                    .scaledToFit()
+                    .frame(
+                        width: size * MessageReactionMetrics.nativeEmojiVisualScale,
+                        height: size * MessageReactionMetrics.nativeEmojiVisualScale
+                    )
             }
         }
         .frame(width: size, height: size)

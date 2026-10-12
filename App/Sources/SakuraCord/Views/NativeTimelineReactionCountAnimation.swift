@@ -59,8 +59,17 @@ final class NativeTimelineReactionCountAnimationHost:
 
 @MainActor
 final class NativeTimelineActionCapsuleHost: NSHostingView<AnyView> {
+    /// The visible pill in the superview's coordinates. Points outside it
+    /// fall through to the timeline.
+    var interactiveFrame: CGRect?
+
     override var safeAreaInsets: NSEdgeInsets {
         NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let interactiveFrame, !interactiveFrame.contains(point) { return nil }
+        return super.hitTest(point)
     }
 }
 

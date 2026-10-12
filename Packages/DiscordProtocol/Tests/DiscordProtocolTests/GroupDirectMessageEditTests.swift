@@ -4,8 +4,8 @@ import SakuraCordModels
 import Synchronization
 import Testing
 
-@Suite(.serialized)
 struct GroupDirectMessageEditTests {
+    private let fixture = GroupEditFixture()
     private let groupID = ChannelID(rawValue: 401)
 
     @Test func `edit group sends only changed fields in one patch and reconciles the group`() async throws {
@@ -23,16 +23,32 @@ struct GroupDirectMessageEditTests {
         #expect(await provider.privateChannel(id: groupID)?.iconURL == nil)
 
         _ = try await provider.editGroupDirectMessage(groupID, changes: .init())
-        let requests = GroupEditURLProtocol.requests.withLock { $0 }
+        let requests = fixture.requests.withLock { $0 }
         #expect(requests.count == 2)
         #expect(requests.allSatisfy { $0.httpMethod == "PATCH" && $0.url?.absoluteString == "https://discord.com/api/v9/channels/401" })
-        #expect(GroupEditURLProtocol.bodies.withLock { $0 } == [
+        #expect(fixture.bodies.withLock { $0 } == [
             .object(["name": .string("Trip"), "icon": .string("data:image/png;base64,AQID")]),
             .object(["name": .string(""), "icon": .null]),
         ])
         #expect(requests.allSatisfy {
             $0.value(forHTTPHeaderField: "X-Context-Properties") == "eyJsb2NhdGlvbiI6Imdyb3VwIGRtIGNvbnRleHQgbWVudSJ9"
         })
+        await provider.disconnect()
+    }
+
+    @Test func `editing one group field preserves the other saved field`() async throws {
+        let provider = await makeProvider()
+        let icon = ProfileImageUpload(data: Data([1]), mediaType: "image/png", description: "icon.png")
+        let iconOnly = try await provider.editGroupDirectMessage(groupID, changes: .init(icon: .set(icon)))
+        #expect(iconOnly.name == "Friend Group")
+        let nameOnly = try await provider.editGroupDirectMessage(groupID, changes: .init(name: .set("Trip")))
+        #expect(nameOnly.iconURL == iconOnly.iconURL)
+        #expect(await provider.privateChannel(id: groupID)?.blockedUserWarningDismissed == true)
+        #expect(await provider.privateChannel(id: groupID)?.lastPinTimestamp == Date(timeIntervalSince1970: 100))
+        #expect(fixture.bodies.withLock { $0 } == [
+            .object(["icon": .string("data:image/png;base64,AQ==")]),
+            .object(["name": .string("Trip")]),
+        ])
         await provider.disconnect()
     }
 
@@ -45,7 +61,7 @@ struct GroupDirectMessageEditTests {
             _ = try await provider.editGroupDirectMessage(groupID, changes: .init(name: .set("forbidden")))
         }
         #expect(await !provider.requestSafetyCircuitIsOpen)
-        #expect(GroupEditURLProtocol.requests.withLock { $0.count } == 2)
+        #expect(fixture.requests.withLock { $0.count } == 2)
         #expect(await provider.privateChannel(id: groupID)?.name == "Friend Group")
         await provider.disconnect()
     }
@@ -64,7 +80,7 @@ struct GroupDirectMessageEditTests {
         let saved = try await provider.editGroupDirectMessage(groupID, changes: .init(name: .set("Trip")))
         #expect(saved.name == "Trip")
         #expect(await provider.privateChannel(id: groupID)?.name == "Friend Group")
-        #expect(GroupEditURLProtocol.requests.withLock { $0.count } == 1)
+        #expect(fixture.requests.withLock { $0.count } == 1)
         await provider.disconnect()
     }
 
@@ -75,13 +91,15 @@ struct GroupDirectMessageEditTests {
         ]))
         #expect(await provider.privateChannel(id: groupID)?.name == "Friend Group")
         #expect(await provider.privateChannel(id: groupID)?.iconURL != nil)
+        #expect(await provider.privateChannel(id: groupID)?.blockedUserWarningDismissed == true)
+        #expect(await provider.privateChannel(id: groupID)?.lastPinTimestamp == Date(timeIntervalSince1970: 100))
         await provider.handleGatewayDispatch(name: "CHANNEL_UPDATE", body: .object([
             "id": .string("401"), "type": .number(3), "name": .null, "icon": .null,
         ]))
         let group = await provider.privateChannel(id: groupID)
         #expect(group?.name == "Friend, Other")
         #expect(group?.iconURL == nil)
-        #expect(GroupEditURLProtocol.requests.withLock { $0.isEmpty })
+        #expect(fixture.requests.withLock { $0.isEmpty })
         await provider.disconnect()
     }
 
@@ -100,7 +118,7 @@ struct GroupDirectMessageEditTests {
             if case let .channelsChanged(guildID, channels) = event, guildID == nil { privateLists.append(channels.map(\.id)) }
         }
         #expect(privateLists == [[ChannelID(rawValue: 402)]])
-        let requests = GroupEditURLProtocol.requests.withLock { $0 }
+        let requests = fixture.requests.withLock { $0 }
         #expect(requests.count == 1)
         #expect(requests.first?.httpMethod == "DELETE")
         #expect(requests.first?.url?.absoluteString == "https://discord.com/api/v9/channels/401?silent=true")
@@ -110,7 +128,7 @@ struct GroupDirectMessageEditTests {
 
     @Test func `a rejected leave keeps the group without retrying or stopping the session`() async throws {
         let provider = await makeProvider()
-        GroupEditURLProtocol.leaveStatus.withLock { $0 = 403 }
+        fixture.leaveStatus.withLock { $0 = 403 }
         await #expect(throws: ChatProviderError.self) {
             try await provider.leaveGroupDirectMessage(groupID, silently: false)
         }
@@ -120,7 +138,7 @@ struct GroupDirectMessageEditTests {
         }
         #expect(await !provider.requestSafetyCircuitIsOpen)
         #expect(await provider.privateChannel(id: groupID)?.name == "Friend Group")
-        let requests = GroupEditURLProtocol.requests.withLock { $0 }
+        let requests = fixture.requests.withLock { $0 }
         #expect(requests.map { $0.url?.absoluteString } == ["https://discord.com/api/v9/channels/401?silent=false"])
         await provider.disconnect()
     }
@@ -144,14 +162,11 @@ struct GroupDirectMessageEditTests {
     }
 
     private func makeProvider(credentials: any CredentialStore = TestCredentialStore()) async -> DiscordRESTProvider {
-        GroupEditURLProtocol.requests.withLock { $0.removeAll() }
-        GroupEditURLProtocol.bodies.withLock { $0.removeAll() }
-        GroupEditURLProtocol.leaveStatus.withLock { $0 = 200 }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [GroupEditURLProtocol.self]
         let provider = DiscordRESTProvider(credentials: credentials,
                                            handle: CredentialHandle(accountID: "group-edit"),
-                                           session: URLSession(configuration: configuration))
+                                           session: URLSession(configuration: configuration, delegate: fixture, delegateQueue: nil))
         await provider.seedGroup()
         return provider
     }
@@ -166,23 +181,38 @@ private extension DiscordRESTProvider {
         ]
         cachedChannels[nil] = [
             Channel(id: .init(rawValue: 401), guildID: nil, name: "Friend Group", kind: .groupDirectMessage,
-                    recipients: recipients),
+                    recipients: recipients, blockedUserWarningDismissed: true,
+                    lastPinTimestamp: Date(timeIntervalSince1970: 100)),
             Channel(id: .init(rawValue: 402), guildID: nil, name: "Friend", kind: .directMessage,
                     recipients: [recipients[0]]),
         ]
     }
 }
 
+private final class GroupEditFixture: NSObject, URLSessionTaskDelegate {
+    let requests = Mutex<[URLRequest]>([])
+    let bodies = Mutex<[JSONValue]>([])
+    let leaveStatus = Mutex(200)
+    let savedFields = Mutex<[String: JSONValue]>(["name": .string("Friend Group"), "icon": .null])
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        task.delegate = self
+    }
+}
+
 private final class GroupEditURLProtocol: URLProtocol, @unchecked Sendable {
-    static let requests = Mutex<[URLRequest]>([])
-    static let bodies = Mutex<[JSONValue]>([])
-    static let leaveStatus = Mutex(200)
+    override static func canInit(with task: URLSessionTask) -> Bool { true }
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        Self.requests.withLock { $0.append(request) }
+        guard let fixture = task?.delegate as? GroupEditFixture else {
+            Issue.record("Group transport is missing its test-owned fixture")
+            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+            return
+        }
+        fixture.requests.withLock { $0.append(request) }
         if request.httpMethod == "DELETE" {
-            let status = Self.leaveStatus.withLock { $0 }
+            let status = fixture.leaveStatus.withLock { $0 }
             return respond(status: status, body: status == 200
                 ? #"{"id":"401","type":3,"name":"Friend Group","owner_id":"2"}"#
                 : #"{"code":50013,"message":"Missing Permissions"}"#)
@@ -201,7 +231,7 @@ private final class GroupEditURLProtocol: URLProtocol, @unchecked Sendable {
         guard case let .object(fields)? = try? JSONDecoder().decode(JSONValue.self, from: body) else {
             return respond(status: 500, body: "{}")
         }
-        Self.bodies.withLock { $0.append(.object(fields)) }
+        fixture.bodies.withLock { $0.append(.object(fields)) }
         switch fields["name"] {
         case .string("invalid"):
             return respond(status: 400, body: #"{"code":50035,"errors":{"name":{"_errors":[{"code":"BASE_TYPE_BAD_LENGTH","message":"Must be between 1 and 100 in length."}]}}}"#)
@@ -213,9 +243,15 @@ private final class GroupEditURLProtocol: URLProtocol, @unchecked Sendable {
             .object(["id": .string("2"), "username": .string("friend"), "global_name": .string("Friend")]),
             .object(["id": .string("3"), "username": .string("other"), "global_name": .string("Other")]),
         ])
-        let icon: JSONValue = if case .string = fields["icon"] { .string("hash") } else { .null }
-        // Discord stores a cleared name as null.
-        let name: JSONValue = fields["name"] == .string("") ? .null : fields["name"] ?? .null
+        let state = fixture.savedFields.withLock { state in
+            if let name = fields["name"] { state["name"] = name }
+            if let icon = fields["icon"] {
+                state["icon"] = if case .string = icon { .string("hash") } else { .null }
+            }
+            return state
+        }
+        let icon = state["icon"] ?? .null
+        let name = state["name"] ?? .null
         let response = JSONValue.object([
             "id": .string("401"), "type": .number(3), "name": name,
             "icon": icon, "owner_id": .string("1"), "recipients": recipients,

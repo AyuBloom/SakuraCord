@@ -94,6 +94,7 @@ extension NativeTimelineRowLayout {
             }
             let mediaFrames = layout.linkedImageRegions.map(\.frame)
                 + layout.attachmentRegions.map(\.frame)
+                + [layout.voiceMessageRegion?.frame].compactMap { $0 }
                 + layout.embedFrames
                 + layout.stickerFrames
             for frame in mediaFrames {
@@ -126,7 +127,7 @@ extension NativeTimelineRowLayout {
             horizontalInset = searchContext == nil
                 ? MessageRowLayoutMetrics.horizontalInset
                 : 22
-            let columnGap = MessageRowLayoutMetrics.avatarColumnGap + timestampGutterWidth - avatarWidth
+            let columnGap = MessageRowLayoutMetrics.columnGap(timestampGutterWidth: metrics.timestampGutterWidth)
             if isOutgoingBubble {
                 contentPresentation = NativeTimelineTextPresentation.outgoingBubble(contentPresentation)
             }
@@ -429,7 +430,7 @@ extension NativeTimelineRowLayout {
         private mutating func appendTextAndPoll() {
             bubbleStartY = verticalOffset
             if usesBubbles {
-                verticalOffset += InterfaceScale.metric(8)
+                verticalOffset += NativeTimelineBubbleLayout.verticalPadding
             }
 
             if message.forwardedSnapshot != nil {
@@ -529,6 +530,22 @@ extension NativeTimelineRowLayout {
         }
 
         private mutating func appendAttachments() {
+            if !usesComponentsV2, (message.forwardedSnapshot?.flags ?? message.flags).contains(.voiceMessage) {
+                let style: NativeTimelineVoiceMessageRegion.Style =
+                    usesBubbles ? (isOutgoingBubble ? .outgoingBubble : .incomingBubble) : .plain
+                let voiceY = verticalOffset + (hasRichContent ? InterfaceScale.metric(8) : 0)
+                if let region = NativeTimelineVoiceMessageRegion.make(
+                    message: message,
+                    origin: CGPoint(x: contentX, y: voiceY),
+                    maximumWidth: inlineMediaMaximumWidth,
+                    style: style
+                ) {
+                    result.voiceMessageRegion = region
+                    verticalOffset = region.frame.maxY
+                    hasRichContent = true
+                    return
+                }
+            }
             if !usesComponentsV2, !message.attachments.isEmpty {
                 if hasRichContent {
                     verticalOffset += InterfaceScale.metric(8)
@@ -786,7 +803,7 @@ extension NativeTimelineRowLayout {
             }
 
             if usesBubbles, hasRichContent {
-                verticalOffset += InterfaceScale.metric(8)
+                verticalOffset += NativeTimelineBubbleLayout.verticalPadding
                 let region = NativeTimelineBubbleLayout.region(
                     contentX: contentX,
                     contentWidth: contentWidth,
@@ -810,6 +827,7 @@ extension NativeTimelineRowLayout {
             return isEmojiOnlyText
                 && (result.contentFrame != nil || !result.stickerFrames.isEmpty)
                 && result.linkedImageRegions.isEmpty && result.attachmentRegions.isEmpty
+                && result.voiceMessageRegion == nil
                 && result.embedRegions.isEmpty && result.componentLayouts.isEmpty
                 && result.inviteRegions.isEmpty && result.sakuraCordDeepLinkRegions.isEmpty
                 && result.translationRegion == nil && result.pollLayout == nil
@@ -828,9 +846,18 @@ extension NativeTimelineRowLayout {
                         width: ReactionActionMenuPresentation.inline.width,
                         height: MessageReactionMetrics.pillHeight
                     )]
+                // Reactions sit below the bubble, so a short bubble must not
+                // narrow them. They wrap against the bubble column instead.
+                let rowWidth = usesBubbles
+                    ? max(contentWidth, min(
+                        NativeTimelineBubbleLayout.maximumContentWidth(availableWidth: width),
+                        isOutgoingBubble ? contentX + contentWidth - horizontalInset : ordinaryContentWidth
+                    ))
+                    : contentWidth
+                let rowX = isOutgoingBubble ? contentX + contentWidth - rowWidth : contentX
                 let wrapping = InlineWrappingLayoutPlan.frames(
                     sizes: sizes,
-                    maximumWidth: contentWidth,
+                    maximumWidth: rowWidth,
                     horizontalSpacing: MessageReactionMetrics.horizontalSpacing,
                     verticalSpacing: MessageReactionMetrics.verticalSpacing
                 )
@@ -841,9 +868,9 @@ extension NativeTimelineRowLayout {
                 }
                 let frames = wrapping.frames.map { frame in
                     let lineShift = isOutgoingBubble
-                        ? max(0, contentWidth - (lineEnds[frame.minY] ?? frame.maxX))
+                        ? max(0, rowWidth - (lineEnds[frame.minY] ?? frame.maxX))
                         : 0
-                    return frame.offsetBy(dx: contentX + lineShift, dy: verticalOffset)
+                    return frame.offsetBy(dx: rowX + lineShift, dy: verticalOffset)
                 }
                 result.reactionRegions = zip(
                     presentedReactions,

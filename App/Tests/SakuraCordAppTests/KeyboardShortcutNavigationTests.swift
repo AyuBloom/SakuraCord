@@ -1,4 +1,5 @@
 @testable import SakuraCord
+import DiscordProtocol
 import Foundation
 import SakuraCordModels
 import Testing
@@ -63,23 +64,24 @@ struct KeyboardShortcutNavigationTests {
 
     @Test func `server shortcuts wrap in rail order including folders and skip missing servers`() {
         let model = makeModel()
-        #expect(model.keyboardShortcutServerDestination(direction: 1) == GuildID(rawValue: 2))
+        #expect(model.keyboardShortcutServerDestination(direction: 1) == .guild(GuildID(rawValue: 2)))
         let removed = model.serverRailGuildsByID.removeValue(forKey: GuildID(rawValue: 2))
-        #expect(model.keyboardShortcutServerDestination(direction: 1) == GuildID(rawValue: 3))
+        #expect(model.keyboardShortcutServerDestination(direction: 1) == .guild(GuildID(rawValue: 3)))
         #expect(!model.serverRailPresentation.navigationGuildIDs.contains(GuildID(rawValue: 2)))
         model.serverRailGuildsByID[GuildID(rawValue: 2)] = removed
-        #expect(model.keyboardShortcutServerDestination(direction: 1) == GuildID(rawValue: 2))
-        #expect(model.keyboardShortcutServerDestination(direction: -1) == GuildID(rawValue: 3))
+        #expect(model.keyboardShortcutServerDestination(direction: 1) == .guild(GuildID(rawValue: 2)))
+        #expect(model.keyboardShortcutServerDestination(direction: -1) == .directMessages)
         model.selectedGuildID = GuildID(rawValue: 3)
-        #expect(model.keyboardShortcutServerDestination(direction: 1) == GuildID(rawValue: 1))
-        #expect(model.keyboardShortcutServerDestination(direction: -1) == GuildID(rawValue: 2))
+        #expect(model.keyboardShortcutServerDestination(direction: 1) == .directMessages)
+        #expect(model.keyboardShortcutServerDestination(direction: -1) == .guild(GuildID(rawValue: 2)))
         model.selectedGuildID = nil
-        #expect(model.keyboardShortcutServerDestination(direction: 1) == GuildID(rawValue: 1))
-        #expect(model.keyboardShortcutServerDestination(direction: -1) == GuildID(rawValue: 3))
+        #expect(model.keyboardShortcutServerDestination(direction: 1) == .guild(GuildID(rawValue: 1)))
+        #expect(model.keyboardShortcutServerDestination(direction: -1) == .guild(GuildID(rawValue: 3)))
         model.serverRailItems = [.guild(GuildID(rawValue: 1))]
         model.selectedGuildID = GuildID(rawValue: 1)
-        #expect(model.keyboardShortcutServerDestination(direction: 1) == nil)
+        #expect(model.keyboardShortcutServerDestination(direction: 1) == .directMessages)
         model.serverRailItems = []
+        model.selectedGuildID = nil
         #expect(model.keyboardShortcutServerDestination(direction: -1) == nil)
     }
 
@@ -218,6 +220,66 @@ struct KeyboardShortcutNavigationTests {
         #expect(model.selectedChannelID == ChannelID(rawValue: 12))
         #expect(model.conversationNavigationHistory.previousTextChannelID == ChannelID(rawValue: 11))
         #expect(model.keyboardShortcutHistoryDestination(direction: -1)?.channelID == ChannelID(rawValue: 11))
+    }
+
+    @Test func `DM shortcuts follow sidebar order including Friends and restore the last page`() async {
+        let model = makeModel()
+        let first = Channel(id: ChannelID(rawValue: 101), guildID: nil, name: "Zebra", kind: .directMessage)
+        let second = Channel(id: ChannelID(rawValue: 102), guildID: nil, name: "Alpha", kind: .groupDirectMessage)
+        model.snapshot?.channels.append(contentsOf: [first, second])
+        model.openFriends()
+        await model.guildActivationTask?.value
+        #expect(model.isFriendsPresented)
+        #expect(model.hasKeyboardShortcutConversationDestination(unreadOnly: false))
+        #expect(model.keyboardShortcutDirectMessageDestination(direction: 1) == .channel(first.id))
+        #expect(model.keyboardShortcutDirectMessageDestination(direction: -1) == .channel(second.id))
+
+        model.navigateShortcutConversation(direction: 1, unreadOnly: false)
+        await model.guildActivationTask?.value
+        #expect(model.selectedChannelID == first.id)
+        #expect(!model.isFriendsPresented)
+        #expect(model.keyboardShortcutDirectMessageDestination(direction: -1) == .friends)
+        model.navigateShortcutConversation(direction: 1, unreadOnly: false)
+        await model.guildActivationTask?.value
+        #expect(model.selectedChannelID == second.id)
+
+        model.selectGuild(GuildID(rawValue: 1))
+        await model.guildActivationTask?.value
+        model.navigateShortcutServer(direction: -1)
+        await model.guildActivationTask?.value
+        #expect(model.selectedGuildID == nil)
+        #expect(model.selectedChannelID == second.id)
+        #expect(!model.isFriendsPresented)
+
+        model.navigateShortcutConversation(direction: 1, unreadOnly: false)
+        #expect(model.isFriendsPresented)
+        model.selectGuild(GuildID(rawValue: 1))
+        await model.guildActivationTask?.value
+        model.selectGuild(nil)
+        await model.guildActivationTask?.value
+        #expect(model.isFriendsPresented)
+        #expect(model.selectedChannelID == nil)
+        model.invalidateAccountSession()
+        #expect(model.lastDirectMessageSelection == nil)
+    }
+
+    @Test func `DM restoration drops closed conversations and empty DM shortcuts are disabled`() async {
+        let model = makeModel()
+        let channel = Channel(id: ChannelID(rawValue: 101), guildID: nil, name: "DM", kind: .directMessage)
+        model.snapshot?.channels.append(channel)
+        model.navigate(to: channel.id)
+        await model.guildActivationTask?.value
+        model.selectGuild(GuildID(rawValue: 1))
+        await model.guildActivationTask?.value
+        model.snapshot?.channels.removeAll { $0.id == channel.id }
+        if let snapshot = model.snapshot { model.provider = MockChatProvider(snapshot: snapshot, messages: []) }
+        model.selectGuild(nil)
+        await model.guildActivationTask?.value
+        #expect(model.selectedChannelID != channel.id)
+        #expect(model.isFriendsPresented)
+        #expect(model.lastDirectMessageSelection == .friends)
+        #expect(!model.hasKeyboardShortcutConversationDestination(unreadOnly: false))
+        #expect(model.keyboardShortcutDirectMessageDestination(direction: 1) == nil)
     }
 
     private func makeModel() -> AppModel {

@@ -73,6 +73,8 @@ extension DiscordRESTProvider {
             if !fields.contains("icon") {
                 channel.iconURL = existing.iconURL
             }
+            channel.blockedUserWarningDismissed = dto.blockedUserWarningDismissed ?? existing.blockedUserWarningDismissed
+            channel.lastPinTimestamp = channel.lastPinTimestamp ?? existing.lastPinTimestamp
             if dto.lastMessageID == nil {
                 channel.lastMessageID = existing.lastMessageID
             }

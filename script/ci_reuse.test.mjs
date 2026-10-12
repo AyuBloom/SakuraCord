@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { canRestoreCompilerCache, findCache, findValidation, fullValidation, suites, trustedRun } from './ci_reuse.mjs';
 
 const repository = 'SakuraCordApp/SakuraCord';
@@ -14,6 +19,28 @@ const jobs = suites.map(suite => ({ name: `build (${suite})`, conclusion: 'succe
   { name: 'Verify checked-out commit', status: 'completed', conclusion: 'success' },
   { name: 'Record clean compilation', status: 'completed', conclusion: 'success' },
 ] }));
+
+test('compiler archives preserve exact fractional output timestamps after extraction', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'sakuracord-compiler-archive-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const outputs = join(directory, 'App/.build/out');
+  mkdirSync(outputs, { recursive: true });
+  const object = join(outputs, 'fixture.o');
+  writeFileSync(object, 'compiled output');
+  utimesSync(object, 1700000000.123456, 1700000000.123456);
+  const expectedTimestamp = statSync(object, { bigint: true }).mtimeNs;
+  assert.notEqual(expectedTimestamp % 1_000_000_000n, 0n);
+
+  execFileSync(process.execPath, [fileURLToPath(new URL('./ci_reuse.mjs', import.meta.url)), 'archive', 'app'], {
+    cwd: directory,
+    env: { ...process.env, GITHUB_REPOSITORY: repository, GITHUB_RUN_ID: '999', RUNNER_TEMP: directory },
+  });
+  rmSync(outputs, { recursive: true });
+  execFileSync('tar', ['-xf', join(directory, 'swiftpm-app.tar')], { cwd: directory });
+
+  assert.equal(readFileSync(object, 'utf8'), 'compiled output');
+  assert.equal(statSync(object, { bigint: true }).mtimeNs, expectedTimestamp);
+});
 
 test('only successful first-party branch pushes can supply full validation', () => {
   assert.equal(trustedRun(run, repository), true);

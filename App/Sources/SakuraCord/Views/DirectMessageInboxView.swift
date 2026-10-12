@@ -24,7 +24,7 @@ struct DirectMessageInboxView: View {
             )
             .tag(DirectMessageSidebarSelection.friends)
             .pointerStyle(.link)
-            .overlay { ChannelRowHoverBridge(isSelected: selection == .friends, usesCustomSelectionBackground: true) }
+            .overlay { ChannelRowHoverBridge(isSelected: selection == .friends) }
 
             Section {
                 ForEach(directMessages) { channel in
@@ -280,8 +280,7 @@ private struct DirectMessageInboxRow: View {
                 userMenu: {
                     guard channel.kind == .directMessage, let recipient = channel.recipients.first else { return nil }
                     return UserContextMenu.make(for: recipient, context: .init(channelID: channel.id, ignoreLocation: .directMessage), model: model)
-                },
-                usesCustomSelectionBackground: true
+                }
             )
         }
     }

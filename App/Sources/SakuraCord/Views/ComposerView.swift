@@ -33,6 +33,10 @@ struct ComposerView: View {
     @State private var isAutocompleteDismissed = false
     @State private var sendTransitionAnchor = ComposerSendTransitionAnchor()
     @State private var holdsPlaceholderForSendTransition = false
+    /// A send clears the composer under the message leaving it, so the
+    /// composer collapses at once rather than animating.
+    @State private var isClearingForSend = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var model = model
@@ -56,11 +60,14 @@ struct ComposerView: View {
                             toggleMention: toggleReplyMention,
                             cancel: cancelReply
                         )
+                        .transition(Self.headerTransition)
                         Divider()
+                            .transition(.opacity)
                     }
                     if !hasActiveCommand, !attachments.isEmpty {
                         ComposerAttachmentTray(
                             attachments: attachments,
+                            checkingIDs: model.composer.checkingAttachmentIDs,
                             sendTransitionAnchor: sendTransitionAnchor,
                             open: openComposerAttachment,
                             toggleSpoiler: {
@@ -73,10 +80,15 @@ struct ComposerView: View {
                                 model.removeComposerAttachment($0, from: conversation)
                             }
                         )
+                        .transition(Self.headerTransition)
                         Divider()
                             .padding(.horizontal, InterfaceScale.metric(11))
+                            .transition(.opacity)
                     }
                 }
+                // The composer grows upward, so the header rises out of the
+                // field rather than dropping in from above.
+                .clipped()
             },
             leading: {
                 Group {
@@ -324,6 +336,10 @@ struct ComposerView: View {
             chrome
                 .animation(.smooth(duration: 0.42, extraBounce: 0.08), value: voiceMessagePhaseKey)
                 .animation(.smooth(duration: 0.3), value: showsVoiceMessageButton)
+                .animation(animatesChromeResize ? ComposerResizeMotion.animation : nil, value: chromeKey)
+                // Another conversation's composer appears in place, as the
+                // timeline does.
+                .transaction(value: activeConversationID) { $0.disablesAnimations = true }
                 .padding(.horizontal, ChatChromeMetrics.composerWindowInset)
                 .padding(.bottom, ChatChromeMetrics.composerWindowInset)
                 .keyframeAnimator(
@@ -421,6 +437,12 @@ struct ComposerView: View {
             autocompleteIndex = 0
             updateSlashPicker(for: value)
             updateMentionMemberSearch()
+        }
+        .onChange(of: chromeKey) { previous, current in
+            guard animatesChromeResize,
+                  previous.conversationID == current.conversationID
+            else { return }
+            model.composer.noteAnimatedResize(of: conversation)
         }
         .onChange(of: draftSelection) { _, _ in
             isAutocompleteDismissed = false
@@ -713,7 +735,8 @@ struct ComposerView: View {
     private func send() {
         guard !isSubmitting, allowsSubmission() else { return }
         if isCreatingThread, !model.validateThreadCreation() { return }
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty,
+              !hasCheckingAttachments
         else { return }
         isSubmitting = true
         draftSelection = nil
@@ -726,7 +749,17 @@ struct ComposerView: View {
         }
         model.beginUsingOwnedPromisedFiles(staged.map(\.url))
         if !keepsCreationDraft {
-            model.clearComposerAttachments(for: conversation)
+            isClearingForSend = true
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                model.clearComposerAttachments(for: conversation)
+            }
+            Task { @MainActor in
+                // The draft and reply clear once the message is enqueued.
+                try? await Task.sleep(for: .milliseconds(250))
+                isClearingForSend = false
+            }
         }
         Task {
             defer {
@@ -791,9 +824,9 @@ struct ComposerView: View {
         case .member:
             return MentionAutocompleteSuggestionFactory.memberSuggestions(
                 query: context.query,
-                recentMessages: activeMessages,
-                localMembers: model.mentionAutocompleteMembers,
-                remoteMembers: model.mentionMemberResults,
+                recentMessages: activeMessages.filter { !model.isMessageSuppressed($0) },
+                localMembers: model.mentionAutocompleteMembers.filter { !model.isUserIgnored($0.id) },
+                remoteMembers: model.mentionMemberResults.filter { !model.isUserIgnored($0.id) },
                 roles: model.guildRoles,
                 canMentionNonMentionableRoles:
                 MentionAutocompleteSuggestionFactory.canMentionNonMentionableRoles(
@@ -882,6 +915,7 @@ struct ComposerView: View {
             return true
         }
         return !isSubmitting
+            && !hasCheckingAttachments
             && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !attachments.isEmpty)
             && draft.count <= ChatCharacterLimitPolicy.limit(
@@ -1249,40 +1283,6 @@ struct ComposerView: View {
         }
     }
 
-    private var activeReply: Message? {
-        switch conversation {
-        case .channel: model.replyingTo
-        case .thread: model.threadReplyingTo
-        }
-    }
-
-    private var activeReplyMentionsAuthor: Bool {
-        switch conversation {
-        case .channel: model.replyMentionsAuthor
-        case .thread: model.threadReplyMentionsAuthor
-        }
-    }
-
-    private var attachments: [ForumPostAttachment] {
-        model.composerAttachments(for: conversation)
-    }
-
-    private var draft: String {
-        switch conversation {
-        case .channel: model.draft
-        case .thread: model.threadDraft
-        }
-    }
-
-    private func updateDraft(_ value: String) {
-        switch conversation {
-        case .channel:
-            model.updateDraft(value)
-        case .thread:
-            model.updateThreadDraft(value)
-        }
-    }
-
     private func cancelReply() {
         model.cancelReply(in: conversation)
     }
@@ -1343,10 +1343,14 @@ extension ComposerView {
     }
 
     func composerSendSlot(appearance: ComposerBarAppearance) -> some View {
-        TimelineView(.periodic(from: .now, by: 0.25)) { context in
-            let coolingDown = activeConversationID.map {
-                model.slowmodeRemaining(in: $0, now: context.date) > 0
-            } ?? false
+        let deadline = activeConversationID.flatMap { channelID in
+            let configuration = model.slowmodeConfiguration(in: channelID)
+            return model.composer.slowmode.deadline(
+                in: channelID, interval: configuration.interval, immune: configuration.immune
+            )
+        }
+        return TimelineView(ComposerSlowmodeTimelineSchedule(deadline: deadline)) { context in
+            let coolingDown = deadline.map { $0 > context.date } ?? false
             ComposerSendSlot(
                 mode: sendSlotMode,
                 appearance: appearance,
@@ -1462,16 +1466,72 @@ extension ComposerView {
 }
 
 private extension ComposerView {
-    /// Bubble timelines animate a sent message out of the field; the
-    /// timeline consumes this when the optimistic row arrives.
+    var draft: String {
+        switch conversation {
+        case .channel: model.draft
+        case .thread: model.threadDraft
+        }
+    }
+
+    func updateDraft(_ value: String) {
+        switch conversation {
+        case .channel:
+            model.updateDraft(value)
+        case .thread:
+            model.updateThreadDraft(value)
+        }
+    }
+
+    var activeReply: Message? {
+        switch conversation {
+        case .channel: model.replyingTo
+        case .thread: model.threadReplyingTo
+        }
+    }
+
+    var activeReplyMentionsAuthor: Bool {
+        switch conversation {
+        case .channel: model.replyMentionsAuthor
+        case .thread: model.threadReplyMentionsAuthor
+        }
+    }
+
+    var attachments: [ForumPostAttachment] {
+        model.composerAttachments(for: conversation)
+    }
+
+    var hasCheckingAttachments: Bool {
+        let checking = model.composer.checkingAttachmentIDs
+        return !checking.isEmpty && attachments.contains { checking.contains($0.id) }
+    }
+
+    static var headerTransition: AnyTransition {
+        AnyTransition(.blurReplace).combined(with: .offset(y: InterfaceScale.metric(14)))
+    }
+
+    var chromeKey: ComposerChromeKey {
+        ComposerChromeKey(
+            conversationID: activeConversationID,
+            attachmentIDs: hasActiveCommand ? [] : attachments.map(\.id),
+            replyID: hasActiveCommand ? nil : activeReply?.id,
+            hasActiveCommand: hasActiveCommand,
+            hasTranslationHeader: model.draftTranslation(for: conversation) != nil
+        )
+    }
+
+    var animatesChromeResize: Bool {
+        !reduceMotion && !isClearingForSend
+    }
+
+    /// The timeline animates a sent message out of the field, as a bubble or
+    /// as plain text; it consumes this when the optimistic row arrives.
     func registerSendTransition(
         channelID: ChannelID,
         attachments: [ForumPostAttachment]
     ) {
         // A send from older history first loads the newest messages, so
         // the field stays editable and nothing arrives to take it over yet.
-        guard model.appearanceSettings.messageAppearance == .bubbles,
-              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+        guard model.animatesMessageSending,
               conversation == .thread || !model.hasMoreLaterMessages,
               let source = sendTransitionAnchor.source(
                   channelID: channelID,

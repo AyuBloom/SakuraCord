@@ -77,6 +77,7 @@ final class NativeTimelinePointerState {
     var textSelection: NativeTimelineTextSelection?
     var textSelectionGesture: NativeTimelineTextSelectionGesture?
     var didDragTextSelection = false
+    var didForceClickLookup = false
     var trackingArea: NSTrackingArea?
     var rowTrackingAreas: [NSTrackingArea] = []
     var reactionMouseMonitor: Any?

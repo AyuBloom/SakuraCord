@@ -157,10 +157,11 @@ Sparkle secret checks, packaging, signature checks and update-notes validation.
 The release workflow starts optimized packaging while it checks for reusable
 validation. A completed, successful `CI` push run on `nightly` or `main` can
 satisfy validation only for the exact release commit, with successful checkout
-verification and the full `Build and test` step in both the `build (packages)`
-and `build (app)` jobs. Pull request runs, skipped
-tests, and other workflows do not qualify. A repair dispatched with a changed
-workflow also runs validation again. An unavailable lookup or missing match
+verification, `Record clean compilation`, and the full `Build and test` step in
+all four build jobs: `packages`, `protocol`, `media`, and `app`. A suite that
+restored compiler outputs cannot supply clean release validation. Pull request
+runs, skipped tests, and other workflows do not qualify. A repair dispatched
+with a changed workflow also runs validation again. An unavailable lookup or missing match
 runs the complete `./script/ci.sh` suite normally.
 
 The publication job requires successful packaging and either fresh or reused
@@ -171,13 +172,16 @@ rechecks release and announcement checkpoints before writing, preserving
 idempotent retries and published DMGs.
 
 SwiftPM dependency caching is enabled for tag runs as well as branch runs.
-Compiler output artifacts retain the six library test builds and the app test
+Compiler output artifacts retain all seven library test builds and the app test
 build as separate per-job caches for branch CI, and optimized app output for
 release CI. Branch CI gives every tracked file and dependency checkout a
 modification time derived from its Git blob hash, so unchanged sources match
-the restored build records and only changed modules recompile. Only pull
-request runs restore branch caches; `main` and `nightly` pushes compile from
-source so reusable validation is never incremental, then save. These caches are
+the restored build records and only changed modules recompile. PAX archives
+preserve the nanosecond output timestamps recorded by Swift Build. Pull requests
+and `main`/`nightly` pushes restore trusted branch caches; successful branch
+pushes save refreshed outputs. Release validation always compiles from source
+unless it can reuse an exact-commit branch run where every suite compiled clean.
+Optimized release packaging has its own compiler cache. These caches are
 kept for seven days and can cross branch/tag boundaries. Restore accepts only
 successful first-party `CI` pushes from `main`/`nightly` for debug output or
 release tags for optimized output, and only when the source commit is an
@@ -263,6 +267,48 @@ both update roles. The bot credential does not belong in workflow logs, release
 assets, or source.
 
 ## Publication and recovery
+
+### Quiet same-version hotfix
+
+A manual `CI` dispatch can rebuild the existing latest regular release without
+creating another GitHub Release or posting or editing a Discord announcement.
+Supply its existing `tag` and a full `hotfix_commit` SHA. The app retains the
+tag's public version; the CI run number becomes its newer internal build number.
+Normal tag releases and repairs keep their existing announcement behaviour.
+
+Prepare the hotfix from the regular release, backport only the reviewed fixes,
+and retain its original tag unchanged. The hotfix source must descend from that
+tag and already be present on `nightly`. Incorporate the hotfix into `main` and
+`nightly` without rewriting either branch, preserving the ancestry and atomic
+push requirements above. The current workflow/control scripts must include the
+hotfix support before dispatch:
+
+```sh
+: "${release_tag:?Set the existing latest regular tag}"
+: "${hotfix_commit:?Set the reviewed full hotfix commit SHA}"
+gh workflow run ci.yml --ref main \
+  -f tag="$release_tag" -f hotfix_commit="$hotfix_commit"
+```
+
+Hotfixes run full validation and signed packaging. Publication takes the normal
+Sparkle release lock and rechecks the latest release and build number. It adds
+an immutable `hotfix-build-N.dmg.backup` recovery copy and
+`hotfix-build-N.json` source/hash manifest, refreshes the canonical DMG used by
+the website and Homebrew, verifies the download, and replaces the signed
+appcast last. The first hotfix preserves the original DMG as a `.backup` asset.
+It does not edit the release
+title, body, tag, release-copy asset, or Discord checkpoint. The recovery copy
+uses a `.backup` suffix so download discovery still sees exactly one DMG.
+
+After publication, refresh the Homebrew cask checksum through its **Update
+cask** workflow and verify the public downloads and an installed stable app's
+update check. Cached original appcasts or Homebrew metadata can briefly refer
+to the previous canonical DMG checksum during replacement; signature failures
+must be retried after refreshing metadata, never bypassed. An already published
+build cannot be replaced: use a new dispatch for a new build, rather than
+rerunning that build.
+
+### Regular release recovery
 
 The workflow publishes Discord last. A Discord failure therefore leaves the
 verified GitHub Release intact, and a retry reuses the exact committed copy.
@@ -362,9 +408,11 @@ switching protocol cannot be published into the catalog.
    Install the existing SakuraCord bot GitHub App on it with **Contents: write**.
    The publisher requests a short-lived token limited to that repository; no
    personal access token or source-repository write grant is needed.
-2. Set source-repository **variable** `SPARKLE_ED_PUBLIC_KEY` to the same public
-   key embedded in released apps. Fork builds must read this public value, so
-   using the secret alone is insufficient. Keep `SPARKLE_ED_PRIVATE_KEY` secret.
+2. Keep the public key in the PR packaging step of `.github/workflows/ci.yml`
+   equal to the key embedded in released apps. The workflow supplies it directly
+   because fork PR workflows cannot read repository variables. Set source-repository **variable**
+   `SPARKLE_ED_PUBLIC_KEY` to the same value for the trusted publisher's independent
+   archive verification. Keep `SPARKLE_ED_PRIVATE_KEY` secret.
    Existing `SAKURACORD_BOT_APP_ID` and `SAKURACORD_BOT_PRIVATE_KEY` supply the
    publisher's GitHub App credentials.
 3. Land the trusted publication workflow on `main` before relying on its

@@ -62,6 +62,7 @@ contacting Discord:
 | `./script/build_and_run.sh --offline-chat-performance` | Large native timeline |
 | `./script/build_and_run.sh --offline-chat-voice-performance` | Large native timeline where every fifth message is a voice message |
 | `./script/build_and_run.sh --offline-pins-performance-autoscroll` | Paginated 5,000-message pins timeline benchmark |
+| `./script/build_and_run.sh --offline-friends-performance` | 1,000 friends plus 200 requests; 20-second scroll with 20 presence updates/second, then 80 category switches |
 | `./script/build_and_run.sh --offline-incoming-private-call` | Incoming direct-message call |
 
 The offline sign-in fixture uses the production sign-in views and state handling
@@ -181,9 +182,12 @@ proportion to its risk:
 | `./script/code_quality.sh check` | Run the pinned SwiftFormat and SwiftLint policy |
 | `./script/ci.sh` | Run code-quality and release checks, the full first-party test matrix, and the app build |
 
-Hosted CI runs `./script/ci.sh packages` (checks and library tests) and
-`./script/ci.sh app` (app tests and build) as parallel jobs, each with its own
-compiler output cache. Branch CI runs on pushes to `main`, `nightly`, and
+Hosted CI runs four parallel jobs with separate compiler output caches:
+`./script/ci.sh packages-core` runs checks and the models, persistence, rendering,
+and plugin SDK tests; `./script/ci.sh protocol` runs protocol tests;
+`./script/ci.sh media` runs DaveKit and media tests; and `./script/ci.sh app`
+runs app tests and builds the executable. The local `packages` and `all` modes
+still run their complete suites. Branch CI runs on pushes to `main`, `nightly`, and
 release tags, and on pull requests; a newer push to a pull request cancels its
 in-progress run. Release compilation runs alongside any required validation,
 and publication waits for both. See

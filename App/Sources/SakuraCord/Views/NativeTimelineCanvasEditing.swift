@@ -123,9 +123,11 @@ extension NativeTimelineCanvasView {
         guard hoveredFooterAction != value else { return }
         let old = hoveredFooterAction
         hoveredFooterAction = value
-        for messageID in [old, value].compactMap({ $0?.messageID }) {
+        for target in [old, value].compactMap({ $0 }) {
+            // A revealed run's header shares its first row's message ID.
+            let header = NativeMessageTimelineItem.Identifier.suppressedMessages(target.messageID)
             guard let index = items.firstIndex(where: {
-                $0.messageID == messageID
+                target.kind == .suppressedToggle ? $0.identifier == header : $0.messageID == target.messageID
             }) else { continue }
             setNeedsDisplay(rowFrame(at: index))
         }
@@ -221,6 +223,7 @@ extension NativeTimelineCanvasView {
                 removeActionCapsule()
                 return
             }
+            refreshActionCapsuleMessage(row.message)
             positionActionCapsule(at: index)
             return
         }
@@ -247,6 +250,7 @@ extension NativeTimelineCanvasView {
         }
 
         if actionCapsuleMessageID == row.id {
+            refreshActionCapsuleMessage(row.message)
             positionActionCapsule(at: index)
             return
         }
@@ -266,21 +270,6 @@ extension NativeTimelineCanvasView {
         model: AppModel,
         actions: NativeTimelineRowActions
     ) {
-        let state = NativeTimelineActionCapsuleState()
-        state.presentationDidChange = { [weak self, weak state] isPresented in
-            Task { @MainActor [weak self, weak state] in
-                await Task.yield()
-                guard let self,
-                      let state,
-                      self.actionCapsuleState === state
-                else { return }
-                if isPresented {
-                    self.refreshActionCapsuleSizeAndPosition()
-                } else {
-                    self.reconcileActionCapsule()
-                }
-            }
-        }
         let canEdit = row.message.author.id == model.snapshot?.currentUser.id
             && !row.message.hasPoll
             && !row.message.flags.contains(.voiceMessage)
@@ -291,14 +280,14 @@ extension NativeTimelineCanvasView {
         let jumpToMessage = actions.openMessage.map { openMessage in
             { openMessage(row.message) }
         }
-        let unpinMessage: (() -> Void)? = if messageInteractionContext == .pinnedResult,
-                                            model.canManagePins(for: row.message)
-        {
-            { actions.togglePin(row.message) }
-        } else {
-            nil
-        }
-        let retry = row.message.outboxState == .failed
+        let isFailed = row.message.outboxState == .failed
+        let offersShiftActions = jumpToMessage == nil && !isFailed
+        let canPin = (offersShiftActions || messageInteractionContext == .pinnedResult)
+            && model.canManagePins(for: row.message)
+        let unpinMessage: (() -> Void)? = messageInteractionContext == .pinnedResult && canPin
+            ? messageMenuHandler(action: .unpinMessage, row: row, index: index, actions: actions)
+            : nil
+        let retry = isFailed
             ? { actions.retry(row.message) }
             : nil
         let reply = MessageReplyPresentationPolicy.allowsReplyAction(
@@ -311,12 +300,43 @@ extension NativeTimelineCanvasView {
                 { forward(row.message) }
             }
             : nil
-        let openThread = row.message.thread.map { thread in
-            { actions.openThread(thread) }
+        let togglePin: (() -> Void)? = offersShiftActions && canPin
+            ? messageMenuHandler(action: .pinMessage, row: row, index: index, actions: actions)
+            : nil
+        // Copy Message ID, Copy Link and Mark Unread, plus Pin when allowed.
+        let shiftActionCount = offersShiftActions ? 3 + (togglePin == nil ? 0 : 1) : 0
+        let controlCount = jumpToMessage == nil
+            ? 2 + (isFailed ? 0 : (reply == nil ? 0 : 1) + (forward == nil ? 0 : 1) + (canEdit ? 1 : 0))
+            : 1 + (unpinMessage == nil ? 0 : 1) + (messageInteractionContext == .inboxMention ? 1 : 0)
+        let state = NativeTimelineActionCapsuleState(
+            message: row.message,
+            controlCount: controlCount,
+            shiftActionCount: shiftActionCount,
+            allowsQuickReactions: jumpToMessage == nil && model.canCreateReactions(on: row.message)
+        )
+        // A capsule that appears while Shift is already held starts in the
+        // Shift variant without animating.
+        state.isShiftHeld = MessageActionShiftPolicy.isActive(NSEvent.modifierFlags)
+        state.updateAvailableWidth(bounds.width)
+        if shiftActionCount > 0 {
+            installActionCapsuleModifierMonitor()
+        }
+        state.presentationDidChange = { [weak self, weak state] isPresented in
+            Task { @MainActor [weak self, weak state] in
+                await Task.yield()
+                guard let self,
+                      let state,
+                      self.actionCapsuleState === state
+                else { return }
+                if isPresented {
+                    self.positionActionCapsule()
+                } else {
+                    self.reconcileActionCapsule()
+                }
+            }
         }
         let root = NativeTimelineActionCapsuleOverlay(
             model: model,
-            message: row.message,
             canEdit: canEdit,
             canDelete: canDelete,
             state: state,
@@ -335,9 +355,21 @@ extension NativeTimelineCanvasView {
                 guard let self else { return }
                 Self.copyText(self.messageLink(for: row.message))
             },
-            openThread: openThread,
-            delete: { actions.delete(row.message) }
+            copyMessageID: messageMenuHandler(action: .copyMessageID, row: row, index: index, actions: actions),
+            markUnread: messageMenuHandler(action: .markUnread, row: row, index: index, actions: actions),
+            togglePin: togglePin,
+            showMoreActions: { [weak self] in
+                self?.presentActionCapsuleMenu(forMessageID: row.id)
+            },
+            delete: messageMenuHandler(action: .deleteMessage, row: row, index: index, actions: actions)
         )
+        actionCapsuleState = state
+        actionCapsuleHost = addActionCapsuleHost(root, identifier: "message-action-capsule-\(row.id)")
+        actionCapsuleMessageID = row.id
+        positionActionCapsule(at: index)
+    }
+
+    private func addActionCapsuleHost(_ root: some View, identifier: String) -> NativeTimelineActionCapsuleHost {
         // The canvas owns the capsule's exact document-coordinate frame.
         // Nested thread timelines extend beneath their top toolbar, so this
         // host must not inherit that container's safe-area displacement.
@@ -346,42 +378,14 @@ extension NativeTimelineCanvasView {
         host.setContentHuggingPriority(.required, for: .vertical)
         host.setContentCompressionResistancePriority(.required, for: .horizontal)
         host.setContentCompressionResistancePriority(.required, for: .vertical)
-        host.setAccessibilityIdentifier("message-action-capsule-\(row.id)")
+        host.setAccessibilityIdentifier(identifier)
         addSubview(host, positioned: .above, relativeTo: nil)
-        actionCapsuleState = state
-        actionCapsuleHost = host
-        actionCapsuleMessageID = row.id
-        let controlCount = jumpToMessage == nil
-            ? (row.message.outboxState == .failed
-                ? 2
-                : 3
-                + (retry == nil ? 0 : 1)
-                + (reply == nil ? 0 : 1)
-                + (forward == nil ? 0 : 1)
-                + (canEdit ? 1 : 0)
-                + (canDelete ? 1 : 0)
-                + (openThread == nil ? 0 : 1))
-            : 1 + (unpinMessage == nil ? 0 : 1) + (messageInteractionContext == .inboxMention ? 1 : 0)
-        actionCapsuleSize = HoverActionPillMetrics.size(
-            controlCount: controlCount
-        )
-        positionActionCapsule(at: index)
-    }
-
-    func refreshActionCapsuleSizeAndPosition(at knownIndex: Int? = nil) {
-        guard let host = actionCapsuleHost else { return }
-        host.layoutSubtreeIfNeeded()
-        let fitting = host.fittingSize
-        actionCapsuleSize = NSSize(
-            width: max(InterfaceScale.metric(36), fitting.width),
-            height: max(InterfaceScale.metric(36), fitting.height)
-        )
-        positionActionCapsule(at: knownIndex)
+        return host
     }
 
     func positionActionCapsule(at knownIndex: Int? = nil) {
-        guard let host = actionCapsuleHost,
-              let size = actionCapsuleSize,
+        guard let state = actionCapsuleState,
+              let host = actionCapsuleHost,
               let messageID = actionCapsuleMessageID,
               let index =
                 knownIndex.flatMap({ candidate in
@@ -392,26 +396,102 @@ extension NativeTimelineCanvasView {
                 })
                 ?? items.firstIndex(where: { $0.messageID == messageID })
         else { return }
+        state.updateAvailableWidth(bounds.width)
+        let size = state.hostSize
         let layout = layouts[index]
         let origin = displayedRowOrigin(at: index)
+        let minX: CGFloat
+        let anchorMaxX: CGFloat
+        let originY: CGFloat
         if let bubble = layout.bubbleRegion {
-            host.frame = CGRect(
-                x: min(
-                    max(InterfaceScale.metric(8), bubble.frame.maxX - size.width),
-                    max(InterfaceScale.metric(8), bounds.width - InterfaceScale.metric(8) - size.width)
-                ),
-                y: max(0, origin + bubble.frame.minY - size.height + InterfaceScale.metric(7)),
-                width: size.width,
-                height: size.height
-            )
+            let inset = InterfaceScale.metric(8)
+            minX = inset
+            anchorMaxX = min(bubble.frame.maxX, bounds.width - inset)
+            originY = max(0, origin + bubble.frame.minY - size.height + InterfaceScale.metric(7))
         } else {
-            host.frame = CGRect(
-                x: max(0, bounds.width - InterfaceScale.metric(14) - size.width),
-                y: origin + (layout.highlightFrame?.minY ?? 0) - InterfaceScale.metric(13),
-                width: size.width,
-                height: size.height
-            )
+            minX = 0
+            anchorMaxX = bounds.width - InterfaceScale.metric(14)
+            originY = origin + (layout.highlightFrame?.minY ?? 0) - InterfaceScale.metric(13)
         }
+        let originX = max(minX, anchorMaxX - size.width)
+        host.frame = CGRect(x: originX, y: originY, width: size.width, height: size.height)
+        // A capsule clamped against the leading side grows away from it.
+        let pinsLeadingEdge = originX > anchorMaxX - size.width
+        if state.pinsLeadingEdge != pinsLeadingEdge {
+            state.pinsLeadingEdge = pinsLeadingEdge
+        }
+        updateActionCapsuleInteractiveFrame()
+    }
+
+    /// Only the visible pill takes pointer input; the rest of the host is
+    /// room for the other variant.
+    private func updateActionCapsuleInteractiveFrame() {
+        guard let state = actionCapsuleState, let host = actionCapsuleHost else { return }
+        let pillWidth = state.actionSize.width
+        host.interactiveFrame = CGRect(
+            x: state.pinsLeadingEdge ? host.frame.minX : host.frame.maxX - pillWidth,
+            y: host.frame.minY,
+            width: pillWidth,
+            height: host.frame.height
+        )
+    }
+
+    /// Lives as long as the canvas once installed; without a capsule it
+    /// does nothing.
+    func installActionCapsuleModifierMonitor() {
+        guard actionCapsuleModifierMonitor == nil else { return }
+        actionCapsuleModifierMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: .flagsChanged
+        ) { [weak self] event in
+            self?.setActionCapsuleShiftHeld(
+                MessageActionShiftPolicy.isActive(event.modifierFlags)
+            )
+            return event
+        }
+    }
+
+    func setActionCapsuleShiftHeld(_ isHeld: Bool) {
+        guard let state = actionCapsuleState, state.isShiftHeld != isHeld else { return }
+        state.isShiftHeld = isHeld
+        updateActionCapsuleInteractiveFrame()
+    }
+
+    /// Modifier changes are not delivered while another app is active or a
+    /// menu is tracking, so re-read Shift when either ends.
+    @objc func synchronizeActionCapsuleShiftState() {
+        setActionCapsuleShiftHeld(MessageActionShiftPolicy.isActive(NSEvent.modifierFlags))
+    }
+
+    /// The capsule's More button opens the same menu as a right click.
+    func presentActionCapsuleMenu(forMessageID messageID: MessageID) {
+        guard let host = actionCapsuleHost,
+              let actions,
+              let index = items.firstIndex(where: { $0.messageID == messageID }),
+              case let .message(row, _, _) = items[index],
+              let menu = messageContextMenu(
+                for: row,
+                at: index,
+                targetsAuthor: false,
+                actions: actions,
+                failedMediaActions: nil
+              )
+        else { return }
+        let pillFrame = host.interactiveFrame ?? host.frame
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(
+                x: pillFrame.maxX - HoverActionPillMetrics.padding - HoverActionPillMetrics.controlDiameter,
+                y: pillFrame.maxY + InterfaceScale.metric(4)
+            ),
+            in: self
+        )
+    }
+
+    /// Keeps a shown capsule on the row's current message, such as after a
+    /// reaction toggles, without reinstalling it.
+    private func refreshActionCapsuleMessage(_ message: Message) {
+        guard let state = actionCapsuleState, state.message != message else { return }
+        state.message = message
     }
 
     func removeActionCapsule() {
@@ -420,7 +500,6 @@ extension NativeTimelineCanvasView {
         actionCapsuleHost = nil
         actionCapsuleState = nil
         actionCapsuleMessageID = nil
-        actionCapsuleSize = nil
     }
 
     func timelineTextCaret(
@@ -1076,7 +1155,8 @@ extension NativeTimelineCanvasView {
 
     func displayedRowOrigin(at index: Int) -> CGFloat {
         contentOriginY
-            + (index >= inboxDisclosureRange.upperBound ? inboxDisclosureShift : 0)
+            + (index >= disclosureRange.upperBound ? disclosureShiftAfter
+                : index < disclosureRange.lowerBound ? disclosureShiftBefore : 0)
             + NativeTimelineTransientRowGeometry.rowOrigin(
                 base: rowOrigins[index],
                 rowIndex: index,

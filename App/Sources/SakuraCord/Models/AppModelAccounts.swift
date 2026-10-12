@@ -290,6 +290,7 @@ extension AppModel {
         selectedChannel = nil
         selectedGuildID = nil
         selectedChannelID = nil
+        resetMessageSearches()
         conversationNavigationHistory = ConversationNavigationHistory()
         replaceSelectedMessages(with: [])
         hasCompletedInitialMessageLoad = false

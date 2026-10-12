@@ -119,7 +119,7 @@ struct MessageTimelineView: View {
                         }
                     } else {
                         scrollPolicy.didRequestBottom()
-                        requestScroll(.bottom)
+                        requestScroll(.bottom, glides: true)
                     }
                 } label: {
                     Label("New messages", systemImage: "arrow.down")
@@ -169,7 +169,7 @@ struct MessageTimelineView: View {
                   model.messages.contains(where: { $0.id == request.messageID })
             else { return }
             scrollPolicy.didNavigateAwayFromBottom()
-            requestScroll(.message(request.messageID, anchor: .center))
+            requestScroll(.message(request.messageID, anchor: .center), glides: request.glides)
             highlight(request.messageID)
             model.completeMessageNavigation(requestID: request.requestID)
         }
@@ -183,7 +183,7 @@ struct MessageTimelineView: View {
         }
         .onChange(of: model.replyingTo?.id) { _, messageID in
             guard let messageID else { return }
-            requestScroll(.message(messageID, anchor: .center))
+            requestScroll(.message(messageID, anchor: .center), glides: true)
         }
         .task(id: model.selectedChannelID) {
             allowsAutomaticHistoryLoading = false
@@ -251,7 +251,7 @@ struct MessageTimelineView: View {
     private func openReply(_ messageID: MessageID) {
         if model.messages.contains(where: { $0.id == messageID }) {
             scrollPolicy.didNavigateAwayFromBottom()
-            requestScroll(.message(messageID, anchor: .center))
+            requestScroll(.message(messageID, anchor: .center), glides: true)
             highlight(messageID)
         } else if let channel = model.selectedChannel {
             model.navigate(
@@ -329,8 +329,8 @@ struct MessageTimelineView: View {
         )
     }
 
-    private func requestScroll(_ target: MessageTimelineScrollRequest.Target) {
-        scrollRequest = MessageTimelineScrollRequest(target: target)
+    private func requestScroll(_ target: MessageTimelineScrollRequest.Target, glides: Bool = false) {
+        scrollRequest = MessageTimelineScrollRequest(target: target, isAnimated: glides)
     }
 
     private func highlight(_ messageID: MessageID) {

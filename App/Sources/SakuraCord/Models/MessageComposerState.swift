@@ -22,6 +22,28 @@ final class MessageComposerState {
     var isSendQueueFullAlertPresented = false
     @ObservationIgnored var outbox = OutgoingMessageState()
     @ObservationIgnored private var draftWriteTask: Task<Void, Never>?
+    /// Staged files whose privacy and size check is still running. They show
+    /// in the composer at once but cannot be sent until it finishes.
+    var checkingAttachmentIDs: Set<UUID> = []
+    @ObservationIgnored private var animatedResizeUptimes: [MessageComposerDestination: TimeInterval] = [:]
+
+    /// Records that a composer began animating to a new height, so the
+    /// timeline above it glides along instead of jumping.
+    func noteAnimatedResize(
+        of destination: MessageComposerDestination,
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        animatedResizeUptimes[destination] = now
+    }
+
+    func isAnimatingResize(
+        of destination: MessageComposerDestination,
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> Bool {
+        animatedResizeUptimes[destination].map {
+            now - $0 <= ComposerResizeMotion.signalLifetime
+        } ?? false
+    }
 
     func persistDraft(_ value: String, channelID: ChannelID, database: SakuraCordDatabase?) {
         guard let database else { return }
@@ -88,6 +110,7 @@ final class MessageComposerState {
         threadReplyMentionsAuthor = true
         channelAttachments = []
         threadAttachments = []
+        checkingAttachmentIDs = []
         isSendQueueFullAlertPresented = false
         outbox.reset()
         slowmode.reset()

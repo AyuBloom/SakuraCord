@@ -165,6 +165,8 @@ import Testing
     let expected: Set<SettingsControlID> = [
         .interfaceSize,
         .messageAppearance,
+        .directMessageAppearance,
+        .groupMessageAppearance,
         .messageDensity,
         .composerBarAppearance,
         .resetMessageAppearance,

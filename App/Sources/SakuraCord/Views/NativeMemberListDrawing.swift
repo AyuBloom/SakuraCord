@@ -37,6 +37,7 @@ extension NativeMemberListCanvasView {
                 )
                 return
             }
+            guard !section.title.isEmpty else { return }
             drawSectionHeader(section, at: index, context: context)
         case .placeholder:
             guard let skeletonStyle else { return }
@@ -67,7 +68,7 @@ extension NativeMemberListCanvasView {
         } else {
             .secondaryLabelColor
         }
-        let line = Self.line(label, font: font, color: color)
+        let line = cachedSectionHeaderLine(label, font: font, color: color)
         let labelY = origins[index] + 12
         let labelX: CGFloat
         if showsRoleIndicator {
@@ -343,7 +344,7 @@ extension NativeMemberListCanvasView {
         let nameX = geometry.nameX
         let nameLayout = geometry.layout
         if nameLayout.nameWidth > 0 {
-            let visibleName = Self.truncatedLine(
+            let visibleName = cachedFittedTextLine(
                 prepared.name,
                 token: prepared.nameTruncationToken,
                 maximumWidth: nameLayout.nameWidth
@@ -378,8 +379,8 @@ extension NativeMemberListCanvasView {
         if let activity = prepared.activity,
            let truncationToken = prepared.activityTruncationToken
         {
-            let maximumWidth = max(0, row.maxX - textX - 4)
-            let visibleActivity = Self.truncatedLine(
+            let maximumWidth = max(0, row.maxX - textX - 4 - InterfaceScale.metric(presentation.trailingAccessoryWidth))
+            let visibleActivity = cachedFittedTextLine(
                 activity,
                 token: truncationToken,
                 maximumWidth: maximumWidth
@@ -428,7 +429,8 @@ extension NativeMemberListCanvasView {
             width: NativeMemberListMetrics.avatarSize,
             height: NativeMemberListMetrics.avatarSize
         )
-        let opacity: CGFloat = !member.isListedOnline ? 0.55 : 1
+        let opacity = presentation.opacity(for: member)
+        let status = presentation.status(for: member)
         let isMobile = member.showsMobileIndicator
         let presenceIndicatorRect = AvatarPresencePresentation.indicatorRect(
             avatarRect: avatar,
@@ -437,7 +439,7 @@ extension NativeMemberListCanvasView {
         )
         context.saveGState()
         context.setAlpha(opacity)
-        if member.memberListStatus != nil {
+        if status != nil {
             context.addRect(context.boundingBoxOfClipPath)
             context.addPath(AvatarPresencePresentation.cutoutPath(
                 avatarRect: avatar,
@@ -497,7 +499,7 @@ extension NativeMemberListCanvasView {
 
         context.restoreGState()
 
-        if let status = member.memberListStatus {
+        if let status {
             drawPresenceIndicator(
                 status,
                 isMobile: isMobile,

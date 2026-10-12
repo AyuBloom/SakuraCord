@@ -21,6 +21,11 @@ For commands, use [Development](DEVELOPMENT.md). For wire behaviour, use the
 Views consume domain state and invoke owners. They do not construct Discord
 requests, open authenticated transports, or import DaveKit directly.
 
+The App package keeps its implementation and resources in the `SakuraCord`
+library target. The `SakuraCordLauncher` executable target calls its launch entry
+point and produces the `SakuraCord` executable. App tests import the same library,
+so building the executable and tests does not compile a second copy of the app.
+
 ## Find the owner
 
 Start at these files and follow their neighbouring extensions. This is an entry
@@ -32,11 +37,19 @@ are mapped in [Testing](TESTING.md#choose-the-verification-boundary).
 | Send, retry, drafts | [MessageComposerState.swift](../App/Sources/SakuraCord/Models/MessageComposerState.swift); [AppModelOutgoing.swift](../App/Sources/SakuraCord/Models/AppModelOutgoing.swift) | [DiscordRESTProvider.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTProvider.swift) | [ComposerView.swift](../App/Sources/SakuraCord/Views/ComposerView.swift) |
 | History and rendering | [AppModelHistory.swift](../App/Sources/SakuraCord/Models/AppModelHistory.swift) | [History provider](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTProviderMessageHistory.swift); [MessageRendering](../Packages/MessageRendering/Sources) | [NativeMessageTimelineView.swift](../App/Sources/SakuraCord/Views/NativeMessageTimelineView.swift) |
 | Inbox and read state | [InboxState.swift](../App/Sources/SakuraCord/Models/InboxState.swift); [AccountReadStateModel.swift](../App/Sources/SakuraCord/Models/AccountReadStateModel.swift) | [DiscordRESTInbox.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTInbox.swift) | [InboxPopoverView.swift](../App/Sources/SakuraCord/Views/InboxPopoverView.swift) |
+| Friends and relationships | [FriendsState.swift](../App/Sources/SakuraCord/Models/FriendsState.swift); [AppModelFriends.swift](../App/Sources/SakuraCord/Models/AppModelFriends.swift) | [DiscordRESTRelationships.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTRelationships.swift) | [FriendsView.swift](../App/Sources/SakuraCord/Views/FriendsView.swift) |
 | Joining, onboarding, Guide | [AppModelOnboarding.swift](../App/Sources/SakuraCord/Models/AppModelOnboarding.swift); [AppModelGuildGuide.swift](../App/Sources/SakuraCord/Models/AppModelGuildGuide.swift) | [DiscordRESTOnboarding.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTOnboarding.swift); [DiscordRESTGuildGuide.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTGuildGuide.swift) | [GuildCustomizationView.swift](../App/Sources/SakuraCord/Views/GuildCustomizationView.swift) |
 | Profiles and account settings | [ProfileEditorState.swift](../App/Sources/SakuraCord/Models/Settings/ProfileEditorState.swift) | [DiscordRESTProfileSaving.swift](../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTProfileSaving.swift) | [ProfilesSettingsPage.swift](../App/Sources/SakuraCord/Views/Settings/ProfilesSettingsPage.swift) |
 | Attachment preparation | [AppModelComposerAttachments.swift](../App/Sources/SakuraCord/Models/AppModelComposerAttachments.swift) | [MediaPipeline](../Packages/MediaPipeline/Sources) | [AttachmentSettingsSection.swift](../App/Sources/SakuraCord/Views/Settings/AttachmentSettingsSection.swift) |
 | Bug reports and suggestions | [IssueReportStore.swift](../App/Sources/SakuraCord/Models/IssueReportStore.swift); [AppModelIssueReports.swift](../App/Sources/SakuraCord/Models/AppModelIssueReports.swift) | [IssueReportHubClient.swift](../App/Sources/SakuraCord/Services/IssueReportHubClient.swift) (sakuracord.app); [report-service sign-in](protocol/SESSION.md#report-service-sign-in) | [IssueReportView.swift](../App/Sources/SakuraCord/Views/IssueReport/IssueReportView.swift) |
 | Voice and screen sharing | [AppModelVoice.swift](../App/Sources/SakuraCord/Models/AppModelVoice.swift); [AppModelScreenSharing.swift](../App/Sources/SakuraCord/Models/AppModelScreenSharing.swift) | [DiscordVoiceSession.swift](../Packages/MediaPipeline/Sources/MediaPipeline/DiscordVoiceSession.swift) | [ScreenShareWindowOverlay.swift](../App/Sources/SakuraCord/Views/ScreenShareWindowOverlay.swift) |
+
+Friends uses the existing native member canvas for visible-row drawing, media
+reuse and accessibility. `FriendsState` sorts hydrated relationships when their
+records change, applies presence deltas by identity, and caches each category's
+search projection. `FriendsProjection` adapts those rows to the canvas; the
+provider remains authoritative for relationship metadata and mutations. These
+caches and request-note reveal state are session-scoped.
 
 ## Runtime and account lifetime
 
@@ -61,6 +74,12 @@ logout and failed startup cancel old work and clear its presentation. Draft
 writes capture their original database and drain on teardown; clearing and
 restoring drafts use the same serialized queue. A restoration also checks the
 composer's edit revision so it cannot overwrite a newer edit or clear.
+
+Message search retains its query and results per guild, with all direct messages
+sharing one scope. Channel changes preserve that scope's search. Side-pane threads
+temporarily occupy the results pane; closing them reveals the retained search.
+Search requests publish to their originating scope, and account teardown clears
+every scope.
 
 `GuildOnboardingStore` owns in-memory choices, membership confirmation, Guide
 configuration and progress. `InboxState` owns frozen Inbox groups and loading;

@@ -9,12 +9,14 @@ enum ProfilePresentationLayout {
 }
 
 struct ProfilePresentationContent<Footer: View>: View {
+    @Environment(\.serverTagCardModel) private var model
     let presentation: ProfilePresentationState
     var layout: ProfilePresentationLayout = .popover
     var maximumPopoverHeight: CGFloat = InterfaceScale.metric(560)
     var showsRoles = true
     let footer: Footer
     var openProfile: ((ProfilePresentationState) -> Void)?
+    var userMenu: (() -> NSMenu?)?
 
     init(
         presentation: ProfilePresentationState,
@@ -22,6 +24,7 @@ struct ProfilePresentationContent<Footer: View>: View {
         maximumPopoverHeight: CGFloat = InterfaceScale.metric(560),
         showsRoles: Bool = true,
         openProfile: ((ProfilePresentationState) -> Void)? = nil,
+        userMenu: (() -> NSMenu?)? = nil,
         @ViewBuilder footer: () -> Footer
     ) {
         self.presentation = presentation
@@ -30,24 +33,40 @@ struct ProfilePresentationContent<Footer: View>: View {
         self.showsRoles = showsRoles
         self.footer = footer()
         self.openProfile = openProfile
+        self.userMenu = userMenu
     }
 
     var body: some View {
         if presentation.isLocalIdentity {
             CompactIdentityProfilePopover(user: presentation.member.user, isClyde: presentation.isClyde)
         } else {
-        MemberProfilePopover(
-            member: presentation.member,
-            isCurrentUser: presentation.isCurrentUser,
-            profile: presentation.profile,
-            isLoading: presentation.isLoading,
-            errorMessage: presentation.errorMessage,
-            layout: layout,
-            maximumPopoverHeight: maximumPopoverHeight,
-            showsRoles: showsRoles,
-            footer: footer,
-            openProfile: openProfile.map { action in { action(presentation) } }
-        )
+            let suppression = model?.profileSuppression(presentation)
+            // The profile stays mounted, collapsed and hidden, behind a
+            // blocked or ignored gate, so its media and theme are already
+            // resolved when the viewer reveals it.
+            ZStack(alignment: .top) {
+                MemberProfilePopover(
+                    member: presentation.member,
+                    isCurrentUser: presentation.isCurrentUser,
+                    profile: presentation.profile,
+                    isLoading: presentation.isLoading,
+                    errorMessage: presentation.errorMessage,
+                    layout: layout,
+                    maximumPopoverHeight: maximumPopoverHeight,
+                    showsRoles: showsRoles,
+                    footer: footer,
+                    openProfile: openProfile.map { action in { action(presentation) } },
+                    userMenu: userMenu
+                )
+                .frame(height: suppression == nil ? nil : 0, alignment: .top)
+                .clipped()
+                .opacity(suppression == nil ? 1 : 0)
+                .allowsHitTesting(suppression == nil)
+                .accessibilityHidden(suppression != nil)
+                if let model, let suppression {
+                    SuppressedProfileGate(model: model, presentation: presentation, reason: suppression, layout: layout)
+                }
+            }
         }
     }
 }
@@ -58,14 +77,16 @@ extension ProfilePresentationContent where Footer == EmptyView {
         layout: ProfilePresentationLayout = .popover,
         maximumPopoverHeight: CGFloat = InterfaceScale.metric(560),
         showsRoles: Bool = true,
-        openProfile: ((ProfilePresentationState) -> Void)? = nil
+        openProfile: ((ProfilePresentationState) -> Void)? = nil,
+        userMenu: (() -> NSMenu?)? = nil
     ) {
         self.init(
             presentation: presentation,
             layout: layout,
             maximumPopoverHeight: maximumPopoverHeight,
             showsRoles: showsRoles,
-            openProfile: openProfile
+            openProfile: openProfile,
+            userMenu: userMenu
         ) {
             EmptyView()
         }
@@ -118,6 +139,7 @@ struct MemberProfilePopover<Footer: View>: View {
     var showsRoles = true
     let footer: Footer
     var openProfile: (() -> Void)?
+    var userMenu: (() -> NSMenu?)?
     var editor: ProfileEditorState?
     var openEditorPicker: ((ProfileEditorPicker) -> Void)?
     var showsDetails = true
@@ -231,6 +253,9 @@ struct MemberProfilePopover<Footer: View>: View {
                     editor: editor,
                     openEditorPicker: openEditorPicker
                 )
+                .overlay {
+                    if let userMenu, editor == nil { UserContextMenuBridge(makeMenu: userMenu) }
+                }
                 .overlay(alignment: .topTrailing) {
                     if openProfile != nil {
                         Button(action: expandProfile) {

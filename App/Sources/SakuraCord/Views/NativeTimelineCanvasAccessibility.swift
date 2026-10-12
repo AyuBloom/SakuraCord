@@ -291,6 +291,12 @@ extension NativeTimelineCanvasView {
         let layout = layouts[index]
         let rowFrame = rowFrame(at: index)
         switch item {
+        case let .suppressedMessages(group):
+            return accessibilityElement(role: .button, label: "\(group.label), \(group.actionTitle)",
+                                        frame: rowFrame, parent: self) { [weak self] in
+                self?.toggleSuppressedGroup(group)
+                return self != nil
+            }
         case let .inboxEvent(event):
             return accessibilityElement(role: .button, label: event.name, frame: rowFrame, parent: self) { [weak self] in
                 self?.model?.inbox.selectedEvent = event
@@ -391,11 +397,7 @@ extension NativeTimelineCanvasView {
         let header = makeMessageAccessibilityHeader(for: row, rowFrame: rowFrame)
         let element = header.element
         element.setAccessibilityCustomActions(
-            accessibilityMessageActions(
-                row,
-                rowFrame: rowFrame,
-                rowIndex: rowIndex
-            ).map { action in
+            accessibilityMessageActions(row, rowIndex: rowIndex).map { action in
                 let handler = action.handler
                 action.handler = { [weak self] in
                     guard let self, !self.sendTransitionBlocksInteractions else { return false }
@@ -487,7 +489,8 @@ extension NativeTimelineCanvasView {
         )
         let generatedLabel = SystemMessagePresentation.label(
             for: message,
-            currentUserID: model?.snapshot?.currentUser.id
+            currentUserID: model?.snapshot?.currentUser.id,
+            recipient: model?.systemMessageRecipient(for: message)
         )
         let baseLabel = message.type.hasGeneratedContent
             ? "System message, \(generatedLabel)"
@@ -970,7 +973,7 @@ extension NativeTimelineCanvasView {
                         dx: 0,
                         dy: self.displayedRowOrigin(at: rowIndex)
                     ),
-                    preferredEdge: .maxX
+                    presentation: .inline
                 )
                 return true
             })

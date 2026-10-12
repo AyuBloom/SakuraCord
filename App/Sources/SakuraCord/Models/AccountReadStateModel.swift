@@ -1140,6 +1140,8 @@ extension AccountReadStateModel {
         let boundary = parent.lastAcknowledgedMessageID ?? MessageID(rawValue: 0)
         return entries.values.lazy.filter { entry in
             entry.parentID == channelID
+                && entry.isAccessible
+                && !self.isGuildResourceChannel(entry)
                 && self.forumPostArchivedByID[entry.channelID] != true
                 && !entry.hasAuthoritativeReadState
                 && MessageID(rawValue: entry.channelID.rawValue) > boundary
@@ -1394,10 +1396,7 @@ extension AccountReadStateModel {
     }
 
     func guildUnread(_ guildID: GuildID, now: Date = .now) -> Bool {
-        channelByID.values.contains { channel in
-            channel.guildID == guildID
-                && contributesGuildUnread(channelID: channel.id, now: now)
-        }
+        unreadPresentationSource().guildUnread(guildID, now: now)
     }
 
     func guildMentions(_ guildID: GuildID) -> Int {

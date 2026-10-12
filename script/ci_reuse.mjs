@@ -8,13 +8,20 @@ import { setTimeout } from 'node:timers/promises';
 const workflowPath = '.github/workflows/ci.yml';
 const releaseTag = /^v\d+\.\d+\.\d+(?:-Beta-\d+)?$/;
 // Full validation is the union of these jobs from the `build` matrix.
-export const suites = ['packages', 'app'];
+export const suites = ['packages', 'protocol', 'media', 'app'];
 const archives = {
-  packages: ['SakuraCordModels', 'DiscordProtocol', 'SakuraCordPersistence',
-    'MessageRendering', 'MediaPipeline', 'SakuraCordPluginSDK'].map(name => `Packages/${name}/.build/out`),
+  packages: ['SakuraCordModels', 'SakuraCordPersistence',
+    'MessageRendering', 'SakuraCordPluginSDK'].map(name => `Packages/${name}/.build/out`),
+  protocol: ['Packages/DiscordProtocol/.build/out'],
+  media: ['Packages/DaveKit/.build/out', 'Packages/MediaPipeline/.build/out'],
   app: ['App/.build/out'],
   release: ['App/.build/out'],
 };
+
+export function canRestoreCompilerCache(configuration, event, ref) {
+  return configuration === 'release' || event === 'pull_request'
+    || (event === 'push' && ['refs/heads/main', 'refs/heads/nightly'].includes(ref));
+}
 
 export function trustedRun(run, repository, configuration = 'app') {
   const branch = configuration === 'release'
@@ -29,7 +36,7 @@ export function trustedRun(run, repository, configuration = 'app') {
 export function fullValidation(jobs) {
   return suites.every(suite => jobs.some(job => job.name === `build (${suite})`
     && job.conclusion === 'success'
-    && ['Verify checked-out commit', 'Build and test'].every(name =>
+    && ['Verify checked-out commit', 'Record clean compilation', 'Build and test'].every(name =>
       job.steps?.some(step => step.name === name
         && step.status === 'completed' && step.conclusion === 'success'))));
 }
@@ -153,16 +160,17 @@ async function main() {
     // Archive only compiler outputs, never credentials, app state, or signed dist assets.
     const present = paths.filter(path => existsSync(path));
     if (present.length !== paths.length) throw new Error('Expected SwiftPM build output is missing.');
-    command('tar', ['-cf', archive, ...present]);
+    // Swift Build records nanosecond output mtimes; whole-second archives invalidate the cache.
+    command('tar', ['--format=pax', '-cf', archive, ...present]);
     return;
   }
   if (mode !== 'restore') throw new Error('Expected validation, restore, or archive.');
   const key = cacheKey(configuration);
   output('key', key);
-  // Branch pushes build clean so the validation that releases reuse never
-  // depends on an incremental build; they still save outputs for pull requests.
-  if (configuration !== 'release' && process.env.GITHUB_EVENT_NAME !== 'pull_request') {
-    console.log('Branch validation compiles from source.');
+  output('restored', false);
+  // Release validation stays clean. Ordinary branch pushes and PRs reuse trusted outputs.
+  if (!canRestoreCompilerCache(configuration, process.env.GITHUB_EVENT_NAME, process.env.GITHUB_REF)) {
+    console.log('Release validation compiles from source.');
     return;
   }
   let stage = 'lookup';
@@ -192,6 +200,7 @@ async function main() {
     stage = 'extraction';
     console.log(`Extracting ${configuration} compiler outputs.`);
     command('tar', ['-xf', join(directory, `swiftpm-${configuration}.tar`)]);
+    output('restored', true);
     console.log(`Restored ${configuration} compiler outputs from ${cached.run.html_url}`);
   } catch (error) {
     console.warn(`Cache restore failed during ${stage}: ${errorDetails(error)}`);

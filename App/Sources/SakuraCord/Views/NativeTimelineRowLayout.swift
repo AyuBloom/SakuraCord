@@ -168,6 +168,7 @@ struct NativeTimelineRowLayout {
     var bubbleReferenceConnector: ReferenceConnector?
     var commandInvocationRegion: CommandInvocationRegion?
     var systemIconFrame: CGRect?
+    var suppressedHeader: NativeTimelineSuppressedHeaderLayout?
     var contentFrame: CGRect?
     var attributedContent: NSAttributedString?
     var contentFramesetter: CTFramesetter?
@@ -202,6 +203,22 @@ struct NativeTimelineRowLayout {
     ) -> Self {
         let width = max(InterfaceScale.metric(220), proposedWidth)
         switch item {
+        case let .suppressedMessages(group):
+            var result = Self(height: NativeTimelineSuppressedHeaderLayout.contentHeight)
+            var offset: CGFloat = 0
+            if group.day != nil {
+                result.daySeparatorFrame = CGRect(x: InterfaceScale.metric(12), y: offset,
+                                                  width: width - InterfaceScale.metric(24), height: NativeTimelineDateSeparatorMetrics.rowHeight)
+                offset += NativeTimelineDateSeparatorMetrics.rowHeight
+            }
+            if group.isUnreadBoundary {
+                result.unreadSeparatorFrame = CGRect(x: InterfaceScale.metric(12), y: offset,
+                                                     width: width - InterfaceScale.metric(24), height: NativeTimelineUnreadSeparatorMetrics.rowHeight)
+                offset += NativeTimelineUnreadSeparatorMetrics.rowHeight
+            }
+            result.height += offset
+            result.suppressedHeader = .make(group: group, width: width, originY: offset)
+            return result
         case .inboxGroup:
             return Self(height: InboxRowMetrics.headerHeight)
         case .inboxEvent:

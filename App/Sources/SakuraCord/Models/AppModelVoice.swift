@@ -24,6 +24,7 @@ extension AppModel {
             return
         }
         let account = accountSession()
+        guard await confirmIgnoredVoiceParticipants(in: channel), isCurrentAccountSession(account) else { return }
         voiceActionGeneration &+= 1
         let actionGeneration = voiceActionGeneration
         await leaveVoice(account: account, preservingVoiceActionGeneration: actionGeneration)
@@ -432,7 +433,7 @@ extension AppModel {
             && (applicationIsActive || !notificationPreferences.isEnabled)
             && notificationPreferences.playsSound
             && privateCallsByChannel.values.contains { call in
-                snapshot.map { call.isRinging($0.currentUser.id) } == true
+                snapshot.map { call.isRinging($0.currentUser.id) } == true && !isIncomingCallSuppressed(call)
                     && notificationPreferences.allows(
                         .incomingCall,
                         isCurrentConversation: readState.isActivelyPresentedAtNewest(call.channelID)

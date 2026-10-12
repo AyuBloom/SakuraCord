@@ -54,6 +54,8 @@ struct MessageTimelineScrollRequest: Equatable {
 
     let id = UUID()
     let target: Target
+    /// Glides to a loaded target instead of cutting to it.
+    var isAnimated = false
 }
 
 struct MessageTimelineEditRequest: Equatable {
@@ -413,6 +415,7 @@ enum NativeTimelineBeginning: Equatable {
 
 enum NativeMessageTimelineItem: Equatable {
     nonisolated enum Identifier: Hashable {
+        case suppressedMessages(MessageID)
         case beginning(ChannelID)
         case inboxGroup(ChannelID)
         case inboxForumPost(ChannelID)
@@ -421,6 +424,7 @@ enum NativeMessageTimelineItem: Equatable {
         case message(MessageRowIdentity)
     }
 
+    case suppressedMessages(SuppressedMessageGroup)
     case beginning(NativeTimelineBeginning)
     case inboxGroup(InboxGroupHeaderPresentation)
     case inboxForumPost(ForumPost)
@@ -433,8 +437,20 @@ enum NativeMessageTimelineItem: Equatable {
     )
 
     var messageID: MessageID? {
-        guard case let .message(row, _, _) = self else { return nil }
-        return row.id
+        switch self {
+        case let .message(row, _, _): row.id
+        // A concealed run is still a message boundary for scrolling and read
+        // acknowledgement. Revealed runs use their original rows instead.
+        case let .suppressedMessages(group) where !group.isRevealed: group.id
+        default: nil
+        }
+    }
+
+    func containsMessage(_ id: MessageID) -> Bool {
+        if case let .suppressedMessages(group) = self {
+            return !group.isRevealed && group.messageIDs.contains(id)
+        }
+        return messageID == id
     }
 
     var messageRow: MessageRowPresentation? {
@@ -444,6 +460,8 @@ enum NativeMessageTimelineItem: Equatable {
 
     var identifier: Identifier {
         switch self {
+        case let .suppressedMessages(group):
+            .suppressedMessages(group.id)
         case let .inboxEvent(event):
             .inboxEvent(event.id)
         case let .inboxGroup(header):

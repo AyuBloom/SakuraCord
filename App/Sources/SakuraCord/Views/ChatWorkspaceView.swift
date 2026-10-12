@@ -66,10 +66,7 @@ struct ChatWorkspaceView: View {
             hasOpenVoiceChat: model.isVoiceChatOpen,
             showsInspector: model.showInspector,
             showsMessageSearch: model.messageSearch.isPresented
-                && MessageSearchSurfacePolicy.showsToolbar(
-                    channelKind: model.selectedChannel?.kind,
-                    hasOpenThread: model.hasThreadPane
-                )
+                && model.canShowMessageSearch
         )
 
         HStack(spacing: 0) {

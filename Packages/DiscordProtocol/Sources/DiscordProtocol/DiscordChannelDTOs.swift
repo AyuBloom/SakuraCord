@@ -152,7 +152,7 @@ struct ChannelDTO: Decodable {
     // Forum and media channel metadata is decoded leniently: guild channel
     // lists are lossy per channel, so one unexpected tag or reaction shape
     // would otherwise drop the whole forum from the sidebar.
-    var availableTags: LossyList<ForumTagDTO>?
+    var availableTags: LossyValue<LossyList<ForumTagDTO>>?
     var defaultReactionEmoji: LossyValue<DefaultReactionDTO>?
     var defaultSortOrder: LossyValue<Int>?
     var defaultForumLayout: LossyValue<Int>?
@@ -294,7 +294,7 @@ struct ChannelDTO: Decodable {
             lastMessageID: lastMessageID.flatMap(MessageID.init),
             lastPinTimestamp: lastPinTimestamp.flatMap(DiscordDate.parse),
             flags: flags ?? 0,
-            availableTags: availableTags?.elements.compactMap(\.domain) ?? [],
+            availableTags: availableTags?.value?.elements.compactMap(\.domain) ?? [],
             defaultReaction: defaultReactionEmoji?.value.map {
                 ForumDefaultReaction(emojiID: $0.emojiID, emojiName: $0.emojiName)
             },

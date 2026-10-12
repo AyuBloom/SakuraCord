@@ -155,10 +155,7 @@ struct RootView: View {
         case .workspace:
             model.onboardingEntryGuildID == nil && model.guildWorkspacePage == nil
                 && (model.isSwitchingAccounts
-                || MessageSearchSurfacePolicy.showsToolbar(
-                    channelKind: model.selectedChannel?.kind,
-                    hasOpenThread: model.hasThreadPane
-                ))
+                || model.canShowMessageSearch)
         case .signedOut:
             model.launchMode != .normal && !model.includesOfflineSignIn
         }
@@ -1160,7 +1157,7 @@ private struct MessageSearchExperienceModifier: ViewModifier {
                 }
             }
             .onChange(of: isEnabled) { wasVisible, isVisible in
-                guard wasVisible, !isVisible else { return }
+                guard wasVisible, !isVisible, !search.isNavigatingToResult else { return }
                 search.isFilterModalPresented = false
                 model.dismissMessageSearch()
             }

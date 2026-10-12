@@ -79,6 +79,8 @@ final class MessageSearchState {
 
     func clear() {
         requestTask?.cancel()
+        resultNavigationGeneration &+= 1
+        isNavigatingToResult = false
         AppPerformanceSignposts.endResourceWindow(named: "MessageSearchBenchmark")
         AppPerformanceSignposts.endResourceWindow(named: "MessageSearchPaginationBenchmark")
         AppPerformanceSignposts.cancelMessageSearchRequest()
@@ -151,6 +153,13 @@ extension AppModel {
         workspaceNavigationOverlay = .quickSwitcher
     }
 
+    var canShowMessageSearch: Bool {
+        MessageSearchSurfacePolicy.showsToolbar(
+            channelKind: selectedChannel?.kind,
+            hasOpenThread: hasThreadPane && !isThreadFullWidth
+        )
+    }
+
     func presentMessageSearch() {
         if isBrowsingGuildChannels {
             onboarding.isChannelSearchFocused = true
@@ -162,10 +171,7 @@ extension AppModel {
         }
         guard sessionState == .workspace,
               selectedChannelID != nil,
-              MessageSearchSurfacePolicy.showsToolbar(
-                  channelKind: selectedChannel?.kind,
-                  hasOpenThread: hasThreadPane
-              )
+              canShowMessageSearch
         else { return }
         let currentScope = selectedGuildID.map(MessageSearchScope.guild) ?? .directMessages
         if messageSearch.submittedQuery?.scope != currentScope {
@@ -177,10 +183,13 @@ extension AppModel {
 
     func presentMessageSearchFromCommand() {
         presentMessageSearch()
-        guard !isBrowsingGuildChannels, messageSearch.isInputFocused,
-              let selectedChannelID,
-              let channel = messageSearchChannels.first(where: { $0.id == selectedChannelID })
-        else { return }
+        guard !isBrowsingGuildChannels, messageSearch.isInputFocused else { return }
+        let channel: Channel? = if isThreadFullWidth, let openThread {
+            threadNavigationChannel(openThread)
+        } else {
+            messageSearchChannels.first(where: { $0.id == selectedChannelID })
+        }
+        guard let channel else { return }
         messageSearch.tokens.removeAll { token in
             if case .channel = token.kind { return true }
             return false
@@ -767,26 +776,17 @@ extension AppModel {
             source: result.hit,
             messageID: messageID,
             initialMessages: result.messages,
-            isKnownThread: isGuildThreadResult
+            isKnownThread: isGuildThreadResult,
+            preservingMessageSearch: true
         )
-        messageSearch.resultNavigationGeneration &+= 1
-        let generation = messageSearch.resultNavigationGeneration
-        messageSearch.isNavigatingToResult = true
-        let navigationTask = guildActivationTask
-        Task { @MainActor [weak self] in
-            await navigationTask?.value
-            guard let self,
-                  messageSearch.resultNavigationGeneration == generation
-            else { return }
-            messageSearch.isNavigatingToResult = false
-        }
     }
 
     private func navigateToMessageResult(
         source: Message,
         messageID: MessageID,
         initialMessages: [Message]?,
-        isKnownThread: Bool
+        isKnownThread: Bool,
+        preservingMessageSearch: Bool = false
     ) {
         let guildID = source.guildID
             ?? snapshot?.channels.first(where: { $0.id == source.channelID })?.guildID
@@ -795,13 +795,15 @@ extension AppModel {
                 to: guildID,
                 linkedChannelID: source.channelID,
                 messageID: messageID,
-                initialMessages: initialMessages ?? [source]
+                initialMessages: initialMessages ?? [source],
+                preservingMessageSearch: preservingMessageSearch
             )
         } else {
             navigate(
                 to: guildID,
                 channelID: source.channelID,
-                messageID: messageID
+                messageID: messageID,
+                preservingMessageSearch: preservingMessageSearch
             )
         }
     }

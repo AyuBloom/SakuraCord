@@ -7,9 +7,9 @@ source "$ROOT_DIR/script/runtime.sh"
 
 MODE="${1:-all}"
 case "$MODE" in
-  all|checks|packages|app) ;;
+  all|checks|packages|packages-core|protocol|media|app) ;;
   *)
-    echo "usage: $0 [all|checks|packages|app]" >&2
+    echo "usage: $0 [all|checks|packages|packages-core|protocol|media|app]" >&2
     exit 2
     ;;
 esac
@@ -52,9 +52,18 @@ case "$MODE" in
     run_checks
     exit 0
     ;;
-  packages)
+  packages|packages-core)
     run_checks
-    "$ROOT_DIR/script/test.sh" packages
+    "$ROOT_DIR/script/test.sh" "$MODE"
+    exit 0
+    ;;
+  protocol)
+    "$ROOT_DIR/script/test.sh" protocol
+    exit 0
+    ;;
+  media)
+    "$ROOT_DIR/script/test.sh" dave
+    "$ROOT_DIR/script/test.sh" media
     exit 0
     ;;
   app)

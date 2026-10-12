@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [packages, app]
+        suite: [packages, protocol, media, app]
     name: build (${{ matrix.suite }})
     env:
       SAKURACORD_STABLE_MTIMES: 1
@@ -95,9 +95,12 @@ jobs:
       - name: Verify checked-out commit
         if: github.event_name != 'workflow_dispatch'
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Record clean compilation
+        if: steps.build-cache.outputs.restored == 'false'
+        run: echo 'No compiler outputs were restored; this suite can supply clean release validation.'
       - name: Build and test
         timeout-minutes: 30
-        run: ./script/ci.sh ${{ matrix.suite }}
+        run: ./script/ci.sh ${{ matrix.suite == 'packages' && 'packages-core' || matrix.suite }}
       - name: Package downloadable pull request app and matching symbols
         if: github.event_name == 'pull_request' && matrix.suite == 'app'
         env:

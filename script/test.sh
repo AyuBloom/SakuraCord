@@ -88,12 +88,18 @@ case "$TARGET" in
   packages)
     run_package_tests
     ;;
+  packages-core)
+    run_tests "$ROOT_DIR/Packages/SakuraCordModels"
+    run_tests "$ROOT_DIR/Packages/SakuraCordPersistence"
+    run_tests "$ROOT_DIR/Packages/MessageRendering"
+    run_tests "$ROOT_DIR/Packages/SakuraCordPluginSDK"
+    ;;
   all)
     run_package_tests
     run_tests "$ROOT_DIR/App"
     ;;
   *)
-    echo "usage: $0 [app|protocol|dave|media|packages|all]" >&2
+    echo "usage: $0 [app|protocol|dave|media|packages|packages-core|all]" >&2
     exit 2
     ;;
 esac

@@ -218,6 +218,27 @@ struct ChannelSidebarView: View {
             \.defaultMinListRowHeight,
             ChannelSidebarLayoutMetrics.minimumRowHeight
         )
+        .overlayPreferenceValue(SidebarUnreadRowAnchors.self) { anchors in
+            GeometryReader { geometry in
+                let width = InterfaceScale.metric(4)
+                let height = InterfaceScale.metric(8)
+                ForEach(anchors) { row in
+                    UnevenRoundedRectangle(
+                        bottomTrailingRadius: height / 2,
+                        topTrailingRadius: height / 2
+                    )
+                    .fill(Color(row.color))
+                    .frame(width: width, height: height)
+                    .position(x: width / 2, y: geometry[row.anchor].midY)
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .clipShape(SidebarContentClip(
+            cornerRadius: ChatChromeMetrics.sidebarContentCornerRadius,
+            showsTopEdge: !isFullScreen
+        ))
         .overlay {
             SidebarChromeSeparator(
                 cornerRadius: ChatChromeMetrics.sidebarContentCornerRadius,
@@ -421,7 +442,6 @@ private struct GuildChannelList: View, Equatable {
     }
     private func guildPageRow(_ title: String, symbol: String, page: GuildWorkspacePage) -> some View {
         HStack(spacing: InterfaceScale.metric(8)) {
-            Color.clear.frame(width: InterfaceScale.metric(8), height: InterfaceScale.metric(8))
             Image(systemName: symbol)
                 .foregroundStyle(.primary.opacity(0.66))
                 .frame(width: ChannelSidebarLayoutMetrics.iconWidth)
@@ -532,6 +552,24 @@ struct SidebarChromeSeparator: Shape {
             control: CGPoint(x: strokeInset, y: strokeInset)
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: strokeInset))
+        return path
+    }
+}
+
+private struct SidebarContentClip: Shape {
+    let cornerRadius: CGFloat
+    let showsTopEdge: Bool
+
+    nonisolated func path(in rect: CGRect) -> Path {
+        var path = SidebarChromeSeparator(
+            cornerRadius: cornerRadius,
+            strokeInset: 0,
+            showsTopEdge: showsTopEdge
+        ).path(in: rect)
+        // Close the sidebar border into a mask using the same top-left curve.
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
         return path
     }
 }
@@ -1303,8 +1341,26 @@ private extension PresenceStatus {
     }
 }
 
+private struct SidebarUnreadRowAnchor: Identifiable {
+    let id: ChannelID
+    let anchor: Anchor<CGRect>
+    // Resolve in the row so the list overlay does not reinterpret its semantic colour.
+    let color: Color.Resolved
+}
+
+private struct SidebarUnreadRowAnchors: PreferenceKey {
+    static var defaultValue: [SidebarUnreadRowAnchor] { [] }
+
+    static func reduce(
+        value: inout [SidebarUnreadRowAnchor],
+        nextValue: () -> [SidebarUnreadRowAnchor]
+    ) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 private struct ChannelRow: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.self) private var environment
 
     let model: AppModel
     let channel: Channel
@@ -1315,11 +1371,6 @@ private struct ChannelRow: View {
 
     var body: some View {
         HStack(spacing: InterfaceScale.metric(8)) {
-            Capsule()
-                .fill(colorScheme == .dark ? Color.white : Color.black)
-                .frame(width: InterfaceScale.metric(4), height: InterfaceScale.metric(8))
-                .opacity(showsUnread ? 1 : 0)
-                .frame(width: InterfaceScale.metric(8))
             Image(systemName: systemImage)
                 .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
                 .fontWeight(.medium)
@@ -1357,6 +1408,9 @@ private struct ChannelRow: View {
             }
         }
         .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
+        .anchorPreference(key: SidebarUnreadRowAnchors.self, value: .bounds) {
+            showsUnread ? [SidebarUnreadRowAnchor(id: channel.id, anchor: $0, color: channelNameForegroundStyle.resolve(in: environment))] : []
+        }
         .accessibilityElement(children: .combine)
         .accessibilityValue(accessibilityValue)
         .overlay {
@@ -1464,7 +1518,7 @@ private struct ChannelRow: View {
 }
 
 private struct ThreadRow: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.self) private var environment
 
     let model: AppModel
     let row: SidebarThreadRow
@@ -1472,11 +1526,6 @@ private struct ThreadRow: View {
 
     var body: some View {
         HStack(spacing: InterfaceScale.metric(8)) {
-            Capsule()
-                .fill(colorScheme == .dark ? Color.white : Color.black)
-                .frame(width: InterfaceScale.metric(4), height: InterfaceScale.metric(8))
-                .opacity(row.isUnread ? 1 : 0)
-                .frame(width: InterfaceScale.metric(8))
             ThreadConnector(continuesBelow: continuesBelow)
                 .stroke(
                     .primary.opacity(0.32),
@@ -1500,6 +1549,9 @@ private struct ThreadRow: View {
         }
         .frame(minHeight: ChannelSidebarLayoutMetrics.minimumRowHeight)
         .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
+        .anchorPreference(key: SidebarUnreadRowAnchors.self, value: .bounds) {
+            row.isUnread ? [SidebarUnreadRowAnchor(id: row.id, anchor: $0, color: nameForegroundStyle.resolve(in: environment))] : []
+        }
         .accessibilityElement(children: .combine)
         .overlay { ThreadContextMenuBridge(model: model, row: row) }
         .accessibilityLabel("\(row.thread.name), thread")

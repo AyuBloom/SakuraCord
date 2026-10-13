@@ -2869,6 +2869,45 @@ private func makeLowerBoundBacklog(in model: AppModel, channelID: ChannelID) {
 }
 
 @MainActor
+@Test func `remote acknowledgement releases a held backlog without another geometry callback`() async throws {
+    let provider = MockChatProvider()
+    let model = AppModel(
+        launchMode: .offlineTesting,
+        provider: provider,
+        readAcknowledgementTiming: .init(debounce: .milliseconds(10))
+    )
+    await model.start()
+    let channelID = ChannelID(rawValue: 210)
+    model.selectedChannelID = channelID
+    #expect(await until { !model.isLoadingMessages && model.selectedChannelID == channelID })
+    model.reportMainWindowActive(true)
+    makeLowerBoundBacklog(in: model, channelID: channelID)
+    model.reportTimelineInitialPosition(channelID: channelID, hasReachedReadBoundary: true)
+    let heldThrough = try #require(model.readState.entries[channelID]?.latestKnownMessageID)
+    let newest = Message(
+        id: MessageID(rawValue: UInt64.max - 2),
+        channelID: channelID,
+        author: User(id: UserID(rawValue: 2), username: "sender", displayName: "Sender"),
+        content: "new",
+        guildID: GuildID(rawValue: 100)
+    )
+    model.consumeImmediately(.messageCreated(newest))
+    #expect(model.readState.holdsAutomaticAcknowledgement(channelID))
+    #expect(model.acknowledgementTasks[channelID] == nil)
+
+    model.consumeImmediately(.readStateChanged(ChannelReadState(
+        channelID: channelID,
+        lastAcknowledgedMessageID: heldThrough
+    )))
+
+    #expect(await eventually { await provider.acknowledgementRequests.count == 1 })
+    let request = try #require(await provider.acknowledgementRequests.first)
+    #expect(request.channelID == channelID)
+    #expect(request.messageID == newest.id)
+    #expect(!request.manual)
+}
+
+@MainActor
 @Test func `opening above the newest message acknowledges once the reader reaches it`() async throws {
     let provider = MockChatProvider()
     let model = AppModel(

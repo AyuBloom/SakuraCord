@@ -678,8 +678,12 @@ extension AppModel {
     }
 
     func consumeReadStateChange(_ state: ChannelReadState) {
+        let heldBacklog = readState.holdsAutomaticAcknowledgement(state.channelID)
         if readState.applyRemote(state) {
             refreshUnreadPresentation()
+            if heldBacklog, !readState.holdsAutomaticAcknowledgement(state.channelID) {
+                acknowledgeIfEligible(channelID: state.channelID)
+            }
             if !readState.unread(channelID: state.channelID) {
                 cancelNativeNotifications(channelID: state.channelID)
             }

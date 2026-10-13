@@ -298,6 +298,7 @@ final class NativeMessageTimelineCoordinator: NSObject {
         var lastReportedState: TimelineScrollState?
         var pendingScrollState: TimelineScrollState?
         var scrollStateCallbackTask: Task<Void, Never>?
+        var liveScrollViewport: CGRect?
         var isEarlierHistoryScrollGestureActive = false
         var hasEarlierHistoryScrollIntent = false
         var hasIssuedEarlierHistoryRequest = false
@@ -574,6 +575,7 @@ extension NativeMessageTimelineCoordinator {
         }
 
         func resetConversationUpdateState() {
+            liveScrollViewport = nil
             widthRelayoutGeneration &+= 1
             widthRelayoutTask?.cancel()
             widthRelayoutTask = nil
@@ -957,6 +959,7 @@ extension NativeMessageTimelineCoordinator {
         }
 
         func stopObserving() {
+            liveScrollViewport = nil
             cancelGlide()
             cancelLayoutPreparation()
             pendingModelRowsUpdateTask?.cancel()

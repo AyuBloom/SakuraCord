@@ -27,7 +27,10 @@ lower-bound `N+` count). Opening such a backlog directly at its newest message
 shows only its tail, so, as in Discord, that visit stays unread until the reader
 scrolls toward the newest message again or chooses Mark as Read. Opening above
 the newest message needs no extra gesture, and a fully visible unread run with
-a loaded divider acknowledges on open.
+a loaded divider acknowledges on open. Wheel or scrollbar movement toward newer
+messages releases the hold; resizing and app-owned positioning do not. A remote
+ACK through the held backlog resumes ordinary viewing acknowledgements without
+requiring another geometry callback.
 
 A channel ACK posts to `/channels/{channel}/messages/{message}/ack` with applicable
 flags, `last_viewed` and the latest server-issued token. Serialize account requests

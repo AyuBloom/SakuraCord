@@ -187,7 +187,8 @@ extension DiscordRESTProvider {
 
     static func applyMemberListOperation(
         _ operation: GuildMemberListUpdateDTO.Operation,
-        to items: inout [GuildMemberListUpdateDTO.Item?]
+        to items: inout [GuildMemberListUpdateDTO.Item?],
+        keepingInvalidatedRows: Bool = false
     ) {
         switch operation.op {
         case "SYNC":
@@ -205,7 +206,13 @@ extension DiscordRESTProvider {
             guard let index = operation.index, items.indices.contains(index) else { return }
             items.remove(at: index)
         case "INVALIDATE":
-            guard let range = operation.range, range.count == 2, !items.isEmpty else { return }
+            // Rows stay only while a resubscribe will bring a fresh SYNC for a
+            // list that is still accessible; otherwise clearing them would
+            // leave permanent placeholders, but keeping them could leak members
+            // after a permission change.
+            guard !keepingInvalidatedRows,
+                  let range = operation.range, range.count == 2, !items.isEmpty
+            else { return }
             let lower = max(0, range[0])
             let upper = min(items.count - 1, range[1])
             guard lower <= upper else { return }
@@ -229,6 +236,12 @@ extension DiscordRESTProvider {
         if items.count <= upper {
             items.append(contentsOf: repeatElement(nil, count: upper + 1 - items.count))
         }
+        // SYNC replaces its declared interval. Discord can return fewer items
+        // than the range spans; retained INVALIDATE rows must not survive in
+        // that interval's unfilled tail. Other cached ranges remain intact.
+        for index in lower ... upper {
+            items[index] = nil
+        }
         for (offset, value) in values.enumerated() where lower + offset <= upper {
             items[lower + offset] = value
         }
@@ -240,10 +253,35 @@ extension DiscordRESTProvider {
         memberListID: String
     ) {
         var items = cachedMemberListItems[guildID]?[memberListID] ?? []
+        let keepInvalidatedRows = !memberListSubscriptionsForRefresh(
+            guildID: guildID, memberListID: memberListID
+        ).isEmpty
         for operation in operations {
-            Self.applyMemberListOperation(operation, to: &items)
+            Self.applyMemberListOperation(
+                operation, to: &items, keepingInvalidatedRows: keepInvalidatedRows
+            )
         }
         cachedMemberListItems[guildID, default: [:]][memberListID] = items
+    }
+
+    /// A retained subscription is accessible while its channel is still
+    /// viewable by the current user and resolves to the same member list.
+    /// INVALIDATE rows are kept only then, while awaiting a replacement SYNC.
+    func isMemberListAccessible(
+        guildID: GuildID, memberListID: String,
+        subscription requestedSubscription: DiscordMemberListSubscription? = nil
+    ) -> Bool {
+        guard let subscription = requestedSubscription ?? memberListSubscriptions[guildID]?[memberListID],
+              let channel = cachedChannels[guildID]?.first(where: {
+                  $0.id == subscription.channelID
+              })
+        else { return false }
+        return canViewMemberListChannel(channel, guildID: guildID)
+            && DiscordMemberListIdentity.id(
+                for: channel,
+                guildID: guildID,
+                roles: cachedGuildRoles[guildID] ?? []
+            ) == memberListID
     }
 
     func selectedMemberListGroups(guildID: GuildID) -> [GuildMemberListGroup] {

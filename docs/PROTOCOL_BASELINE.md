@@ -65,6 +65,7 @@ and each topic's contract tests before changing them.
 | Remote-auth ticket exchange | Original plus at most three bounded transient-status retries. |
 | User-completed login, server-join or relationship CAPTCHA | At most one challenged-request replay after human completion; a second challenge terminates the attempt. |
 | Full relationship read | At most once per Gateway connection, on the ordinary read budget. |
+| Selected member-list refresh | One deferred attempt after a known opcode-37 cooldown per invalidation; no background retry loop. See [member lists](protocol/GUILDS.md#guild-and-member-lifecycle). |
 
 A later explicit user action is distinct from automatic retry. Message retry
 retains its nonce; operation-specific exceptions must be documented beside their

@@ -31,6 +31,35 @@ import SakuraCordModels
             }
         }
 
+        func waitForNextGuildSubscriptionForTesting(guildID: GuildID, after taskID: UUID) async {
+            guard guildSubscriptionTaskIDs[guildID] == taskID else { return }
+            await withCheckedContinuation {
+                guildSubscriptionQueueWaitersForTesting[guildID, default: []].append($0)
+            }
+        }
+
+        func runScheduledMemberListRefreshForTesting(guildID: GuildID) async -> Bool {
+            if let task = memberListViewportRestoreTasks.removeValue(forKey: guildID),
+               let generation = guildSubscriptionGenerations[guildID] {
+                task.cancel()
+                gatewayOpcodeRateLimitDates[37] = nil
+                await restoreSelectedMemberListViewport(guildID: guildID, generation: generation)
+                return true
+            }
+            guard let task = memberListRefreshRetryTasks.removeValue(forKey: guildID),
+                  let memberListID = selectedMemberListID[guildID],
+                  let refresh = memberListsNeedingRefresh[guildID]?[memberListID]
+            else { return false }
+            task.cancel()
+            gatewayOpcodeRateLimitDates[37] = nil
+            await retryMemberListRefresh(guildID: guildID, memberListID: memberListID, refresh: refresh)
+            return true
+        }
+
+        func setPendingMemberGuildForTesting(_ guildID: GuildID) {
+            pendingMemberGuildID = guildID
+        }
+
         func seedGuildChannelForTesting(_ channel: Channel) {
             guard let guildID = channel.guildID else { return }
             cachedChannels[guildID, default: []].removeAll {

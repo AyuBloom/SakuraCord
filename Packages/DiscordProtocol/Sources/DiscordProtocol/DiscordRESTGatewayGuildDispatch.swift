@@ -178,6 +178,9 @@ extension DiscordRESTProvider {
         else { return }
         cachedGuilds[guildID] = guild
         continuation?.yield(.guildChanged(guild))
+        if discardInaccessibleMemberLists(guildID: guildID) {
+            publishMembers(guildID: guildID, members: [], groups: [])
+        }
     }
 
     func handleGuildEmojisUpdateDispatch(

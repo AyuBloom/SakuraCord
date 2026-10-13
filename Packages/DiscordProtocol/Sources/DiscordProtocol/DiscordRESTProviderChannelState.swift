@@ -272,6 +272,9 @@ extension DiscordRESTProvider {
         }
         cachedChannels[guildID] = channels
         continuation?.yield(.channelsChanged(guildID: guildID, channels: channels))
+        if discardInaccessibleMemberLists(guildID: guildID) {
+            publishMembers(guildID: guildID, members: [], groups: [])
+        }
     }
 
     static func domainChannels(_ values: [ChannelDTO], guildID: GuildID) throws -> [Channel] {

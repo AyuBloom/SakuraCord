@@ -105,6 +105,7 @@ extension DiscordRESTProvider {
     private func resetReadySessionState(
         for ready: GatewayReadyGuildsDTO
     ) async {
+        resetMemberListSubscriptionWork()
         privateCallsByChannel = [:]
         cancelPendingRoleMemberRequests(error: CancellationError())
         cachedMembers = [:]
@@ -120,7 +121,9 @@ extension DiscordRESTProvider {
         cachedMemberListGroups = [:]
         selectedMemberListID = [:]
         memberListSubscriptions = [:]
+        memberListsNeedingRefresh = [:]
         memberListSubscriptionOrder = [:]
+        memberListViewportRequests = [:]
         cachedGuildChannelDTOs = [:]
         cachedGuildRoles = [:]
         cachedStickersByGuild = [:]

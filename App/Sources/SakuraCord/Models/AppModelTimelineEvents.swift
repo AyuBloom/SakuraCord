@@ -516,8 +516,16 @@ extension AppModel {
                 priority: preparationPriority
             )
         }
-        guard !Task.isCancelled, selectedChannelID == channelID else {
-            return false
+        guard !Task.isCancelled, selectedChannelID == channelID else { return false }
+        // The timeline can change while rows are prepared off the main actor.
+        // Revalidate the insertion against the current window, not the IDs
+        // that pagination filtered before awaiting preparation.
+        guard earlier.allSatisfy({ message in
+            !selectedMessageIDs.contains(message.id)
+                && (messages.first.map { Self.messagePrecedes(message, $0) } ?? true)
+        }) else {
+            mergeOverlappingSelectedHistoryMessages(earlier)
+            return true
         }
         let stateCommit = AppPerformanceSignposts.signposter.beginInterval(
             "EarlierHistoryStateCommit",
@@ -703,13 +711,27 @@ extension AppModel {
                 priority: preparationPriority
             )
         }
-        guard !Task.isCancelled, selectedChannelID == channelID else {
-            return false
+        guard !Task.isCancelled, selectedChannelID == channelID else { return false }
+        guard later.allSatisfy({ message in
+            !selectedMessageIDs.contains(message.id)
+                && (messages.last.map { Self.messagePrecedes($0, message) } ?? true)
+        }) else {
+            mergeOverlappingSelectedHistoryMessages(later)
+            return true
         }
         AppPerformanceSignposts.measureSync("LaterHistoryStateCommit") {
             appendSelectedMessages(later, preparedRows: preparedRows)
         }
         return true
+    }
+
+    private func mergeOverlappingSelectedHistoryMessages(_ history: [Message]) {
+        // Keep live edits/reactions for IDs already present. A simple filtered
+        // prepend/append is insufficient: new rows can now interleave with
+        // the history page, so rebuild their order and grouping together.
+        let missing = history.filter { !selectedMessageIDs.contains($0.id) }
+        guard !missing.isEmpty else { return }
+        replaceSelectedMessages(with: Self.merging(current: messages, fresh: missing))
     }
 
     func commitBatchedSelectedMessages() {

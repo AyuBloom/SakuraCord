@@ -1332,12 +1332,15 @@ struct AccountReadStateModelTests {
         #expect(model.acknowledgementToken == "accepted-12")
     }
 
-    @Test func `overlapping failures restore every unread contribution exactly once`() {
-        let model = makeModel(latest: 12, acknowledged: 10, mentions: 2)
-        model.markAcknowledgementPending(
-            channelID: channelID,
-            messageID: MessageID(rawValue: 12)
-        )
+    @Test(arguments: [false, true])
+    func `overlapping failures restore every unread contribution exactly once`(manualUnread: Bool) {
+        let model = makeModel(latest: 12, acknowledged: manualUnread ? 12 : 10, mentions: manualUnread ? 0 : 2)
+        let firstTarget = MessageID(rawValue: manualUnread ? 5 : 12)
+        if manualUnread {
+            model.markUnread(channelID: channelID, after: firstTarget, mentionCount: 3)
+        } else {
+            model.markAcknowledgementPending(channelID: channelID, messageID: firstTarget)
+        }
         #expect(model.receive(
             message(id: 13, mentionedUsers: [currentUser]),
             currentUserID: currentUser.id
@@ -1349,17 +1352,17 @@ struct AccountReadStateModelTests {
 
         model.failAcknowledgement(
             channelID: channelID,
-            messageID: MessageID(rawValue: 12)
+            messageID: firstTarget
         )
         model.failAcknowledgement(
             channelID: channelID,
             messageID: MessageID(rawValue: 13)
         )
 
-        #expect(model.entries[channelID]?.lastAcknowledgedMessageID == MessageID(rawValue: 10))
+        #expect(model.entries[channelID]?.lastAcknowledgedMessageID == MessageID(rawValue: manualUnread ? 12 : 10))
         #expect(model.entries[channelID]?.pendingAcknowledgementID == nil)
-        #expect(model.mentions(channelID: channelID) == 3)
-        #expect(model.unreadMessageCount(channelID: channelID) == 2)
+        #expect(model.mentions(channelID: channelID) == (manualUnread ? 1 : 3))
+        #expect(model.unreadMessageCount(channelID: channelID) == (manualUnread ? 1 : 2))
         #expect(model.unread(channelID: channelID))
     }
 
@@ -2869,7 +2872,10 @@ private func makeLowerBoundBacklog(in model: AppModel, channelID: ChannelID) {
 }
 
 @MainActor
-@Test func `remote acknowledgement releases a held backlog without another geometry callback`() async throws {
+@Test(arguments: [false, true])
+func `read state completion releases a held backlog without another geometry callback`(
+    manualUnreadFailed: Bool
+) async throws {
     let provider = MockChatProvider()
     let model = AppModel(
         launchMode: .offlineTesting,
@@ -2881,9 +2887,17 @@ private func makeLowerBoundBacklog(in model: AppModel, channelID: ChannelID) {
     model.selectedChannelID = channelID
     #expect(await until { !model.isLoadingMessages && model.selectedChannelID == channelID })
     model.reportMainWindowActive(true)
-    makeLowerBoundBacklog(in: model, channelID: channelID)
-    model.reportTimelineInitialPosition(channelID: channelID, hasReachedReadBoundary: true)
     let heldThrough = try #require(model.readState.entries[channelID]?.latestKnownMessageID)
+    if manualUnreadFailed {
+        #expect(model.readState.applyRemote(ChannelReadState(
+            channelID: channelID,
+            lastAcknowledgedMessageID: heldThrough
+        )))
+        model.readState.markUnread(channelID: channelID, after: MessageID(rawValue: 1), mentionCount: 0)
+    } else {
+        makeLowerBoundBacklog(in: model, channelID: channelID)
+    }
+    model.reportTimelineInitialPosition(channelID: channelID, hasReachedReadBoundary: true)
     let newest = Message(
         id: MessageID(rawValue: UInt64.max - 2),
         channelID: channelID,
@@ -2895,10 +2909,22 @@ private func makeLowerBoundBacklog(in model: AppModel, channelID: ChannelID) {
     #expect(model.readState.holdsAutomaticAcknowledgement(channelID))
     #expect(model.acknowledgementTasks[channelID] == nil)
 
-    model.consumeImmediately(.readStateChanged(ChannelReadState(
-        channelID: channelID,
-        lastAcknowledgedMessageID: heldThrough
-    )))
+    if manualUnreadFailed {
+        model.rollbackReadAcknowledgement(
+            channelID: channelID,
+            mutation: model.readStateMutation(
+                channelID: channelID,
+                messageID: MessageID(rawValue: 1),
+                manual: true,
+                mentionCount: 0
+            )
+        )
+    } else {
+        model.consumeImmediately(.readStateChanged(ChannelReadState(
+            channelID: channelID,
+            lastAcknowledgedMessageID: heldThrough
+        )))
+    }
 
     #expect(await eventually { await provider.acknowledgementRequests.count == 1 })
     let request = try #require(await provider.acknowledgementRequests.first)

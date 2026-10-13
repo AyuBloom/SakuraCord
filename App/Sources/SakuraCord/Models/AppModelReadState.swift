@@ -310,22 +310,27 @@ extension AppModel {
                 guard generation == acknowledgementGeneration,
                       isCurrentAccountSession(session)
                 else { return }
-                readState.failAcknowledgement(
-                    channelID: channelID,
-                    messageID: mutation.messageID
-                )
-                logReadAcknowledgementFailed(channelID: channelID, mutation: mutation)
-                refreshUnreadPresentation()
-                reconcileInboxReadState()
-                if mutation.manual {
-                    errorMessage = "Discord did not accept the read-state update."
-                }
+                rollbackReadAcknowledgement(channelID: channelID, mutation: mutation)
             }
         }
         if generation == acknowledgementGeneration,
            isCurrentAccountSession(session)
         {
             acknowledgementProcessorTask = nil
+        }
+    }
+
+    func rollbackReadAcknowledgement(channelID: ChannelID, mutation: ReadStateMutation) {
+        let heldBacklog = readState.holdsAutomaticAcknowledgement(channelID)
+        readState.failAcknowledgement(channelID: channelID, messageID: mutation.messageID)
+        logReadAcknowledgementFailed(channelID: channelID, mutation: mutation)
+        refreshUnreadPresentation()
+        reconcileInboxReadState()
+        if mutation.manual {
+            errorMessage = "Discord did not accept the read-state update."
+            if heldBacklog, !readState.holdsAutomaticAcknowledgement(channelID) {
+                acknowledgeIfEligible(channelID: channelID)
+            }
         }
     }
 

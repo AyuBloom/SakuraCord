@@ -39,6 +39,10 @@ final class AccountReadStateModel {
         var latestUnreadMessageID: MessageID?
         var mentionCount: Int
         var unreadMessageCount: Int
+        var optimisticMentionCount: Int
+        var optimisticUnreadMessageCount: Int
+        var receivedMentionCount = 0
+        var receivedUnreadMessageCount = 0
         var requiresExactBoundary = false
     }
 
@@ -1006,6 +1010,13 @@ extension AccountReadStateModel {
             }
             entry.mentionCount += 1
         }
+        if let pending = entry.pendingAcknowledgementID,
+           var rollback = pendingRollbacks[message.channelID]?[pending]
+        {
+            rollback.receivedUnreadMessageCount += 1
+            if mentionKind != .none { rollback.receivedMentionCount += 1 }
+            pendingRollbacks[message.channelID]?[pending] = rollback
+        }
         entries[message.channelID] = entry
 
         let isMention = mentionKind != .none
@@ -1194,6 +1205,7 @@ extension AccountReadStateModel {
 
     func markAcknowledgementPending(channelID: ChannelID, messageID: MessageID) {
         var entry = entry(for: channelID)
+        let clearsCounts = entry.latestKnownMessageID.map { messageID >= $0 } == true
         if pendingRollbacks[channelID]?[messageID] == nil {
             pendingRollbacks[channelID, default: [:]][messageID] = PendingRollback(
                 messageID: messageID,
@@ -1201,12 +1213,14 @@ extension AccountReadStateModel {
                 lastAcknowledgedMessageID: entry.lastAcknowledgedMessageID,
                 latestUnreadMessageID: entry.latestUnreadMessageID,
                 mentionCount: entry.mentionCount,
-                unreadMessageCount: entry.unreadMessageCount
+                unreadMessageCount: entry.unreadMessageCount,
+                optimisticMentionCount: clearsCounts ? 0 : entry.mentionCount,
+                optimisticUnreadMessageCount: clearsCounts ? 0 : entry.unreadMessageCount
             )
         }
         entry.lastAcknowledgedMessageID = maximum(entry.lastAcknowledgedMessageID, messageID)
         entry.pendingAcknowledgementID = maximum(entry.pendingAcknowledgementID, messageID)
-        if let newest = entry.latestKnownMessageID, messageID >= newest {
+        if clearsCounts {
             entry.mentionCount = 0
             entry.unreadMessageCount = 0
         }
@@ -1230,6 +1244,8 @@ extension AccountReadStateModel {
                         latestUnreadMessageID: entry.latestUnreadMessageID,
                         mentionCount: entry.mentionCount,
                         unreadMessageCount: entry.unreadMessageCount,
+                        optimisticMentionCount: max(0, mentionCount),
+                        optimisticUnreadMessageCount: max(1, entry.unreadMessageCount),
                         requiresExactBoundary: true
                     )
                 )
@@ -1282,9 +1298,12 @@ extension AccountReadStateModel {
            let rollback = pendingRollbacks[channelID]?[messageID]
         {
             entry.lastAcknowledgedMessageID = rollback.lastAcknowledgedMessageID
-            entry.latestUnreadMessageID = rollback.latestUnreadMessageID
+            entry.latestUnreadMessageID = maximum(entry.latestUnreadMessageID, rollback.latestUnreadMessageID)
+            // Roll back the intent while retaining arrivals after it began.
             entry.mentionCount = rollback.mentionCount
+                + rollback.receivedMentionCount
             entry.unreadMessageCount = rollback.unreadMessageCount
+                + rollback.receivedUnreadMessageCount
             entry.pendingAcknowledgementID = rollback.predecessorMessageID
             pendingRollbacks[channelID]?[messageID] = nil
             if pendingRollbacks[channelID]?.isEmpty == true {
@@ -1313,9 +1332,11 @@ extension AccountReadStateModel {
             child.predecessorMessageID = discarded.predecessorMessageID
             if !succeeded {
                 child.lastAcknowledgedMessageID = discarded.lastAcknowledgedMessageID
-                child.latestUnreadMessageID = discarded.latestUnreadMessageID
-                child.mentionCount += discarded.mentionCount
-                child.unreadMessageCount += discarded.unreadMessageCount
+                child.latestUnreadMessageID = maximum(child.latestUnreadMessageID, discarded.latestUnreadMessageID)
+                child.mentionCount = discarded.mentionCount
+                    + max(0, child.mentionCount - discarded.optimisticMentionCount)
+                child.unreadMessageCount = discarded.unreadMessageCount
+                    + max(0, child.unreadMessageCount - discarded.optimisticUnreadMessageCount)
             }
             pendingRollbacks[channelID]?[childID] = child
         }

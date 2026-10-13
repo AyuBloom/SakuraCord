@@ -29,13 +29,14 @@ scrolls toward the newest message again or chooses Mark as Read. Opening above
 the newest message needs no extra gesture, and a fully visible unread run with
 a loaded divider acknowledges on open. Wheel or scrollbar movement toward newer
 messages releases the hold; resizing and app-owned positioning do not. A remote
-ACK through the held backlog resumes ordinary viewing acknowledgements without
-requiring another geometry callback.
+ACK or failed Mark Unread rollback that releases the hold resumes ordinary
+viewing acknowledgements without requiring another geometry callback.
 
 A channel ACK posts to `/channels/{channel}/messages/{message}/ack` with applicable
 flags, `last_viewed` and the latest server-issued token. Serialize account requests
 and coalesce per channel; retain each optimistic intent's rollback boundary.
-Definite failure reverts that intent without undoing an earlier accepted ACK.
+Definite failure reverts that intent without undoing an earlier accepted ACK
+or discarding subsequent live messages and mentions.
 Reconnects overlay pending intent rather than cancelling it. No automatic replay
 follows an ambiguous failure.
 

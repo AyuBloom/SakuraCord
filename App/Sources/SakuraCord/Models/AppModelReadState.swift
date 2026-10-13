@@ -53,7 +53,27 @@ extension AppModel {
     }
 
     func preserveUnreadDividerIfNeeded(channelID: ChannelID) {
-        guard unreadDividerMessageIDs[channelID] == nil else { return }
+        guard unreadDividerMessageIDs[channelID] == nil,
+              let summary = presentedUnreadSummary(channelID: channelID),
+              !summary.isLowerBound
+        else { return }
+        unreadDividerMessageIDs[channelID] = summary.firstUnreadMessageID
+    }
+
+    /// True while a long backlog's first unread row is not loaded, so the
+    /// timeline can show only its loaded tail.
+    func hasUnresolvedUnreadBoundary(channelID: ChannelID) -> Bool {
+        guard let summary = presentedUnreadSummary(channelID: channelID),
+              summary.isLowerBound
+        else { return false }
+        guard let divider = unreadDividerMessageIDs[channelID] else { return true }
+        let loaded = channelID == openThread?.id ? threadMessages : messages
+        return !loaded.contains { $0.id == divider }
+    }
+
+    private func presentedUnreadSummary(
+        channelID: ChannelID
+    ) -> AccountReadStateModel.TimelineUnreadSummary? {
         let conversationMessages: [Message]
         let hasMoreBefore: Bool
         if channelID == openThread?.id {
@@ -65,15 +85,13 @@ extension AppModel {
             hasMoreBefore = hasMoreMessages
                 || (isLoadingMessages && !messages.isEmpty)
         } else {
-            return
+            return nil
         }
-        guard let summary = readState.timelineUnreadSummary(
+        return readState.timelineUnreadSummary(
             channelID: channelID,
             messages: conversationMessages,
             hasMoreBefore: hasMoreBefore
-        ), !summary.isLowerBound
-        else { return }
-        unreadDividerMessageIDs[channelID] = summary.firstUnreadMessageID
+        )
     }
 
     func markMessageAndFollowingUnread(_ message: Message) {
@@ -292,22 +310,27 @@ extension AppModel {
                 guard generation == acknowledgementGeneration,
                       isCurrentAccountSession(session)
                 else { return }
-                readState.failAcknowledgement(
-                    channelID: channelID,
-                    messageID: mutation.messageID
-                )
-                logReadAcknowledgementFailed(channelID: channelID, mutation: mutation)
-                refreshUnreadPresentation()
-                reconcileInboxReadState()
-                if mutation.manual {
-                    errorMessage = "Discord did not accept the read-state update."
-                }
+                rollbackReadAcknowledgement(channelID: channelID, mutation: mutation)
             }
         }
         if generation == acknowledgementGeneration,
            isCurrentAccountSession(session)
         {
             acknowledgementProcessorTask = nil
+        }
+    }
+
+    func rollbackReadAcknowledgement(channelID: ChannelID, mutation: ReadStateMutation) {
+        let heldBacklog = readState.holdsAutomaticAcknowledgement(channelID)
+        readState.failAcknowledgement(channelID: channelID, messageID: mutation.messageID)
+        logReadAcknowledgementFailed(channelID: channelID, mutation: mutation)
+        refreshUnreadPresentation()
+        reconcileInboxReadState()
+        if mutation.manual {
+            errorMessage = "Discord did not accept the read-state update."
+            if heldBacklog, !readState.holdsAutomaticAcknowledgement(channelID) {
+                acknowledgeIfEligible(channelID: channelID)
+            }
         }
     }
 

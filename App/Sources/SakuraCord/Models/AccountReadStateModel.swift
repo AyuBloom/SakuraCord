@@ -39,6 +39,10 @@ final class AccountReadStateModel {
         var latestUnreadMessageID: MessageID?
         var mentionCount: Int
         var unreadMessageCount: Int
+        var optimisticMentionCount: Int
+        var optimisticUnreadMessageCount: Int
+        var receivedMentionCount = 0
+        var receivedUnreadMessageCount = 0
         var requiresExactBoundary = false
     }
 
@@ -1006,6 +1010,13 @@ extension AccountReadStateModel {
             }
             entry.mentionCount += 1
         }
+        if let pending = entry.pendingAcknowledgementID,
+           var rollback = pendingRollbacks[message.channelID]?[pending]
+        {
+            rollback.receivedUnreadMessageCount += 1
+            if mentionKind != .none { rollback.receivedMentionCount += 1 }
+            pendingRollbacks[message.channelID]?[pending] = rollback
+        }
         entries[message.channelID] = entry
 
         let isMention = mentionKind != .none
@@ -1173,14 +1184,28 @@ extension AccountReadStateModel {
             value.hasReachedReadBoundary = hasReachedReadBoundary
         }
         if let blocksAutomaticAcknowledgement {
-            value.blocksAutomaticAcknowledgement = blocksAutomaticAcknowledgement
+            value.heldThroughMessageID = blocksAutomaticAcknowledgement
+                ? entries[channelID]?.latestKnownMessageID ?? MessageID(rawValue: 0)
+                : nil
         }
         presentations[channelID] = value
-        return value.canAcknowledge ? newestUnacknowledgedMessage(in: channelID) : nil
+        return canAcknowledge(channelID) ? newestUnacknowledgedMessage(in: channelID) : nil
+    }
+
+    func canAcknowledge(_ channelID: ChannelID) -> Bool {
+        presentations[channelID]?.meetsViewingConditions == true
+            && !holdsAutomaticAcknowledgement(channelID)
+    }
+
+    func holdsAutomaticAcknowledgement(_ channelID: ChannelID) -> Bool {
+        guard let held = presentations[channelID]?.heldThroughMessageID else { return false }
+        guard let acknowledged = entries[channelID]?.lastAcknowledgedMessageID else { return true }
+        return acknowledged < held
     }
 
     func markAcknowledgementPending(channelID: ChannelID, messageID: MessageID) {
         var entry = entry(for: channelID)
+        let clearsCounts = entry.latestKnownMessageID.map { messageID >= $0 } == true
         if pendingRollbacks[channelID]?[messageID] == nil {
             pendingRollbacks[channelID, default: [:]][messageID] = PendingRollback(
                 messageID: messageID,
@@ -1188,12 +1213,14 @@ extension AccountReadStateModel {
                 lastAcknowledgedMessageID: entry.lastAcknowledgedMessageID,
                 latestUnreadMessageID: entry.latestUnreadMessageID,
                 mentionCount: entry.mentionCount,
-                unreadMessageCount: entry.unreadMessageCount
+                unreadMessageCount: entry.unreadMessageCount,
+                optimisticMentionCount: clearsCounts ? 0 : entry.mentionCount,
+                optimisticUnreadMessageCount: clearsCounts ? 0 : entry.unreadMessageCount
             )
         }
         entry.lastAcknowledgedMessageID = maximum(entry.lastAcknowledgedMessageID, messageID)
         entry.pendingAcknowledgementID = maximum(entry.pendingAcknowledgementID, messageID)
-        if let newest = entry.latestKnownMessageID, messageID >= newest {
+        if clearsCounts {
             entry.mentionCount = 0
             entry.unreadMessageCount = 0
         }
@@ -1217,6 +1244,8 @@ extension AccountReadStateModel {
                         latestUnreadMessageID: entry.latestUnreadMessageID,
                         mentionCount: entry.mentionCount,
                         unreadMessageCount: entry.unreadMessageCount,
+                        optimisticMentionCount: max(0, mentionCount),
+                        optimisticUnreadMessageCount: max(1, entry.unreadMessageCount),
                         requiresExactBoundary: true
                     )
                 )
@@ -1235,8 +1264,9 @@ extension AccountReadStateModel {
         )
     }
 
-    func unblockAutomaticAcknowledgement(channelID: ChannelID) {
-        _ = updatePresentation(
+    @discardableResult
+    func unblockAutomaticAcknowledgement(channelID: ChannelID) -> MessageID? {
+        updatePresentation(
             channelID: channelID,
             blocksAutomaticAcknowledgement: false
         )
@@ -1268,10 +1298,22 @@ extension AccountReadStateModel {
            let rollback = pendingRollbacks[channelID]?[messageID]
         {
             entry.lastAcknowledgedMessageID = rollback.lastAcknowledgedMessageID
-            entry.latestUnreadMessageID = rollback.latestUnreadMessageID
+            entry.latestUnreadMessageID = maximum(entry.latestUnreadMessageID, rollback.latestUnreadMessageID)
+            // Roll back the intent while retaining arrivals after it began.
             entry.mentionCount = rollback.mentionCount
+                + rollback.receivedMentionCount
             entry.unreadMessageCount = rollback.unreadMessageCount
+                + rollback.receivedUnreadMessageCount
             entry.pendingAcknowledgementID = rollback.predecessorMessageID
+            if let predecessorID = rollback.predecessorMessageID,
+               var predecessor = pendingRollbacks[channelID]?[predecessorID]
+            {
+                // Bulk and channel ACKs can finish out of order. Retain these
+                // arrivals if the earlier request subsequently fails too.
+                predecessor.receivedMentionCount += rollback.receivedMentionCount
+                predecessor.receivedUnreadMessageCount += rollback.receivedUnreadMessageCount
+                pendingRollbacks[channelID]?[predecessorID] = predecessor
+            }
             pendingRollbacks[channelID]?[messageID] = nil
             if pendingRollbacks[channelID]?.isEmpty == true {
                 pendingRollbacks[channelID] = nil
@@ -1297,13 +1339,36 @@ extension AccountReadStateModel {
         }?.messageID
         if let childID, var child = pendingRollbacks[channelID]?[childID] {
             child.predecessorMessageID = discarded.predecessorMessageID
-            if !succeeded {
+            if succeeded {
+                // The accepted boundary supersedes every earlier intent. A
+                // later failure must not reach behind it through the chain.
+                child.predecessorMessageID = nil
+                var predecessorID = discarded.predecessorMessageID
+                while let priorID = predecessorID,
+                      let predecessor = pendingRollbacks[channelID]?[priorID]
+                {
+                    predecessorID = predecessor.predecessorMessageID
+                    pendingRollbacks[channelID]?[priorID] = nil
+                }
+            } else {
                 child.lastAcknowledgedMessageID = discarded.lastAcknowledgedMessageID
-                child.latestUnreadMessageID = discarded.latestUnreadMessageID
-                child.mentionCount += discarded.mentionCount
-                child.unreadMessageCount += discarded.unreadMessageCount
+                child.latestUnreadMessageID = maximum(child.latestUnreadMessageID, discarded.latestUnreadMessageID)
+                child.mentionCount = discarded.mentionCount
+                    + max(0, child.mentionCount - discarded.optimisticMentionCount)
+                child.unreadMessageCount = discarded.unreadMessageCount
+                    + max(0, child.unreadMessageCount - discarded.optimisticUnreadMessageCount)
             }
             pendingRollbacks[channelID]?[childID] = child
+        }
+        if !succeeded,
+           let predecessorID = discarded.predecessorMessageID,
+           var predecessor = pendingRollbacks[channelID]?[predecessorID]
+        {
+            // A failed interior intent's arrivals are already in its child's
+            // rollback boundary, but must also survive its predecessor failing.
+            predecessor.receivedMentionCount += discarded.receivedMentionCount
+            predecessor.receivedUnreadMessageCount += discarded.receivedUnreadMessageCount
+            pendingRollbacks[channelID]?[predecessorID] = predecessor
         }
         pendingRollbacks[channelID]?[messageID] = nil
         if pendingRollbacks[channelID]?.isEmpty == true {
@@ -1442,7 +1507,7 @@ extension AccountReadStateModel {
     }
 
     func isVisibleAtNewest(_ channelID: ChannelID) -> Bool {
-        presentations[channelID]?.canAcknowledge == true
+        canAcknowledge(channelID)
     }
 
     func isActivelyPresentedAtNewest(_ channelID: ChannelID) -> Bool {

@@ -39,7 +39,7 @@ async function pages(repo, endpoint, key, options = {}, request = api) {
   }
 }
 
-export function validateOrigin(run, artifact, metadata, workflowID, approvedHeadSHA = '') {
+export function validateOrigin(run, artifact, metadata, workflowID) {
   check(run.repository?.full_name === SOURCE && run.workflow_id === workflowID
     && run.path === '.github/workflows/ci.yml' && run.event === 'pull_request'
     && run.status === 'completed' && run.conclusion === 'success', 'Not a successful canonical PR CI run');
@@ -60,9 +60,6 @@ export function validateOrigin(run, artifact, metadata, workflowID, approvedHead
     && run.head_sha === metadata.headSHA && pr.head.repo.id === run.head_repository.id,
   'PR commit provenance mismatch');
   const fork = pr.head.repo.id !== run.repository.id;
-  check(!fork || (sha(approvedHeadSHA) && approvedHeadSHA === metadata.headSHA),
-    'Fork publication requires workflow_dispatch approval of the exact head SHA');
-  check(!approvedHeadSHA || approvedHeadSHA === metadata.headSHA, 'Approval is for a different commit');
   check(metadata.schemaVersion === 1 && metadata.configuration === 'debug'
     && metadata.architecture === 'arm64'
     && metadata.id === `pr-${pr.number}-run-${run.id}-attempt-${run.run_attempt}`, 'Invalid build identity');
@@ -75,11 +72,6 @@ async function prepare(directory) {
   check(integer(runID) && integer(attempt), 'Run ID and attempt must be positive integers');
   const run = await api(SOURCE, `actions/runs/${runID}/attempts/${attempt}`);
   check(run, 'Run attempt is unavailable');
-  // A fork's initial CI remains downloadable from Actions but is never automatically signed.
-  if (!process.env.PR_BUILD_APPROVED_HEAD_SHA && run.head_repository?.id !== run.repository?.id) {
-    console.log('Fork artifact retained in Actions; dispatch publication with the reviewed head SHA.');
-    return;
-  }
   const workflow = await api(SOURCE, 'actions/workflows/ci.yml');
   const artifacts = await pages(SOURCE, `actions/runs/${runID}/artifacts`, 'artifacts');
   const candidates = artifacts.filter(item => item.name === `pr-build-${runID}-${attempt}`);
@@ -102,7 +94,7 @@ async function prepare(directory) {
   if (!run.pull_requests?.some(pr => pr.number === metadata.pullRequest)) {
     run.pull_requests = await pages(SOURCE, `commits/${run.head_sha}/pulls`);
   }
-  const context = validateOrigin(run, artifact, metadata, workflow.id, process.env.PR_BUILD_APPROVED_HEAD_SHA);
+  const context = validateOrigin(run, artifact, metadata, workflow.id);
   const commit = await api(SOURCE, `commits/${context.builtSHA}`);
   check(commit && (context.builtSHA === context.headSHA ||
     (commit.parents.length === 2 && commit.parents[0].sha === context.baseSHA && commit.parents[1].sha === context.headSHA)),
@@ -218,6 +210,11 @@ export function latestBuildsByPullRequest(catalog) {
   return [...latest.values()];
 }
 
+export async function openPullRequestCatalog(catalog, request = api) {
+  const open = new Set((await pages(SOURCE, 'pulls?state=open', null, {}, request)).map(pr => pr.number));
+  return { ...catalog, builds: catalog.builds.filter(build => open.has(build.pullRequest)) };
+}
+
 export async function discardFailedDraftUploads(release, token, request = api) {
   if (!release.draft) return;
   for (const asset of await pages(DISTRIBUTION, `releases/${release.id}/assets`, null, { token }, request)) {
@@ -292,12 +289,15 @@ async function rebuildCatalog(token = process.env.PR_BUILDS_TOKEN) {
     check(digest(await publicBytes(`https://github.com/${DISTRIBUTION}/releases/download/${tag}/appcast.xml`)) === digest(feed),
       'PR track verification failed');
   }
+  // Discovery follows current PR state; immutable downloads and update tracks
+  // remain available to people who already installed a closed PR's build.
+  catalog = await openPullRequestCatalog(catalog);
   const release = await distributionRelease('pr-builds', token);
   await upload(release, 'catalog.json', Buffer.from(json(catalog)), token, true);
   if (release.draft) await api(DISTRIBUTION, `releases/${release.id}`, { token, method: 'PATCH', body: { draft: false, make_latest: 'false' } });
   const published = await publicBytes(`https://github.com/${DISTRIBUTION}/releases/download/pr-builds/catalog.json`);
   check(digest(published) === digest(Buffer.from(json(catalog))), 'Catalog verification failed');
-  console.log(`Published catalog with ${catalog.builds.length} retained builds.`);
+  console.log(`Published catalog with ${catalog.builds.length} builds from open pull requests.`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

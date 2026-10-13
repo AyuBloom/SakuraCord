@@ -438,18 +438,25 @@ private struct GuildChannelList: View, Equatable {
         }
     }
     private func guildPageRow(_ title: String, symbol: String, page: GuildWorkspacePage) -> some View {
-        HStack(spacing: InterfaceScale.metric(8)) {
+        let isSelected = input.sidebarSelection == .page(page)
+        return HStack(spacing: InterfaceScale.metric(8)) {
             Image(systemName: symbol)
-                .foregroundStyle(.primary.opacity(0.66))
+                .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
+                .fontWeight(.medium)
+                .foregroundStyle(isSelected ? Color.primary : .primary.opacity(0.70))
                 .frame(width: ChannelSidebarLayoutMetrics.iconWidth)
-            Text(title).interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize)).foregroundStyle(.primary.opacity(0.78)).lineLimit(1)
+            Text(title)
+                .font(.interfaceSystem(size: 14, weight: .medium))
+                .fontWeight(.medium)
+                .foregroundStyle(isSelected ? Color.primary : .primary.opacity(0.70))
+                .lineLimit(1)
             Spacer()
         }
         .frame(minHeight: ChannelSidebarLayoutMetrics.minimumRowHeight)
         .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
         .accessibilityElement(children: .combine)
         .tag(GuildSidebarSelection.page(page))
-        .overlay { ChannelRowHoverBridge(isSelected: input.sidebarSelection == .page(page)) }
+        .overlay { ChannelRowHoverBridge(isSelected: isSelected) }
     }
 
 }

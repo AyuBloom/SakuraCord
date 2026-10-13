@@ -265,6 +265,7 @@ nonisolated extension SettingsControlID {
     static let underlineLinks = Self(rawValue: "interface.underline-links")
     // Preserve exported identifiers when moving these controls to General.
     static let sendWithReturn = Self(rawValue: "chat.send-with-return")
+    static let replyMentionsAuthor = Self(rawValue: "chat.reply-mentions-author")
     static let spellCheck = Self(rawValue: "chat.spell-check")
     static let automaticCorrection = Self(rawValue: "chat.automatic-correction")
     static let smartQuotes = Self(rawValue: "chat.smart-quotes")

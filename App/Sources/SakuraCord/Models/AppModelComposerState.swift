@@ -20,12 +20,12 @@ extension AppModel {
         set { composer.threadReplyingTo = newValue }
     }
     var replyMentionsAuthor: Bool {
-        get { composer.replyMentionsAuthor }
-        set { composer.replyMentionsAuthor = newValue }
+        composer.replyMentionsAuthorChoice
+            && (replyingTo == nil || replyingTo?.author.id != snapshot?.currentUser.id)
     }
     var threadReplyMentionsAuthor: Bool {
-        get { composer.threadReplyMentionsAuthor }
-        set { composer.threadReplyMentionsAuthor = newValue }
+        composer.replyMentionsAuthorChoice
+            && (threadReplyingTo == nil || threadReplyingTo?.author.id != snapshot?.currentUser.id)
     }
     var draft: String {
         get { composer.draft }
@@ -50,16 +50,11 @@ extension AppModel {
 
     func reply(to message: Message) {
         let destination: MessageComposerDestination
-        // Self-replies never ping (Discord's default; the toggle is hidden
-        // for them). Other replies use the user's last explicit choice.
-        let isSelf = message.author.id == snapshot?.currentUser.id
         if message.channelID == selectedChannelID {
             replyingTo = message
-            replyMentionsAuthor = isSelf ? false : composer.replyMentionsAuthorChoice
             destination = .channel
         } else if message.channelID == openThread?.id {
             threadReplyingTo = message
-            threadReplyMentionsAuthor = isSelf ? false : composer.threadReplyMentionsAuthorChoice
             destination = .thread
         } else {
             return
@@ -141,14 +136,12 @@ extension AppModel {
         _ mentionsAuthor: Bool,
         in destination: MessageComposerDestination
     ) {
-        switch destination {
-        case .channel:
-            replyMentionsAuthor = mentionsAuthor
-            composer.replyMentionsAuthorChoice = mentionsAuthor
-        case .thread:
-            threadReplyMentionsAuthor = mentionsAuthor
-            composer.threadReplyMentionsAuthorChoice = mentionsAuthor
+        let reply = switch destination {
+        case .channel: replyingTo
+        case .thread: threadReplyingTo
         }
+        guard let reply, reply.author.id != snapshot?.currentUser.id else { return }
+        composer.rememberReplyMentionsAuthor(mentionsAuthor)
     }
 
     func updateDraft(_ value: String) {

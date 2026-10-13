@@ -183,6 +183,7 @@ not start network work merely because a row redraws.
 | Account credentials | `KeychainCredentialStore`; new credentials are saved only after authoritative `READY.user` validation. Debug-only local credential mode is described in [Development](DEVELOPMENT.md#local-credential-mode). |
 | Saved-account labels, avatar and preferred account | Local picker metadata in user defaults; not an authenticated workspace snapshot. |
 | Message drafts and explicitly created invite links | Account-scoped GRDB. Expired links are pruned and checked before reuse; neither restores permissions or membership. |
+| Reply ping choice | App-wide user defaults through `SettingsPreferenceStore`, shared by both composers and retained across account resets. Self-replies suppress the effective ping without changing the saved choice. Offline fixtures keep this choice in memory. |
 | Workspace, message history, members, read state, onboarding choices | Session memory; restored from the live provider, not disk. |
 | Unsaved emoji/reaction usage | Account-scoped user defaults until acknowledged by Discord; replayed over remote history and removed with the account. |
 | Unsaved account status pick | Account-scoped user defaults until saved, superseded or rejected; removed with the account. See [settings synchronization](protocol/SETTINGS.md#status-and-custom-status). |

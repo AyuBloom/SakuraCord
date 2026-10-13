@@ -929,6 +929,7 @@ extension NativeTimelineRowPainter {
         avatarFrame: CGRect,
         trailingInset: CGFloat,
         reservesSummary: Bool = false,
+        showsReplyMention: Bool = true,
         message: Message,
         model: AppModel?
     ) {
@@ -956,6 +957,7 @@ extension NativeTimelineRowPainter {
                 height: frame.height
             ),
             avatarFrame: avatarFrame,
+            showsReplyMention: showsReplyMention,
             message: message,
             model: model
         )
@@ -1017,6 +1019,7 @@ extension NativeTimelineRowPainter {
         preview: MessageReplyPreview,
         frame: CGRect,
         avatarFrame: CGRect,
+        showsReplyMention: Bool,
         message: Message,
         model: AppModel?
     ) -> CGRect {
@@ -1028,8 +1031,11 @@ extension NativeTimelineRowPainter {
             in: avatarFrame
         )
         let font = ProfileNameFontLoader.shared.resolvedFont(for: author, fallback: NativeTimelineReplyMetrics.authorFont)
+        let displayName = showsReplyMention
+            ? NativeTimelineReplyMetrics.authorDisplayName(author, in: message)
+            : author.displayName
         let width = NativeTimelineReplyMetrics.textWidth(
-            author.displayName,
+            displayName,
             font: font
         )
         let roleColor = roleColor(presentation?.roleColorHex)
@@ -1050,7 +1056,7 @@ extension NativeTimelineRowPainter {
             height: InterfaceScale.metric(20)
         )
         text(
-            author.displayName,
+            displayName,
             in: authorFrame,
             font: font,
             color: author.isBot

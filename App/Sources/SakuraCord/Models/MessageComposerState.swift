@@ -4,7 +4,8 @@ import SakuraCordModels
 import SakuraCordPersistence
 
 /// Owns both composers and their pending local writes for the installed account.
-/// The model coordinates navigation and delivery; this owner resets as a unit.
+/// The model coordinates navigation and delivery; account reset preserves the
+/// app-wide reply preference while clearing pending account work.
 @MainActor
 @Observable
 final class MessageComposerState {
@@ -15,8 +16,10 @@ final class MessageComposerState {
     @ObservationIgnored private(set) var threadDraftRevision: UInt64 = 0
     var replyingTo: Message?
     var threadReplyingTo: Message?
-    var replyMentionsAuthor = true
-    var threadReplyMentionsAuthor = true
+    /// Shared across both composers and accounts. Self-replies suppress the
+    /// effective ping without changing the user's persisted choice.
+    private(set) var replyMentionsAuthorChoice: Bool
+    @ObservationIgnored private let preferences: SettingsPreferenceStore?
     var channelAttachments: [ForumPostAttachment] = []
     var threadAttachments: [ForumPostAttachment] = []
     var isSendQueueFullAlertPresented = false
@@ -26,6 +29,20 @@ final class MessageComposerState {
     /// in the composer at once but cannot be sent until it finishes.
     var checkingAttachmentIDs: Set<UUID> = []
     @ObservationIgnored private var animatedResizeUptimes: [MessageComposerDestination: TimeInterval] = [:]
+
+    init(preferences: SettingsPreferenceStore? = nil) {
+        self.preferences = preferences
+        if case let .bool(choice) = preferences?.value(for: .replyMentionsAuthor) {
+            replyMentionsAuthorChoice = choice
+        } else {
+            replyMentionsAuthorChoice = true
+        }
+    }
+
+    func rememberReplyMentionsAuthor(_ choice: Bool) {
+        replyMentionsAuthorChoice = choice
+        preferences?.set(.bool(choice), for: .replyMentionsAuthor)
+    }
 
     /// Records that a composer began animating to a new height, so the
     /// timeline above it glides along instead of jumping.
@@ -106,8 +123,6 @@ final class MessageComposerState {
         threadDraft = ""
         replyingTo = nil
         threadReplyingTo = nil
-        replyMentionsAuthor = true
-        threadReplyMentionsAuthor = true
         channelAttachments = []
         threadAttachments = []
         checkingAttachmentIDs = []

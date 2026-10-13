@@ -241,6 +241,11 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
             defaultValue: .bool(true)
         ),
         SettingsPreferenceRegistration(
+            id: .replyMentionsAuthor, page: .general,
+            storage: .appWide(key: "settings.chat.replyMentionsAuthor"),
+            defaultValue: .bool(true), exports: false, resets: false
+        ),
+        SettingsPreferenceRegistration(
             id: .spellCheck,
             page: .general,
             storage: .appWide(key: "settings.chat.spellCheck"),

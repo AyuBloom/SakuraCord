@@ -386,6 +386,11 @@ extension AppModel {
             nonce: outgoing.nonce,
             outboxState: .sending,
             stickers: stickers,
+            // Pre-fill the replied-to author when pinging, so the reply @
+            // indicator shows before the gateway confirmation arrives.
+            mentionedUsers: outgoing.mentionsRepliedUser
+                ? replyPreview.map { [$0.author] } ?? []
+                : [],
             poll: outgoing.poll?.preview()
         )
         if let voiceMessage = outgoing.voiceMessage, !message.attachments.isEmpty {

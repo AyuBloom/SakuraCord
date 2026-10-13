@@ -425,11 +425,6 @@ extension DiscordRESTProvider {
         let ranges = DiscordMemberListRangePolicy.ranges(around: visibleRange)
         guard let channel = cachedChannels[guildID]?.first(where: { $0.id == channelID })
         else { return }
-        guard canViewMemberListChannel(channel, guildID: guildID) else {
-            discardInaccessibleMemberLists(guildID: guildID)
-            publishMembers(guildID: guildID, members: [], groups: [])
-            return
-        }
         let memberListID = DiscordMemberListIdentity.id(
             for: channel,
             guildID: guildID,
@@ -443,6 +438,16 @@ extension DiscordRESTProvider {
         if changedSelection {
             memberListRefreshRetryTasks.removeValue(forKey: guildID)?.cancel()
             memberListViewportRestoreTasks.removeValue(forKey: guildID)?.cancel()
+        }
+        // An inaccessible viewport still supersedes the old selection. This
+        // cancels its recovery and lets returning to an accessible cached list
+        // publish rows even when its subscribed ranges have not changed.
+        guard canViewMemberListChannel(channel, guildID: guildID) else {
+            discardInaccessibleMemberLists(guildID: guildID)
+            publishMembers(guildID: guildID, members: [], groups: [])
+            return
+        }
+        if changedSelection {
             publishMembers(
                 guildID: guildID,
                 members: orderedMemberListMembers(

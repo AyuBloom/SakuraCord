@@ -152,6 +152,15 @@ adopting a viewable channel's changed member-list identity;
 selection changes and session/guild teardown prevent delayed restoration.
 That restoration waits out an already-known opcode-37 cooldown before its one
 attempt, including when the requested list has not yet committed a subscription.
+An inaccessible viewport supersedes the prior selection without sending a
+subscription. Returning to an accessible retained list republishes its cached
+rows even when its ranges are unchanged; a purged shared-list alias requires a
+fresh subscription.
+Member-only queue resets preserve a pending readable thread subscription and
+requeue it under the current generation. Request ownership prevents an older
+failure from removing a successor's desired thread. Closing/archiving a thread,
+eviction, account/guild teardown, and cancellation remain terminal; transport
+failures and cooldowns do not trigger this local-generation repair.
 
 For a known opcode-37 cooldown, SakuraCord makes at most one deferred attempt
 for the selected refresh, including a requested list whose first send has not

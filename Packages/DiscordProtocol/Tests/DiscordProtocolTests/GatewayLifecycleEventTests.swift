@@ -1302,3 +1302,125 @@ private final class GatewayDispatchCountingURLProtocol: URLProtocol, @unchecked 
 
     override func stopLoading() {}
 }
+
+extension GatewayLifecycleEventTests {
+    @Test(arguments: [true, false])
+    func `returning from an inaccessible viewport restores accessible member rows`(sharedList: Bool) async throws {
+        let fixture = try await makeMemberListProvider()
+        let (provider, socket) = (fixture.provider, fixture.socket)
+        let memberListID = fixture.memberListID
+        let events = await provider.eventStream()
+        await provider.receiveGatewayDispatchForTesting(
+            name: "GUILD_MEMBER_LIST_UPDATE",
+            data: memberListUpdate(id: memberListID, userIDs: ["2", "3"], groupCount: 2)
+        )
+        let hiddenListID = sharedList ? memberListID : "hidden-list"
+        await provider.receiveGatewayDispatchForTesting(
+            name: "CHANNEL_UPDATE",
+            data: .object([
+                "id": .string("201"), "guild_id": .string("100"), "type": .number(15),
+                "name": .string("hidden"), "member_list_id": .string(hiddenListID),
+                "permission_overwrites": .array([.object([
+                    "id": .string("1"), "type": .number(1),
+                    "allow": .string("0"), "deny": .string("1024"),
+                ])]),
+            ])
+        )
+        let sends = await socket.sentPayloadCount(opcode: 37)
+        try await provider.updateMemberListViewport(
+            in: guildID, channelID: forumChannelID, visibleRange: 0 ... 10
+        )
+        #expect(await socket.sentPayloadCount(opcode: 37) == sends)
+        #expect(await provider.selectedMemberListID[guildID] == hiddenListID)
+        #expect(await provider.memberListViewportRequests[guildID] == nil)
+        try await provider.updateMemberListViewport(
+            in: guildID, channelID: textChannelID, visibleRange: 0 ... 10
+        )
+        if sharedList {
+            // A hidden alias purges the shared cache. Returning must request
+            // a fresh SYNC instead of relying on a native row callback.
+            #expect(await socket.sentPayloadCount(opcode: 37) == sends + 1)
+            await provider.receiveGatewayDispatchForTesting(
+                name: "GUILD_MEMBER_LIST_UPDATE",
+                data: memberListUpdate(id: memberListID, userIDs: ["2", "3"], groupCount: 2)
+            )
+        } else {
+            #expect(await socket.sentPayloadCount(opcode: 37) == sends)
+        }
+        await provider.disconnect()
+        var published: [[UserID]] = []
+        for await event in events {
+            if case let .membersChanged(eventGuildID, members, _) = event, eventGuildID == guildID {
+                published.append(members.map(\.id))
+            }
+        }
+        #expect(published.contains([]))
+        #expect(published.last == [UserID(rawValue: 2), UserID(rawValue: 3)])
+    }
+
+    @Test(arguments: ["restore", "superseded", "closed", "guild-removed"])
+    func `member-only queue resets preserve a desired thread subscription`(outcome: String) async throws {
+        let fixture = try await makeMemberListProvider()
+        let (provider, socket) = (fixture.provider, fixture.socket)
+        let thread = MessageThreadSummary(
+            id: ChannelID(rawValue: 400), guildID: guildID, parentID: textChannelID, name: "Fixture Thread"
+        )
+        let events = await provider.eventStream()
+        await socket.holdNextSend(opcode: 37)
+        let viewport = Task {
+            try await provider.subscribeToMemberList(guildID: guildID, channelID: textChannelID, ranges: [0 ... 199])
+        }
+        await socket.waitForHeldSend()
+        let viewportID = try #require(await provider.guildSubscriptionTaskIDs[guildID])
+        let first = Task { try await provider.threadMembers(in: thread) }
+        await provider.waitForNextGuildSubscriptionForTesting(guildID: guildID, after: viewportID)
+        var successor: Task<[Member]?, any Error>?
+        if outcome == "superseded" {
+            let firstID = try #require(await provider.guildSubscriptionTaskIDs[guildID])
+            successor = Task { try await provider.threadMembers(in: thread) }
+            await provider.waitForNextGuildSubscriptionForTesting(guildID: guildID, after: firstID)
+        }
+        await provider.receiveGatewayDispatchForTesting(
+            name: "CHANNEL_UPDATE",
+            data: .object([
+                "id": .string("200"), "guild_id": .string("100"), "type": .number(0),
+                "name": .string("general"), "member_list_id": .string("replacement-list"),
+            ])
+        )
+        if outcome == "closed" { await provider.removeThreadMemberSubscription(thread.id) }
+        if outcome == "guild-removed" { await provider.removeGuild(guildID) }
+        await socket.releaseHeldSend()
+        await #expect(throws: CancellationError.self) { try await viewport.value }
+        let remainsDesired = outcome == "restore" || outcome == "superseded"
+        if outcome == "restore" {
+            #expect(try await first.value == nil)
+        } else {
+            await #expect(throws: CancellationError.self) { try await first.value }
+        }
+        if let successor { #expect(try await successor.value == nil) }
+        let isDesired = await provider.threadMemberSubscriptions[guildID]?.contains(thread.id) == true
+        #expect(isDesired == remainsDesired)
+        await provider.receiveGatewayDispatchForTesting(
+            name: "THREAD_MEMBER_LIST_UPDATE",
+            data: .object([
+                "guild_id": .string("100"), "thread_id": .string("400"),
+                "members": .array([.object([
+                    "user_id": .string("2"),
+                    "member": .object(["user": user(id: "2", username: "member", globalName: "Member"),
+                                       "roles": .array([])]),
+                ])]),
+            ])
+        )
+        #expect(await provider.resolvedThreadMembers(threadID: thread.id, guildID: guildID)?.map(\.id)
+            == (remainsDesired ? [UserID(rawValue: 2)] : nil))
+        await provider.disconnect()
+        var published: [[UserID]] = []
+        for await event in events {
+            if case let .threadMembersChanged(eventGuildID, threadID, members) = event,
+               eventGuildID == guildID, threadID == thread.id, let members {
+                published.append(members.map(\.id))
+            }
+        }
+        #expect(published.last == (remainsDesired ? [UserID(rawValue: 2)] : nil))
+    }
+}

@@ -187,6 +187,7 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var cachedMemberListGroups:
         [GuildID: [String: [GuildMemberListGroup]]] = [:]
     var threadMemberSubscriptions: [GuildID: [ChannelID]] = [:]
+    var threadMemberSubscriptionRequestIDs: [GuildID: [ChannelID: UUID]] = [:]
     var cachedThreadMemberIDs: [ChannelID: [UserID]] = [:]
     var selectedMemberListID: [GuildID: String] = [:]
     var memberListSubscriptions:

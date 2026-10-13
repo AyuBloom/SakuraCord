@@ -196,11 +196,13 @@ extension DiscordRESTProvider {
         }
     }
 
-    func resetMemberListSubscriptionWork(guildID: GuildID? = nil) {
+    func resetMemberListSubscriptionWork(guildID: GuildID? = nil, preservingThreadRequests: Bool = false) {
         let guildIDs = guildID.map { [$0] } ?? Array(Set(
             guildSubscriptionGenerations.keys
-        ).union(memberListRefreshRetryTasks.keys).union(memberListViewportRestoreTasks.keys))
+        ).union(memberListRefreshRetryTasks.keys).union(memberListViewportRestoreTasks.keys)
+            .union(threadMemberSubscriptionRequestIDs.keys))
         for guildID in guildIDs {
+            if !preservingThreadRequests { threadMemberSubscriptionRequestIDs[guildID] = nil }
             guildSubscriptionGenerations[guildID] = nil
             memberListInFlightRequests[guildID] = nil
             guildSubscriptionTasks.removeValue(forKey: guildID)?.cancel()
@@ -333,7 +335,7 @@ extension DiscordRESTProvider {
         if discardedSubscription {
             // A send started before access loss must not restore the discarded
             // ranges. Regaining access requires a fresh subscription.
-            resetMemberListSubscriptionWork(guildID: guildID)
+            resetMemberListSubscriptionWork(guildID: guildID, preservingThreadRequests: true)
             // Resetting the guild queue also cancels a newer, still-accessible
             // selection. Restore its desired viewport without requiring a
             // second native viewport callback.

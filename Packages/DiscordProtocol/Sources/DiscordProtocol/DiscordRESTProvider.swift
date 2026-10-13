@@ -187,11 +187,31 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var cachedMemberListGroups:
         [GuildID: [String: [GuildMemberListGroup]]] = [:]
     var threadMemberSubscriptions: [GuildID: [ChannelID]] = [:]
+    var threadMemberSubscriptionRequestIDs: [GuildID: [ChannelID: UUID]] = [:]
     var cachedThreadMemberIDs: [ChannelID: [UserID]] = [:]
     var selectedMemberListID: [GuildID: String] = [:]
     var memberListSubscriptions:
         [GuildID: [String: DiscordMemberListSubscription]] = [:]
     var memberListSubscriptionOrder: [GuildID: [String]] = [:]
+    /// The selected viewport can move while a cooldown prevents committing it.
+    var memberListViewportRequests:
+        [GuildID: (memberListID: String, subscription: DiscordMemberListSubscription)] = [:]
+    /// Selection can replace the desired viewport while an older send is suspended.
+    var memberListInFlightRequests:
+        [GuildID: DiscordMemberListInFlightRequest] = [:]
+    /// Retained member lists whose subscribed ranges were invalidated and
+    /// still need a subscription send to get a fresh SYNC.
+    var memberListsNeedingRefresh: [GuildID: [String: UUID]] = [:]
+    var guildSubscriptionTasks: [GuildID: Task<Void, any Error>] = [:]
+    #if DEBUG
+        var guildSubscriptionQueueWaitersForTesting:
+            [GuildID: [CheckedContinuation<Void, Never>]] = [:]
+    #endif
+    var guildSubscriptionGenerations: [GuildID: UUID] = [:]
+    var guildSubscriptionTaskIDs: [GuildID: UUID] = [:]
+    var memberListRefreshRetryTasks: [GuildID: Task<Void, Never>] = [:]
+    var memberListViewportRestoreTasks: [GuildID: Task<Void, Never>] = [:]
+    var memberListRefreshRetryAttempts: [GuildID: Set<String>] = [:]
     var cachedGatewayUsersByID: [String: UserDTO] = [:]
     var cachedGatewayUserOrder: [String] = []
     var cachedGatewayUserIDs: Set<String> = []
@@ -224,6 +244,8 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var relationshipLoadGeneration: UInt64?
     /// Per-user revisions keep unrelated relationship events from suppressing saves.
     var relationshipRevisions: [UserID: UInt64] = [:]
+    /// Per-group revisions keep an Edit Group response from replacing a newer Gateway update.
+    var privateChannelRevisions: [ChannelID: UInt64] = [:]
     var cachedUserRevisions: [String: UInt64] = [:]
     var relationshipUserPublicationTask: Task<Void, Never>?
     var cachedGuildRoles: [GuildID: [GuildRoleDTO]] = [:]

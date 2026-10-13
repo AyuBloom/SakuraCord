@@ -19,6 +19,7 @@ struct NativeMemberListView: NSViewRepresentable {
     var onViewportRange: (ClosedRange<Int>) -> Void = { _ in }
 
     var openProfile: ((ProfilePresentationState) -> Void)?
+    var sendProfileMessage: ((UserID, String, String) async -> Bool)?
     var rowAccessory: ((Member) -> AnyView)?
     var rowMenu: ((Member) -> NSMenu?)?
     var rowAccessibilityActions: ((Member) -> [NSAccessibilityCustomAction])?

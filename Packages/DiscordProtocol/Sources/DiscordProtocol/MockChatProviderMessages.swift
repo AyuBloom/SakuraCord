@@ -270,6 +270,9 @@ public extension MockChatProvider {
             stickers: draft.stickerIDs.map {
                 MessageSticker(id: $0, name: "Demo sticker", format: .png)
             },
+            mentionedUsers: draft.mentionsRepliedUser
+                ? replyPreview.map { [$0.author] } ?? []
+                : [],
             poll: draft.poll?.preview()
         )
         if draft.voiceMessage != nil { message.flags.insert(.voiceMessage) }

@@ -2,6 +2,7 @@ import AppKit
 @testable import DiscordProtocol
 import Foundation
 import MessageRendering
+import Observation
 import SakuraCordModels
 import SakuraCordPersistence
 import Testing
@@ -3394,6 +3395,76 @@ func `GIF completion preserves newer text and channel drafts`(changesChannel: Bo
     #expect(model.messageRows.last?.replyPreview?.messageID == target.id)
     #expect(model.messageRows.last?.replyPreview?.content == target.content)
     #expect(model.replyingTo == nil)
+}
+
+@MainActor
+@Test func `reply ping choice is shared and survives self replies account resets and relaunch`() async throws {
+    let defaults = InMemoryPreferences()
+    let preferences = SettingsPreferenceStore(defaults: defaults)
+    let model = AppModel(launchMode: .offlineTesting, composerPreferences: preferences)
+    await model.start()
+    let currentUser = try #require(model.snapshot?.currentUser)
+    let target = try #require(model.messages.first { $0.author.id != currentUser.id })
+    let thread = MessageThreadSummary(
+        id: ChannelID(rawValue: 88_001), parentID: target.channelID, name: "Reply preference"
+    )
+    model.openThread = thread
+    let threadTarget = Message(
+        id: MessageID(rawValue: 88_002), channelID: thread.id,
+        author: target.author, content: "thread target"
+    )
+    model.reply(to: target)
+    model.reply(to: threadTarget)
+    #expect(model.replyMentionsAuthor && model.threadReplyMentionsAuthor)
+
+    let changes = AsyncStream<MessageComposerDestination>.makeStream()
+    withObservationTracking {
+        _ = model.replyMentionsAuthor
+    } onChange: { changes.continuation.yield(.channel) }
+    withObservationTracking {
+        _ = model.threadReplyMentionsAuthor
+    } onChange: { changes.continuation.yield(.thread) }
+    model.setReplyMentionsAuthor(false, in: .channel)
+    changes.continuation.finish()
+    var observedChanges: Set<MessageComposerDestination> = []
+    for await destination in changes.stream { observedChanges.insert(destination) }
+    #expect(observedChanges == [.channel, .thread])
+    #expect(!model.replyMentionsAuthor && !model.threadReplyMentionsAuthor)
+    model.setReplyMentionsAuthor(true, in: .thread)
+    #expect(model.replyMentionsAuthor && model.threadReplyMentionsAuthor)
+
+    let selfReply = Message(
+        id: MessageID(rawValue: 88_003), channelID: target.channelID,
+        author: currentUser, content: "self target"
+    )
+    model.replaceSelectedMessages(with: [target, selfReply])
+    #expect(model.navigateReplySelection(in: .channel, direction: .newer))
+    #expect(!model.replyMentionsAuthor && model.threadReplyMentionsAuthor)
+    model.setReplyMentionsAuthor(false, in: .channel)
+    #expect(preferences.value(for: .replyMentionsAuthor) == .bool(true))
+    #expect(model.navigateReplySelection(in: .channel, direction: .older))
+    #expect(model.replyMentionsAuthor)
+
+    model.setReplyMentionsAuthor(false, in: .thread)
+    model.updateDraft("unpinged reply")
+    try #require(await model.send())
+    #expect(model.replyingTo == nil)
+    #expect(model.messages.last?.mentionedUsers.contains(where: { $0.id == target.author.id }) == false)
+    #expect(!model.threadReplyMentionsAuthor)
+    await model.resetAccountScopedLoadsAndForumState()
+    #expect(model.replyingTo == nil && model.threadReplyingTo == nil)
+    #expect(!model.replyMentionsAuthor && !model.threadReplyMentionsAuthor)
+    #expect(preferences.value(for: .replyMentionsAuthor) == .bool(false))
+
+    let relaunched = AppModel(
+        launchMode: .offlineTesting,
+        composerPreferences: SettingsPreferenceStore(defaults: defaults)
+    )
+    await relaunched.start()
+    let nextTarget = try #require(relaunched.messages.first { $0.author.id != relaunched.snapshot?.currentUser.id })
+    relaunched.reply(to: nextTarget)
+    #expect(!relaunched.replyMentionsAuthor)
+    #expect(AppModel(launchMode: .offlineTesting).replyMentionsAuthor)
 }
 
 @MainActor

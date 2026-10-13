@@ -155,7 +155,8 @@ extension AppModel {
         attachments: [ForumPostAttachment],
         clearsComposer: Bool,
         poll: PollDraft? = nil,
-        isTTS: Bool = false
+        isTTS: Bool = false,
+        nonce: String = ClientNonce.make()
     ) async -> Bool {
         await enqueueChannelMessage(
             channelID: channelID,
@@ -166,7 +167,8 @@ extension AppModel {
             attachments: attachments,
             clearsComposer: clearsComposer,
             poll: poll,
-            isTTS: isTTS
+            isTTS: isTTS,
+            nonce: nonce
         )?.value ?? false
     }
 
@@ -181,7 +183,8 @@ extension AppModel {
         attachments: [ForumPostAttachment],
         clearsComposer: Bool,
         poll: PollDraft? = nil,
-        isTTS: Bool = false
+        isTTS: Bool = false,
+        nonce: String = ClientNonce.make()
     ) -> Task<Bool, Never>? {
         guard allowSlowmodeSubmission(in: channelID) else { return nil }
         let outgoing = SendMessageDraft(
@@ -190,6 +193,7 @@ extension AppModel {
             replyTo: replyTo,
             mentionsRepliedUser: mentionsRepliedUser,
             attachments: attachments,
+            nonce: nonce,
             poll: poll,
             isTTS: isTTS
         )
@@ -255,7 +259,10 @@ extension AppModel {
             await turn.previous?.value
             guard let self else { return false }
             defer {
-                if isCurrentAccountSession(session) { composer.slowmode.end(in: outgoing.channelID) }
+                if isCurrentAccountSession(session) {
+                    composer.slowmode.end(in: outgoing.channelID)
+                    composer.outbox.finishDelivery(for: turn)
+                }
             }
             let confirmedWhileWaiting = composer.outbox.beginDelivery(for: turn)
             guard isCurrentAccountSession(session) else { return false }
@@ -313,6 +320,7 @@ extension AppModel {
             confirmSlowmodeMessage(confirmed)
             let reconciled = reconcileVisibleOrCached(confirmed)
             discardVoiceMessageFile(for: outgoing)
+            composer.outbox.noteConfirmation(nonce: outgoing.nonce, channelID: outgoing.channelID)
             composer.outbox.draftsByNonce[outgoing.nonce] = nil
             composer.outbox.stickerUploadSourceURLByNonce[outgoing.nonce] = nil
             journalAuthoritativeMessageUpsert(reconciled)
@@ -378,6 +386,11 @@ extension AppModel {
             nonce: outgoing.nonce,
             outboxState: .sending,
             stickers: stickers,
+            // Pre-fill the replied-to author when pinging, so the reply @
+            // indicator shows before the gateway confirmation arrives.
+            mentionedUsers: outgoing.mentionsRepliedUser
+                ? replyPreview.map { [$0.author] } ?? []
+                : [],
             poll: outgoing.poll?.preview()
         )
         if let voiceMessage = outgoing.voiceMessage, !message.attachments.isEmpty {
@@ -391,6 +404,7 @@ extension AppModel {
 
     func appendOutgoingMessage(_ message: Message) {
         if let nonce = message.nonce {
+            composer.outbox.updateState(message.outboxState, nonce: nonce, channelID: message.channelID)
             timelineSendTransitionStore.noteLocalSend(nonce: nonce)
         }
         if message.channelID == openThread?.id {

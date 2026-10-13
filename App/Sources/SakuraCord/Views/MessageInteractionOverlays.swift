@@ -1030,8 +1030,8 @@ struct MessageProfilePopoverContent: View {
                presentation.requestID == requestID
             {
                 ProfilePresentationContent(presentation: presentation, openProfile: model.expandProfile, userMenu: {
-                UserContextMenu.make(for: presentation.member.user, context: .init(guildID: presentation.guildID), model: model)
-            })
+                    UserContextMenu.make(for: presentation.member.user, context: .init(guildID: presentation.guildID), model: model)
+                }, sendMessage: model.sendProfileMessage)
                     .environment(\.profileCosmeticPolicy, model.cosmeticPolicy)
                     .environment(\.serverTagCardModel, model)
             } else {

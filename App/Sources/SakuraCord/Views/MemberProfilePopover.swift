@@ -10,6 +10,7 @@ enum ProfilePresentationLayout {
 
 struct ProfilePresentationContent<Footer: View>: View {
     @Environment(\.serverTagCardModel) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let presentation: ProfilePresentationState
     var layout: ProfilePresentationLayout = .popover
     var maximumPopoverHeight: CGFloat = InterfaceScale.metric(560)
@@ -17,6 +18,7 @@ struct ProfilePresentationContent<Footer: View>: View {
     let footer: Footer
     var openProfile: ((ProfilePresentationState) -> Void)?
     var userMenu: (() -> NSMenu?)?
+    var sendMessage: ((UserID, String, String) async -> Bool)?
 
     init(
         presentation: ProfilePresentationState,
@@ -25,6 +27,7 @@ struct ProfilePresentationContent<Footer: View>: View {
         showsRoles: Bool = true,
         openProfile: ((ProfilePresentationState) -> Void)? = nil,
         userMenu: (() -> NSMenu?)? = nil,
+        sendMessage: ((UserID, String, String) async -> Bool)? = nil,
         @ViewBuilder footer: () -> Footer
     ) {
         self.presentation = presentation
@@ -34,6 +37,11 @@ struct ProfilePresentationContent<Footer: View>: View {
         self.footer = footer()
         self.openProfile = openProfile
         self.userMenu = userMenu
+        self.sendMessage = sendMessage
+    }
+
+    private var showsQuickMessage: Bool {
+        layout == .popover && !presentation.isLoading && !presentation.isCurrentUser && sendMessage != nil
     }
 
     var body: some View {
@@ -54,7 +62,19 @@ struct ProfilePresentationContent<Footer: View>: View {
                     layout: layout,
                     maximumPopoverHeight: maximumPopoverHeight,
                     showsRoles: showsRoles,
-                    footer: footer,
+                    bottomPadding: showsQuickMessage ? ProfileQuickMessageMetrics.cardInset : InterfaceScale.metric(14),
+                    footer: VStack(alignment: .leading, spacing: InterfaceScale.metric(12)) {
+                        footer
+                        if showsQuickMessage, let sendMessage {
+                            ProfileQuickMessageView(
+                                displayName: presentation.member.user.displayName,
+                                send: { content, nonce in await sendMessage(presentation.member.id, content, nonce) },
+                                releaseNonce: { model?.releaseProfileMessage(nonce: $0) },
+                                conversationOpener: model.map { model in { model.profileMessageConversationOpener(for: presentation.member.user) } }
+                            )
+                            .padding(.horizontal, ProfileQuickMessageMetrics.cardInset)
+                        }
+                    },
                     openProfile: openProfile.map { action in { action(presentation) } },
                     userMenu: userMenu
                 )
@@ -67,6 +87,12 @@ struct ProfilePresentationContent<Footer: View>: View {
                     SuppressedProfileGate(model: model, presentation: presentation, reason: suppression, layout: layout)
                 }
             }
+            .id(presentation.member.id)
+            .transition(.opacity)
+            .animation(
+                layout == .popover && !reduceMotion ? .easeOut(duration: 0.12) : nil,
+                value: presentation.member.id
+            )
         }
     }
 }
@@ -78,7 +104,8 @@ extension ProfilePresentationContent where Footer == EmptyView {
         maximumPopoverHeight: CGFloat = InterfaceScale.metric(560),
         showsRoles: Bool = true,
         openProfile: ((ProfilePresentationState) -> Void)? = nil,
-        userMenu: (() -> NSMenu?)? = nil
+        userMenu: (() -> NSMenu?)? = nil,
+        sendMessage: ((UserID, String, String) async -> Bool)? = nil
     ) {
         self.init(
             presentation: presentation,
@@ -86,7 +113,8 @@ extension ProfilePresentationContent where Footer == EmptyView {
             maximumPopoverHeight: maximumPopoverHeight,
             showsRoles: showsRoles,
             openProfile: openProfile,
-            userMenu: userMenu
+            userMenu: userMenu,
+            sendMessage: sendMessage
         ) {
             EmptyView()
         }
@@ -137,6 +165,7 @@ struct MemberProfilePopover<Footer: View>: View {
     var layout: ProfilePresentationLayout = .popover
     var maximumPopoverHeight: CGFloat = InterfaceScale.metric(560)
     var showsRoles = true
+    var bottomPadding: CGFloat = InterfaceScale.metric(14)
     let footer: Footer
     var openProfile: (() -> Void)?
     var userMenu: (() -> NSMenu?)?
@@ -192,7 +221,10 @@ struct MemberProfilePopover<Footer: View>: View {
         }
         .onPreferenceChange(ProfileContentHeightKey.self) { newHeight in
             guard editor == nil, newHeight.isFinite, newHeight > 0 else { return }
-            contentHeight = max(250, newHeight)
+            let measuredHeight = max(InterfaceScale.metric(250), newHeight)
+            guard contentHeight != measuredHeight else { return }
+            contentHeight = measuredHeight
+            popoverPresentationContext?.contentSizeDidChange?()
         }
         .task(id: cosmeticPolicy.disables(.gradient, for: member.id) ? nil : theme.source(for: profile, scale: displayScale, allowsTheme: editor?.isNitro)) {
             if !cosmeticPolicy.disables(.gradient, for: member.id) {
@@ -251,24 +283,17 @@ struct MemberProfilePopover<Footer: View>: View {
                     isExpandedProfile: layout == .expanded,
                     animatesRemoteMedia: animatesRemoteMedia,
                     editor: editor,
-                    openEditorPicker: openEditorPicker
+                    openEditorPicker: openEditorPicker,
+                    openProfile: profileExpansionAction
                 )
                 .overlay {
                     if let userMenu, editor == nil { UserContextMenuBridge(makeMenu: userMenu) }
                 }
                 .overlay(alignment: .topTrailing) {
-                    if openProfile != nil {
-                        Button(action: expandProfile) {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.interfaceSystem(size: 12, weight: .semibold))
-                                .frame(width: InterfaceScale.metric(28), height: InterfaceScale.metric(28))
-                                .background(.regularMaterial, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Expand Profile")
-                        .accessibilityLabel("Expand Profile")
-                        .padding(InterfaceScale.metric(10))
-                    }
+                    profileExpansionButton
+                }
+                .overlay(alignment: .topLeading) {
+                    if profile?.isPrivate == true { privateProfileBadge }
                 }
                 .zIndex(10)
 
@@ -296,6 +321,9 @@ struct MemberProfilePopover<Footer: View>: View {
                             layout: layout
                         )
                     }
+                    if profile.isPrivate == true {
+                        privateProfileNotice(profile)
+                    }
                     if let editor, editor.scope == .main || editor.isNitro {
                         ProfileInlineBioEditor(value: Binding(get: { editor.bio }, set: { editor.bio = $0 }), displayValue: profile.bio, model: editor.model)
                         .id(editor.draftGeneration)
@@ -320,10 +348,14 @@ struct MemberProfilePopover<Footer: View>: View {
 
                 }
 
+                if layout == .popover { Spacer(minLength: 0) }
                 footer
             }
             .frame(width: contentWidth, alignment: .leading)
-            .padding(.bottom, InterfaceScale.metric(14))
+            // Use the card's minimum, not its previous viewport height, so a
+            // loading or expanded card can shrink when its content changes.
+            .frame(minHeight: layout == .popover ? InterfaceScale.metric(236) : 0, alignment: .top)
+            .padding(.bottom, bottomPadding)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(key: ProfileContentHeightKey.self, value: proxy.size.height)
@@ -331,6 +363,53 @@ struct MemberProfilePopover<Footer: View>: View {
             }
         }
         .scrollIndicators(editorModal == nil && (editor != nil || contentHeight > maximumPopoverHeight) ? .visible : .hidden)
+    }
+
+    @ViewBuilder
+    private var profileExpansionButton: some View {
+        if openProfile != nil {
+            Button(action: expandProfile) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.interfaceSystem(size: 12, weight: .semibold))
+                    .frame(width: InterfaceScale.metric(28), height: InterfaceScale.metric(28))
+                    .background(.regularMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Expand Profile")
+            .accessibilityLabel("Expand Profile")
+            .padding(InterfaceScale.metric(10))
+        }
+    }
+
+    /// Mirrors the expansion button in the banner's opposite corner, so the
+    /// badge shares its inset and stays concentric with the card.
+    private var privateProfileBadge: some View {
+        Label("Private", systemImage: "lock.fill")
+            .font(.interfaceSystem(size: 12, weight: .semibold))
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, InterfaceScale.metric(10))
+            .frame(height: InterfaceScale.metric(28))
+            .background(.regularMaterial, in: Capsule())
+            .padding(InterfaceScale.metric(10))
+            .help("This profile is private")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Private profile")
+    }
+
+    private func privateProfileNotice(_ profile: UserProfile) -> some View {
+        Label {
+            Text("\(profile.displayName)'s profile is private, so some info is hidden. Add them as a friend to see more.")
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "lock.fill").foregroundStyle(.secondary)
+        }
+        .font(.interface(.callout))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, InterfaceScale.metric(12))
+        .padding(.vertical, InterfaceScale.metric(10))
+        .background(.quaternary.opacity(0.5), in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(12)))
+        .padding(.horizontal, InterfaceScale.metric(16))
     }
 
     @ViewBuilder
@@ -363,6 +442,11 @@ struct MemberProfilePopover<Footer: View>: View {
         cosmeticPolicy.disables(.gradient, for: member.id) ? [] : theme.colors(for: profile, scale: displayScale, allowsTheme: editor?.isNitro)
     }
 
+    private var profileExpansionAction: (() -> Void)? {
+        guard openProfile != nil else { return nil }
+        return { expandProfile() }
+    }
+
     private func expandProfile() {
         openProfile?()
         popoverPresentationContext?.dismiss?()
@@ -380,8 +464,10 @@ struct MemberProfilePopover<Footer: View>: View {
         }
     }
 
+    static var surfaceCornerRadius: CGFloat { 16 }
+
     private var innerCornerRadius: CGFloat {
-        layout == .inspector ? 0 : 16
+        layout == .inspector ? 0 : Self.surfaceCornerRadius
     }
 
     private var profileShape: ConcentricRectangle {
@@ -436,6 +522,7 @@ private struct ProfileHeroSection: View {
     var usesSolidBannerAccent = false
     var editor: ProfileEditorState?
     var openEditorPicker: ((ProfileEditorPicker) -> Void)?
+    var openProfile: (() -> Void)?
 
     @State private var defaultAvatarPalette: (url: URL, color: UInt32)?
 
@@ -498,6 +585,7 @@ private struct ProfileHeroSection: View {
                         size: avatarSize,
                         playback: animatesRemoteMedia ? .continuous : .paused
                     )
+                    .modifier(ProfileAvatarExpansion(openProfile: editor == nil ? openProfile : nil))
                     .padding(InterfaceScale.metric(3))
                 }
                 .modifier(ProfileEditorImageMenu(editor: editor, target: .avatar, open: openEditorPicker))

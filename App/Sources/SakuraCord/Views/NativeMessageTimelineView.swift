@@ -8,12 +8,21 @@ private final class NativeTimelineInputShieldScrollView: NSScrollView {
     let inputPerformanceProbe = ScrollInputPerformanceProbe(
         surface: .timeline
     )
+    var onUserScrollTowardNewest: (() -> Void)?
     var onScrollWheel: (() -> Void)?
 
     override func scrollWheel(with event: NSEvent) {
         guard WindowModalCoordinator.allowsInput(for: self) else { return }
         onScrollWheel?()
         super.scrollWheel(with: event)
+        // A clamped scroll at the newest edge moves no bounds and starts no
+        // live scroll, so read intent is taken from the wheel input itself.
+        if NativeTimelineReadBoundaryPolicy.isScrollTowardNewest(
+            deltaX: event.scrollingDeltaX,
+            deltaY: event.scrollingDeltaY
+        ) {
+            onUserScrollTowardNewest?()
+        }
     }
 }
 
@@ -45,6 +54,7 @@ struct NativeMessageTimelineView: NSViewRepresentable {
     let onInitialPositionEstablished: (TimelineScrollState) -> Void
     let onUserScrollBegan: () -> Void
     let onUserScrollEnded: (TimelineScrollState) -> Void
+    let onUserScrollTowardNewest: () -> Void
 
     init(
         model: AppModel,
@@ -73,7 +83,8 @@ struct NativeMessageTimelineView: NSViewRepresentable {
         onInitialPositionEstablished:
             @escaping (TimelineScrollState) -> Void = { _ in },
         onUserScrollBegan: @escaping () -> Void,
-        onUserScrollEnded: @escaping (TimelineScrollState) -> Void
+        onUserScrollEnded: @escaping (TimelineScrollState) -> Void,
+        onUserScrollTowardNewest: @escaping () -> Void = {}
     ) {
         self.model = model
         self.conversation = conversation
@@ -103,6 +114,7 @@ struct NativeMessageTimelineView: NSViewRepresentable {
             onInitialPositionEstablished
         self.onUserScrollBegan = onUserScrollBegan
         self.onUserScrollEnded = onUserScrollEnded
+        self.onUserScrollTowardNewest = onUserScrollTowardNewest
     }
 
     var rowsRevision: UInt64 {
@@ -286,6 +298,7 @@ final class NativeMessageTimelineCoordinator: NSObject {
         var lastReportedState: TimelineScrollState?
         var pendingScrollState: TimelineScrollState?
         var scrollStateCallbackTask: Task<Void, Never>?
+        var liveScrollViewport: CGRect?
         var isEarlierHistoryScrollGestureActive = false
         var hasEarlierHistoryScrollIntent = false
         var hasIssuedEarlierHistoryRequest = false
@@ -342,6 +355,9 @@ extension NativeMessageTimelineCoordinator {
 
             let scrollView = NativeTimelineInputShieldScrollView()
             scrollView.inputPerformanceProbe.install(on: scrollView)
+            scrollView.onUserScrollTowardNewest = { [weak self] in
+                self?.parent.onUserScrollTowardNewest()
+            }
             // The reader's own scrolling always wins over a jump's glide.
             scrollView.onScrollWheel = { [weak self] in self?.cancelGlide() }
             scrollView.documentView = documentView
@@ -559,6 +575,7 @@ extension NativeMessageTimelineCoordinator {
         }
 
         func resetConversationUpdateState() {
+            liveScrollViewport = nil
             widthRelayoutGeneration &+= 1
             widthRelayoutTask?.cancel()
             widthRelayoutTask = nil
@@ -942,6 +959,7 @@ extension NativeMessageTimelineCoordinator {
         }
 
         func stopObserving() {
+            liveScrollViewport = nil
             cancelGlide()
             cancelLayoutPreparation()
             pendingModelRowsUpdateTask?.cancel()

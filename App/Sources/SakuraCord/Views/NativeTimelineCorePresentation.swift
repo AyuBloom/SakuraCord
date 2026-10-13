@@ -139,6 +139,11 @@ enum NativeTimelineReplyMetrics {
         }
     }
 
+    static func authorDisplayName(_ author: User, in message: Message) -> String {
+        message.mentionedUsers.contains { $0.id == author.id }
+            ? "@\(author.displayName)" : author.displayName
+    }
+
     static func mediaSymbol(for preview: MessageReplyPreview) -> String? {
         switch preview.mediaKind {
         case .image, .animatedImage: "photo.fill"
@@ -178,7 +183,7 @@ enum NativeTimelineReplyMetrics {
         return avatarDiameter
             + horizontalSpacing
             + (showsIndicator ? InterfaceScale.metric(14) : 0)
-            + textWidth(author.displayName, font: authorFont)
+            + textWidth(authorDisplayName(author, in: message), font: authorFont)
             + horizontalSpacing
             + textWidth(summary, font: summaryFont)
             + (mediaSymbol(for: preview) == nil ? 0 : mediaSymbolReserve)

@@ -2429,6 +2429,75 @@ private func downArrowKeyEvent(
 
 @MainActor
 @Test(arguments: [false, true])
+func `profile message retry reuses the failed outbox nonce`(timesOut: Bool) async throws {
+    let provider = TypingTestProvider()
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    await model.start()
+    let recipient = User(id: UserID(rawValue: 2), username: "recipient", displayName: "Recipient")
+    let channelID = try #require(model.selectedChannelID)
+    let index = try #require(model.snapshot?.channels.firstIndex { $0.id == channelID })
+    model.snapshot?.channels[index].recipients = [recipient]
+    if timesOut {
+        await provider.timeOutNextSend()
+    } else {
+        await provider.failNextSend()
+    }
+    let nonce = ClientNonce.make()
+    #expect(await model.sendProfileMessage(to: recipient.id, content: "retry privately", nonce: nonce) == false)
+    // Failed profile sends outlive bounded history windows and cache eviction.
+    model.messages = []
+    model.messageCache[channelID] = nil
+    #expect(model.outgoingState(nonce: nonce, channelID: channelID) == .failed)
+    #expect(await model.sendProfileMessage(to: recipient.id, content: "retry privately", nonce: nonce))
+    let drafts = await provider.sentDrafts
+    #expect(drafts.count == 2)
+    #expect(drafts[0] == drafts[1])
+    #expect(model.messages.filter { $0.nonce == nonce }.count == 1)
+    #expect(model.composer.outbox.draftsByNonce[nonce] == nil)
+    #expect(await model.sendProfileMessage(to: recipient.id, content: "retry privately", nonce: nonce))
+    #expect(await provider.sendCount == 2)
+}
+
+@MainActor
+@Test(arguments: [false, true])
+func `profile send retains a Gateway receipt across timeout and history eviction`(confirmsAfterTimeout: Bool) async throws {
+    let provider = TypingTestProvider()
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    await model.start()
+    let recipient = await provider.otherUser
+    let channelID = try #require(model.selectedChannelID)
+    let index = try #require(model.snapshot?.channels.firstIndex { $0.id == channelID })
+    model.snapshot?.channels[index].recipients = [recipient]
+    await provider.timeOutNextSend()
+    await provider.suspendNextSend()
+    let nonce = ClientNonce.make()
+    let send = Task { await model.sendProfileMessage(to: recipient.id, content: "confirmed privately", nonce: nonce) }
+    await provider.waitUntilSendStarts()
+    #expect(!(await model.sendProfileMessage(to: recipient.id, content: "confirmed privately", nonce: nonce)))
+    let pending = try #require(model.messages.first { $0.nonce == nonce })
+    var confirmation = Message(
+        id: MessageID(rawValue: 9_001), channelID: channelID, author: pending.author,
+        content: pending.content, nonce: nonce
+    )
+    if confirmsAfterTimeout {
+        await provider.releaseSend()
+        #expect(!(await send.value))
+    }
+    model.consumeMessageCreated(&confirmation, preparedTextPlan: nil)
+    model.messages = []
+    model.messageCache[channelID] = nil
+    if confirmsAfterTimeout {
+        #expect(await model.sendProfileMessage(to: recipient.id, content: "confirmed privately", nonce: nonce))
+    } else {
+        await provider.releaseSend()
+        #expect(await send.value)
+    }
+    #expect(model.composer.outbox.draftsByNonce[nonce] == nil)
+    #expect(await provider.sendCount == 1)
+}
+
+@MainActor
+@Test(arguments: [false, true])
 func `retry resends the exact failed draft through sending and confirmed states`(timesOut: Bool) async throws {
     let provider = TypingTestProvider()
     let model = AppModel(launchMode: .offlineTesting, provider: provider)
@@ -2572,6 +2641,13 @@ func `retry resends the exact failed draft through sending and confirmed states`
     #expect(model.draft == "refused")
     #expect(model.isSendQueueFullAlertPresented)
     #expect(await provider.sendCount == 1)
+    let recipient = await provider.otherUser
+    let channelID = try #require(model.selectedChannelID)
+    let channelIndex = try #require(model.snapshot?.channels.firstIndex { $0.id == channelID })
+    model.snapshot?.channels[channelIndex].recipients = [recipient]
+    #expect(!(await model.sendProfileMessage(to: recipient.id, content: "also refused")))
+    #expect(model.draft == "refused")
+    #expect(model.composer.outbox.waitingDeliveryCount == OutgoingMessageState.maximumWaitingDeliveries)
 
     // The confirmation carries a later server timestamp than the sends still
     // queued behind it; it must settle in place rather than move below them.

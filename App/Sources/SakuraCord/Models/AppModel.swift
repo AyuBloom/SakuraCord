@@ -159,6 +159,8 @@ final class AppModel {
     @ObservationIgnored let serverTagCards = ServerTagCardStore()
     @ObservationIgnored let issueReports = IssueReportStore()
     @ObservationIgnored let nicknameEditor = NicknameEditorStore()
+    @ObservationIgnored let groupDirectMessageEditor = GroupDirectMessageEditorStore()
+    @ObservationIgnored let groupDirectMessageLeave = GroupDirectMessageLeaveStore()
     @ObservationIgnored let voiceSidebarPresentation =
         VoiceSidebarPresentationStore()
     var serverRailGuildsByID: [GuildID: Guild] = [:] {
@@ -436,7 +438,7 @@ final class AppModel {
         threadErrorScope == .initialPage
             || threadErrorScope == .earlierPage
     }
-    @ObservationIgnored let composer = MessageComposerState()
+    @ObservationIgnored let composer: MessageComposerState
     @ObservationIgnored let voiceMessagePlayback = VoiceMessagePlaybackStore()
     @ObservationIgnored let channelVoiceMessageComposer = VoiceMessageComposerState(destination: .channel)
     @ObservationIgnored let threadVoiceMessageComposer = VoiceMessageComposerState(destination: .thread)
@@ -1215,11 +1217,15 @@ final class AppModel {
         attachmentSettingsStore: AttachmentSettingsStore? = nil,
         privacySafetySettingsStore: PrivacySafetySettingsStore? = nil,
         uploadPrivacyPreparation: UploadPrivacyPreparation? = nil,
-        translation: TranslationState? = nil
+        translation: TranslationState? = nil,
+        composerPreferences: SettingsPreferenceStore? = nil
     ) {
         self.launchMode = launchMode
         includesOfflineSignIn = launchMode == .offlineTesting && awaitsOfflineSignIn
         self.awaitsOfflineSignIn = includesOfflineSignIn
+        composer = MessageComposerState(
+            preferences: composerPreferences ?? (launchMode == .normal ? .shared : nil)
+        )
         appearanceSettings = AppearanceSettingsStore.shared.load()
         interfaceSettings = InterfaceSettingsStore.shared.load()
         generalInputSettings = GeneralInputSettingsStore.shared.load()

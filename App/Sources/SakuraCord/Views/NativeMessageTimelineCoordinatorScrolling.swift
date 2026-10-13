@@ -1121,28 +1121,7 @@ extension NativeMessageTimelineCoordinator {
                 ) { [weak self] _ in
                     MainActor.assumeIsolated {
                         guard let self else { return }
-                        let viewportSize = scrollView.contentView.bounds.size
-                        let resized = abs(viewportSize.width - self.lastViewportSize.width) >= 0.5
-                            || abs(viewportSize.height - self.lastViewportSize.height) >= 0.5
-                        if self.reconcileViewportGeometryIfNeeded(), resized {
-                            return
-                        }
-                        let didClamp =
-                            self.clampToMaterializedHistoryBoundaries()
-                        self.positionViewportCanvas()
-                        self.updateHistorySkeletonPresentation()
-                        guard !self.isApplyingUpdate else { return }
-                        self.canvas?.dismissHoverPresentationForScroll()
-                        self.noteScrollActivity()
-                        // Once the clip view is pinned to the loaded-history
-                        // boundary, its logical near-top state no longer
-                        // changes. A further upward wheel delta can still
-                        // briefly move into the reserved coordinates before
-                        // this clamp restores it. Force that attempted
-                        // crossing through the callback so a completed or
-                        // failed slow request cannot leave pagination
-                        // permanently stuck at the current oldest row.
-                        self.reportScrollState(force: didClamp)
+                        self.viewportBoundsDidChange(in: scrollView)
                     }
                 },
                 center.addObserver(
@@ -1161,6 +1140,15 @@ extension NativeMessageTimelineCoordinator {
                 ) { [weak self] _ in
                     MainActor.assumeIsolated {
                         self?.liveScrollTrackingWillBegin()
+                    }
+                },
+                center.addObserver(
+                    forName: NSScrollView.didLiveScrollNotification,
+                    object: scrollView,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.liveScrollTrackingDidMove()
                     }
                 },
                 center.addObserver(
@@ -1201,6 +1189,36 @@ extension NativeMessageTimelineCoordinator {
             }
         }
 
+        func viewportBoundsDidChange(in scrollView: NSScrollView) {
+            let viewportSize = scrollView.contentView.bounds.size
+            let resized = abs(viewportSize.width - lastViewportSize.width) >= 0.5
+                || abs(viewportSize.height - lastViewportSize.height) >= 0.5
+            if reconcileViewportGeometryIfNeeded(), resized {
+                return
+            }
+            if isApplyingUpdate || resized {
+                liveScrollViewport = liveScrollViewport.map { _ in
+                    scrollView.contentView.bounds
+                }
+            }
+            let didClamp =
+                clampToMaterializedHistoryBoundaries()
+            positionViewportCanvas()
+            updateHistorySkeletonPresentation()
+            guard !isApplyingUpdate else { return }
+            canvas?.dismissHoverPresentationForScroll()
+            noteScrollActivity()
+            // Once the clip view is pinned to the loaded-history
+            // boundary, its logical near-top state no longer
+            // changes. A further upward wheel delta can still
+            // briefly move into the reserved coordinates before
+            // this clamp restores it. Force that attempted
+            // crossing through the callback so a completed or
+            // failed slow request cannot leave pagination
+            // permanently stuck at the current oldest row.
+            reportScrollState(force: didClamp)
+        }
+
         func noteScrollActivity() {
             lastScrollActivityUptime = ProcessInfo.processInfo.systemUptime
             publishScrollActivity(true)
@@ -1235,7 +1253,24 @@ extension NativeMessageTimelineCoordinator {
             }
         }
 
+        func liveScrollTrackingDidMove() {
+            guard let scrollView, let previous = liveScrollViewport else { return }
+            let viewport = scrollView.contentView.bounds
+            liveScrollViewport = viewport
+            let eventType = scrollView.window?.currentEvent?.type ?? NSApp.currentEvent?.type
+            // Mouse-driven live scrolling covers scrollbar dragging. Wheel
+            // input has its own delta check; layout and app-owned positioning
+            // are not evidence that the reader moved toward newer messages.
+            guard eventType == .leftMouseDown || eventType == .leftMouseDragged,
+                  !isApplyingUpdate, activeGlide == nil,
+                  viewport.size == previous.size,
+                  viewport.minY > previous.minY
+            else { return }
+            parent.onUserScrollTowardNewest()
+        }
+
         func liveScrollTrackingDidEnd() {
+            liveScrollViewport = nil
             let interval = Self.performanceSignposter.beginInterval(
                 "TimelineLiveScrollEnd"
             )
@@ -1323,6 +1358,7 @@ extension NativeMessageTimelineCoordinator {
                 }
                 reportScrollState(force: true)
             }
+            liveScrollViewport = scrollView?.contentView.bounds
             parent.onUserScrollBegan()
         }
 
@@ -1589,6 +1625,9 @@ extension NativeMessageTimelineCoordinator {
                 )
             )
             scrollView.reflectScrolledClipView(scrollView.contentView)
+            if liveScrollViewport != nil {
+                liveScrollViewport = scrollView.contentView.bounds
+            }
             positionViewportCanvas()
         }
 

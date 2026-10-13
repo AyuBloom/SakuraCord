@@ -280,7 +280,13 @@ private struct DirectMessageInboxRow: View {
                 userMenu: {
                     guard channel.kind == .directMessage, let recipient = channel.recipients.first else { return nil }
                     return UserContextMenu.make(for: recipient, context: .init(channelID: channel.id, ignoreLocation: .directMessage), model: model)
-                }
+                },
+                groupActions: model.offersGroupDirectMessageActions(channel)
+                    ? GroupDirectMessageMenuActions(
+                        edit: { model.presentGroupDirectMessageEditor(for: channel.id) },
+                        leave: { model.presentLeaveGroupDirectMessage(for: channel.id) }
+                    )
+                    : nil
             )
         }
     }

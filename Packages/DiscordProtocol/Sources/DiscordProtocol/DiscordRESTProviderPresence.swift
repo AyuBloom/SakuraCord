@@ -51,6 +51,12 @@ extension DiscordRESTProvider {
 
     func publishMembers(guildID: GuildID, members: [Member], groups: [GuildMemberListGroup]) {
         publishThreadMembers(guildID: guildID)
+        discardInaccessibleMemberLists(guildID: guildID)
+        if let selected = selectedMemberListID[guildID],
+           !isMemberListAccessible(guildID: guildID, memberListID: selected) {
+            continuation?.yield(.membersChanged(guildID: guildID, members: [], groups: []))
+            return
+        }
         continuation?.yield(.membersChanged(guildID: guildID, members: membersWithCurrentStatus(members), groups: groups))
     }
 

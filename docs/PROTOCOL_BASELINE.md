@@ -15,7 +15,7 @@ dated observations establish why a wire shape was chosen.
 | [Read state and Inbox](protocol/READ_STATE.md) | Acknowledgements, Undo, mentions, events, notifications. |
 | [Guilds and membership](protocol/GUILDS.md) | Invites, onboarding, channel customization, Guide, member discovery. |
 | [Friends and relationships](protocol/RELATIONSHIPS.md) | Relationship records, friend presence, requests, blocking, CAPTCHA replay. |
-| [Profiles and synchronized settings](protocol/SETTINGS.md) | Profile saves, widgets, status, protobuf updates, folders and favourites. |
+| [Profiles and synchronized settings](protocol/SETTINGS.md) | Profile saves, nicknames, group-DM edits and leaving, widgets, status, protobuf updates, folders and favourites. |
 | [Voice and streams](protocol/VOICE.md) | Calls, screen sharing, voice recovery, soundboard. |
 
 Architecture owns [component and persistence boundaries](ARCHITECTURE.md).
@@ -65,6 +65,7 @@ and each topic's contract tests before changing them.
 | Remote-auth ticket exchange | Original plus at most three bounded transient-status retries. |
 | User-completed login, server-join or relationship CAPTCHA | At most one challenged-request replay after human completion; a second challenge terminates the attempt. |
 | Full relationship read | At most once per Gateway connection, on the ordinary read budget. |
+| Selected member-list refresh | One deferred attempt after a known opcode-37 cooldown per invalidation; no background retry loop. See [member lists](protocol/GUILDS.md#guild-and-member-lifecycle). |
 
 A later explicit user action is distinct from automatic retry. Message retry
 retains its nonce; operation-specific exceptions must be documented beside their

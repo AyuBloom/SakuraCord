@@ -244,6 +244,7 @@ private struct ChatWorkspaceSupplementaryContent: View {
                         roleColorDisplay: model.accessibilitySettings.roleColorDisplay
                     ),
                     openProfile: model.expandProfile,
+                    sendProfileMessage: model.sendProfileMessage,
                     userMenu: { UserContextMenu.make(for: $0.user, context: userContext, model: model) },
                     userAccessibilityActions: { UserContextMenu.accessibilityActions(for: $0.user, context: userContext, model: model) },
                     updateViewport: model.updateMemberListViewport

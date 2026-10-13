@@ -527,7 +527,7 @@ extension AppModel {
         typingState.clear(userID: message.author.id, in: message.channelID)
         if let nonce = message.nonce {
             enrichInteractionResponse(&message)
-            composer.outbox.noteConfirmation(nonce: nonce)
+            composer.outbox.noteConfirmation(nonce: nonce, channelID: message.channelID)
             // Discord has the upload; the recording is no longer needed.
             if let outgoing = composer.outbox.draftsByNonce[nonce] { discardVoiceMessageFile(for: outgoing) }
             composer.outbox.draftsByNonce[nonce] = nil
@@ -678,8 +678,12 @@ extension AppModel {
     }
 
     func consumeReadStateChange(_ state: ChannelReadState) {
+        let heldBacklog = readState.holdsAutomaticAcknowledgement(state.channelID)
         if readState.applyRemote(state) {
             refreshUnreadPresentation()
+            if heldBacklog, !readState.holdsAutomaticAcknowledgement(state.channelID) {
+                acknowledgeIfEligible(channelID: state.channelID)
+            }
             if !readState.unread(channelID: state.channelID) {
                 cancelNativeNotifications(channelID: state.channelID)
             }

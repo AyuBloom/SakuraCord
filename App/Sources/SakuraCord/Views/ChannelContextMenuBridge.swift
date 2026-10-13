@@ -339,13 +339,18 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
             menu.addItem(notificationItem)
 
             menu.addItem(.separator())
-            addGroupItem(
-                "Leave Group", systemImage: "rectangle.portrait.and.arrow.right",
-                action: #selector(leaveGroupFromMenu), isDestructive: true, to: menu
-            )
             personItems.filter { $0.identifier?.rawValue == copyIdentifier }.forEach(menu.addItem)
             appendChannelCopyItems(to: menu)
-            UserContextMenu.append(personItems.filter { $0.identifier?.rawValue == destructiveIdentifier }, to: menu)
+            var destructiveItems = personItems.filter { $0.identifier?.rawValue == destructiveIdentifier }
+            if groupActions != nil {
+                destructiveItems.append(
+                    menuItem(
+                        "Leave Group", systemImage: "rectangle.portrait.and.arrow.right",
+                        action: #selector(leaveGroupFromMenu), isEnabled: allowsMutations, isDestructive: true
+                    )
+                )
+            }
+            UserContextMenu.append(destructiveItems, to: menu)
             return menu
         }
 
@@ -370,11 +375,11 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
 
         /// A group DM action in its own section, as Discord's group menu lists it.
         private func addGroupItem(
-            _ title: String, systemImage: String, action: Selector, isDestructive: Bool = false, to menu: NSMenu
+            _ title: String, systemImage: String, action: Selector, to menu: NSMenu
         ) {
             guard groupActions != nil else { return }
             menu.addItem(
-                menuItem(title, systemImage: systemImage, action: action, isEnabled: allowsMutations, isDestructive: isDestructive)
+                menuItem(title, systemImage: systemImage, action: action, isEnabled: allowsMutations)
             )
             menu.addItem(.separator())
         }

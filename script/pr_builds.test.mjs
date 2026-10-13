@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, createPublicKey, verify } from 'node:crypto';
 import { validateOrigin, signingKey, signedAppcast, mergeCatalog, distributionRelease, latestBuildsByPullRequest,
-  discardFailedDraftUploads, openPullRequestCatalog, SOURCE, DISTRIBUTION } from './pr_builds.mjs';
+  discardFailedDraftUploads, openPullRequestCatalog, resolvePullRequest, SOURCE, DISTRIBUTION } from './pr_builds.mjs';
 
 const head = 'a'.repeat(40), base = 'b'.repeat(40), merge = 'c'.repeat(40);
 function fixture(fork = false) {
@@ -47,6 +47,26 @@ test('fork builds publish automatically while retaining immutable commit provena
   // immutable head_sha still identifies the earlier build during recovery.
   const historical = fixture(true); historical[0].pull_requests[0].head.sha = base;
   assert.equal(validateOrigin(...historical).headSHA, head);
+});
+
+test('missing fork run summaries require the exact PR repository and current or historical commit', async () => {
+  const [run,, metadata] = fixture(true);
+  const pr = run.pull_requests[0];
+  run.pull_requests = [];
+  let commits = [];
+  const request = async (repo, endpoint) => {
+    assert.equal(repo, SOURCE);
+    if (endpoint === 'pulls/7') return pr;
+    assert.equal(endpoint, 'pulls/7/commits?per_page=100&page=1');
+    return commits;
+  };
+  assert.equal(await resolvePullRequest(run, metadata, request), pr);
+  pr.head.sha = base;
+  await assert.rejects(resolvePullRequest(run, metadata, request), /CI commit is not part/);
+  commits = [{ sha: head }];
+  assert.equal(await resolvePullRequest(run, metadata, request), pr);
+  pr.head.repo.id = 3;
+  await assert.rejects(resolvePullRequest(run, metadata, request), /PR repository provenance mismatch/);
 });
 
 test('Sparkle archive and feed signatures bind bytes and XML escapes untrusted PR titles', () => {

@@ -217,23 +217,6 @@ struct ChannelSidebarView: View {
             \.defaultMinListRowHeight,
             ChannelSidebarLayoutMetrics.minimumRowHeight
         )
-        .overlayPreferenceValue(SidebarUnreadRowAnchors.self) { anchors in
-            GeometryReader { geometry in
-                let width = InterfaceScale.metric(4)
-                let height = InterfaceScale.metric(8)
-                ForEach(anchors) { row in
-                    UnevenRoundedRectangle(
-                        bottomTrailingRadius: height / 2,
-                        topTrailingRadius: height / 2
-                    )
-                    .fill(Color(row.color))
-                    .frame(width: width, height: height)
-                    .position(x: width / 2, y: geometry[row.anchor].midY)
-                }
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
         .clipShape(SidebarContentClip(
             cornerRadius: ChatChromeMetrics.sidebarContentCornerRadius,
             showsTopEdge: !isFullScreen
@@ -429,6 +412,23 @@ private struct GuildChannelList: View, Equatable {
         .environment(\.defaultMinListRowHeight, ChannelSidebarLayoutMetrics.minimumRowHeight)
         .scrollContentBackground(.hidden)
         .scrollClipDisabled()
+        .overlayPreferenceValue(SidebarUnreadRowAnchors.self) { anchors in
+            GeometryReader { geometry in
+                let width = InterfaceScale.metric(4)
+                let height = InterfaceScale.metric(8)
+                ForEach(anchors) { row in
+                    UnevenRoundedRectangle(
+                        bottomTrailingRadius: height / 2,
+                        topTrailingRadius: height / 2
+                    )
+                    .fill(Color(row.color))
+                    .frame(width: width, height: height)
+                    .position(x: width / 2, y: geometry[row.anchor].midY)
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .padding(.top, ChatChromeMetrics.channelListTopPadding)
         .clipped()
         .background {

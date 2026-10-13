@@ -354,7 +354,11 @@ published build.
 The separate `Publish PR build` workflow runs only trusted default-branch
 control code on an ephemeral hosted runner. It binds the artifact digest to the
 canonical CI workflow, successful run and attempt, PR number, head SHA, base SHA,
-and built merge SHA. Both test jobs must have passed in that attempt. It reads
+and built merge SHA. All build/test jobs must have passed in that attempt. If GitHub refreshed the
+merge ref after creating the PR event, its actual base must descend from the
+recorded base and remain an ancestor of the canonical PR target. The recorded
+PR head must still match exactly. Incomplete GitHub step records are retried
+for up to ten minutes; failed or skipped required steps are rejected immediately. It reads
 ZIP entries, metadata, and Mach-O UUIDs without executing contributor code,
 rejects unsafe archive paths, checks matching dSYMs, and requires the build
 switching protocol and secure update configuration. A separate ephemeral macOS

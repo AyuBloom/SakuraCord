@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, createPublicKey, verify } from 'node:crypto';
 import { validateOrigin, signingKey, signedAppcast, mergeCatalog, distributionRelease, latestBuildsByPullRequest,
-  discardFailedDraftUploads, openPullRequestCatalog, resolvePullRequest, SOURCE, DISTRIBUTION } from './pr_builds.mjs';
+  discardFailedDraftUploads, openPullRequestCatalog, resolvePullRequest, validateBuiltCommit, verifyCIJobs, SOURCE, DISTRIBUTION } from './pr_builds.mjs';
 
 const head = 'a'.repeat(40), base = 'b'.repeat(40), merge = 'c'.repeat(40);
 function fixture(fork = false) {
@@ -67,6 +67,62 @@ test('missing fork run summaries require the exact PR repository and current or 
   assert.equal(await resolvePullRequest(run, metadata, request), pr);
   pr.head.repo.id = 3;
   await assert.rejects(resolvePullRequest(run, metadata, request), /PR repository provenance mismatch/);
+});
+
+test('refreshed PR merges require the exact head and forward ancestry on the canonical target', async () => {
+  const [, , context] = fixture();
+  const newerBase = 'd'.repeat(40), target = 'e'.repeat(40);
+  const pr = { base: { sha: base, ref: 'nightly', repo: { full_name: SOURCE } } };
+  const commit = { sha: merge, parents: [{ sha: newerBase }, { sha: head }] };
+  let status = 'ahead';
+  const seen = [];
+  const request = async (repo, endpoint) => {
+    assert.equal(repo, SOURCE);
+    seen.push(endpoint);
+    if (endpoint === `commits/${merge}`) return commit;
+    if (endpoint === 'branches/nightly') return { commit: { sha: target } };
+    assert.ok([`compare/${base}...${newerBase}`, `compare/${newerBase}...${target}`].includes(endpoint));
+    return { status, merge_base_commit: { sha: endpoint.slice(8).split('...')[0] } };
+  };
+  assert.equal(await validateBuiltCommit(context, pr, request), commit);
+  assert.equal(seen.length, 4);
+  status = 'diverged';
+  await assert.rejects(validateBuiltCommit(context, pr, request), /not a forward update/);
+  status = 'ahead';
+  pr.base.repo.full_name = 'attacker/repo';
+  await assert.rejects(validateBuiltCommit(context, pr, request), /Invalid PR base repository/);
+  pr.base.repo.full_name = SOURCE;
+  commit.parents[1].sha = base;
+  await assert.rejects(validateBuiltCommit(context, pr, request), /recorded PR head/);
+  commit.parents = [{ sha: base }, { sha: head }];
+  assert.equal(await validateBuiltCommit(context, pr, request), commit);
+});
+
+test('CI verification waits for delayed step records but rejects failed, skipped and foreign jobs', async () => {
+  const steps = ['Build and test', 'Package downloadable pull request app and matching symbols', 'Upload pull request build'];
+  const jobs = ['packages', 'app', 'protocol', 'media'].map(suite => ({
+    name: `build (${suite})`, run_id: 99, run_attempt: 2, conclusion: 'success',
+    steps: (suite === 'app' ? steps : steps.slice(0, 1)).map(name => ({ name, conclusion: 'success' })),
+  }));
+  let reads = 0, waits = 0;
+  const request = async (_repo, endpoint) => {
+    assert.equal(endpoint, 'actions/runs/99/attempts/2/jobs?per_page=100&page=1');
+    reads++;
+    return { jobs: reads === 1 ? [] : reads === 2 ? jobs.map(job => ({ ...job, steps: [] })) : jobs };
+  };
+  await verifyCIJobs(99, 2, request, async () => { waits++; });
+  assert.equal(waits, 2);
+  for (const conclusion of ['failure', 'skipped', 'cancelled']) {
+    jobs[2].steps[0].conclusion = conclusion;
+    await assert.rejects(verifyCIJobs(99, 2, request), /CI step did not pass/);
+  }
+  jobs[2].steps[0].conclusion = 'success';
+  jobs[2].run_attempt = 1;
+  await assert.rejects(verifyCIJobs(99, 2, request), /run\/attempt mismatch/);
+  jobs[2].run_attempt = 2;
+  waits = 0;
+  await assert.rejects(verifyCIJobs(99, 2, async () => ({ jobs: [] }), async () => { waits++; }), /still incomplete/);
+  assert.equal(waits, 19);
 });
 
 test('Sparkle archive and feed signatures bind bytes and XML escapes untrusted PR titles', () => {

@@ -26,16 +26,30 @@ enum ComposerAutocompleteCommand {
 final class ComposerDropInteractionState {
     private(set) var destination: MessageComposerDestination?
     private(set) var isInstant = false
+    /// Last time any file drop target saw the drag, read by the root view's
+    /// watchdog to spot sessions that ended without an exit callback.
+    @ObservationIgnored private(set) var lastDragActivity = ContinuousClock.now
 
     var isTargeted: Bool { destination != nil }
+
+    func noteDragActivity() {
+        lastDragActivity = .now
+    }
 
     func update(
         isTargeted: Bool,
         destination: MessageComposerDestination,
         isInstant: Bool
     ) {
+        if isTargeted { noteDragActivity() }
         self.destination = isTargeted ? destination : nil
         self.isInstant = isTargeted && isInstant
+    }
+
+    func reset() {
+        // `clear(destination:)` can't cover this: a drag that ends without exiting never names its destination.
+        destination = nil
+        isInstant = false
     }
 
     func clear(destination: MessageComposerDestination) {
@@ -69,7 +83,7 @@ nonisolated enum ComposerLatestMessageEditingPolicy {
     ) -> MessageID? {
         guard let currentUserID else { return nil }
         return messages.last(where: {
-            $0.author.id == currentUserID && !$0.hasPoll
+            $0.author.id == currentUserID && !$0.hasPoll && !$0.flags.contains(.voiceMessage)
         })?.id
     }
 }
@@ -866,6 +880,10 @@ final class ComposerNSTextView: ComposerFocusReportingTextView {
         updateAttachmentDropTarget(sender)
     }
 
+    override func wantsPeriodicDraggingUpdates() -> Bool {
+        true
+    }
+
     override func draggingExited(_ sender: (any NSDraggingInfo)?) {
         onDropTargetChanged?(false, false)
     }
@@ -883,6 +901,10 @@ final class ComposerNSTextView: ComposerFocusReportingTextView {
     }
 
     override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
+        onDropTargetChanged?(false, false)
+    }
+
+    override func draggingEnded(_ sender: any NSDraggingInfo) {
         onDropTargetChanged?(false, false)
     }
 

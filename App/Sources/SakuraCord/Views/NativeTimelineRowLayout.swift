@@ -157,8 +157,18 @@ struct NativeTimelineRowLayout {
     var activityIndicators: [ActivityIndicator] = []
     var replyFrame: CGRect?
     var replyContentFrame: CGRect?
+    /// A bubble's reply or command elbow: a stem rising from the bubble's top
+    /// edge that turns toward the referenced content at `cornerY`.
+    struct ReferenceConnector {
+        let stemX: CGFloat
+        let fromY: CGFloat
+        let cornerY: CGFloat
+        let toX: CGFloat
+    }
+    var bubbleReferenceConnector: ReferenceConnector?
     var commandInvocationRegion: CommandInvocationRegion?
     var systemIconFrame: CGRect?
+    var suppressedHeader: NativeTimelineSuppressedHeaderLayout?
     var contentFrame: CGRect?
     var attributedContent: NSAttributedString?
     var contentFramesetter: CTFramesetter?
@@ -167,6 +177,7 @@ struct NativeTimelineRowLayout {
     var forwardedSourceRegion: ForwardedSourceRegion?
     var linkedImageRegions: [LinkedImageRegion] = []
     var attachmentRegions: [AttachmentRegion] = []
+    var voiceMessageRegion: NativeTimelineVoiceMessageRegion?
     var embedFrames: [CGRect] = []
     var embedRegions: [EmbedRegion] = []
     var sakuraCordDeepLinkRegions: [SakuraCordDeepLinkRegion] = []
@@ -192,6 +203,22 @@ struct NativeTimelineRowLayout {
     ) -> Self {
         let width = max(InterfaceScale.metric(220), proposedWidth)
         switch item {
+        case let .suppressedMessages(group):
+            var result = Self(height: NativeTimelineSuppressedHeaderLayout.contentHeight)
+            var offset: CGFloat = 0
+            if group.day != nil {
+                result.daySeparatorFrame = CGRect(x: InterfaceScale.metric(12), y: offset,
+                                                  width: width - InterfaceScale.metric(24), height: NativeTimelineDateSeparatorMetrics.rowHeight)
+                offset += NativeTimelineDateSeparatorMetrics.rowHeight
+            }
+            if group.isUnreadBoundary {
+                result.unreadSeparatorFrame = CGRect(x: InterfaceScale.metric(12), y: offset,
+                                                     width: width - InterfaceScale.metric(24), height: NativeTimelineUnreadSeparatorMetrics.rowHeight)
+                offset += NativeTimelineUnreadSeparatorMetrics.rowHeight
+            }
+            result.height += offset
+            result.suppressedHeader = .make(group: group, width: width, originY: offset)
+            return result
         case .inboxGroup:
             return Self(height: InboxRowMetrics.headerHeight)
         case .inboxEvent:

@@ -8,9 +8,11 @@ private final class NativeTimelineInputShieldScrollView: NSScrollView {
     let inputPerformanceProbe = ScrollInputPerformanceProbe(
         surface: .timeline
     )
+    var onScrollWheel: (() -> Void)?
 
     override func scrollWheel(with event: NSEvent) {
         guard WindowModalCoordinator.allowsInput(for: self) else { return }
+        onScrollWheel?()
         super.scrollWheel(with: event)
     }
 }
@@ -132,6 +134,7 @@ struct NativeMessageTimelineView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        coordinator.canvas?.clearDisclosure(redraws: false)
         (scrollView as? NativeTimelineInputShieldScrollView)?
             .inputPerformanceProbe.invalidate()
         coordinator.stopObserving()
@@ -174,6 +177,7 @@ final class NativeMessageTimelineCoordinator: NSObject {
             let width: CGFloat
             let widthChanged: Bool
             let restoreAnchor: VisibleAnchor?
+            let disclosureAnchor: NativeTimelineRowDisclosure.ScrollAnchor?
         }
 
         struct TimelineReloadMeasurement {
@@ -299,6 +303,7 @@ final class NativeMessageTimelineCoordinator: NSObject {
         var layoutPreparationTask: Task<Void, Never>?
         var layoutPreparation: LayoutPreparation?
         var scrollIdleTask: Task<Void, Never>?
+        var activeGlide: NativeTimelineGlideScroll?
         var lastScrollActivityUptime = 0.0
         var widthRelayoutTask: Task<Void, Never>?
         var pendingLayoutWidth: CGFloat?
@@ -337,6 +342,8 @@ extension NativeMessageTimelineCoordinator {
 
             let scrollView = NativeTimelineInputShieldScrollView()
             scrollView.inputPerformanceProbe.install(on: scrollView)
+            // The reader's own scrolling always wins over a jump's glide.
+            scrollView.onScrollWheel = { [weak self] in self?.cancelGlide() }
             scrollView.documentView = documentView
             scrollView.drawsBackground = false
             scrollView.borderType = .noBorder
@@ -526,6 +533,7 @@ extension NativeMessageTimelineCoordinator {
             let width = pendingLayoutWidth == nil ? measuredWidth : max(220, layoutWidth)
             let widthChanged = abs(width - layoutWidth) >= 1
             let anchor = visibleAnchor()
+            let disclosureAnchor = resolvedDisclosureAnchor(canvas: canvas, scrollView: scrollView)
             resetTimelineMutationState(
                 widthChanged: widthChanged,
                 presentationChanged: presentationChanged
@@ -544,7 +552,8 @@ extension NativeMessageTimelineCoordinator {
                 acceptsNewRows: acceptsNewRows,
                 width: width,
                 widthChanged: widthChanged,
-                restoreAnchor: anchor
+                restoreAnchor: anchor,
+                disclosureAnchor: disclosureAnchor
             )
             return (preparation, measurement)
         }
@@ -624,6 +633,18 @@ extension NativeMessageTimelineCoordinator {
                 || preparation.oldItemCount == 0,
                let highlightedMessageID = parent.highlightedMessageID {
                 canvas.startMessageJumpHighlight(highlightedMessageID)
+            }
+            // Collapsing changes the item-to-message cardinality. Reconcile the
+            // affected conversation as a projection while retaining source rows;
+            // unchanged rows keep their layouts, so revealing a run lays out only it.
+            if !preparation.hasUnpublishedRows,
+               items.contains(where: { if case .suppressedMessages = $0 { true } else { false } })
+                || preparation.newRows.contains(where: { parent.model.isMessageSuppressed($0.message)
+                    || $0.replyPreview.map { parent.model.userSuppressionReason($0.author.id) != nil } == true }) {
+                layoutWidth = preparation.width
+                rebuildAll(from: parent, rows: preparation.newRows, width: preparation.width,
+                           force: preparation.widthChanged || preparation.presentationChanged)
+                return
             }
             if preparation.widthChanged || preparation.presentationChanged {
                 layoutWidth = preparation.width
@@ -808,7 +829,13 @@ extension NativeMessageTimelineCoordinator {
             updateInsets()
             updateHistorySkeletonPresentation()
             if let collapseAnchor { restore(collapseAnchor) }
-            if !parent.conversation.isInbox, preparation.wasNearBottom,
+            if didMutateItems, let disclosureAnchor = preparation.disclosureAnchor {
+                // A blocked or ignored run opening or closing keeps its header in place where the
+                // document allows; its motion absorbs whatever the scroll position cannot.
+                if let index = canvas.disclosureHeaderIndex(for: disclosureAnchor.key) {
+                    restoreRow(at: index, offsetFromViewportTop: disclosureAnchor.offsetFromViewportTop)
+                }
+            } else if !parent.conversation.isInbox, preparation.wasNearBottom,
                preparation.bottomInsetChanged || (didMutateItems && !didPrependItems) {
                 scroll(toDocumentY: .greatestFiniteMagnitude, scrollView: scrollView)
             } else if didMutateItems,
@@ -915,6 +942,7 @@ extension NativeMessageTimelineCoordinator {
         }
 
         func stopObserving() {
+            cancelGlide()
             cancelLayoutPreparation()
             pendingModelRowsUpdateTask?.cancel()
             pendingModelRowsUpdateTask = nil
@@ -1050,11 +1078,28 @@ extension NativeMessageTimelineCoordinator {
                 || layouts.count != newItems.count
                 || messageIDs.count != rows.count
             {
+                // Without a width or presentation change, an unchanged item's
+                // layout is still current wherever the item moved. Rows
+                // previewed at a transient width are laid out again.
+                var reusableLayouts: [NativeMessageTimelineItem.Identifier: Int] = [:]
+                if !force, items.count == layouts.count, previewedRowIdentifiers.isEmpty {
+                    reusableLayouts.reserveCapacity(items.count)
+                    for (index, item) in items.enumerated() { reusableLayouts[item.identifier] = index }
+                }
+                let oldItems = items
+                let oldLayouts = layouts
                 items = newItems
                 messageIDs = rows.map(\.id)
-                layouts = items.map {
-                    layoutUsingRecentConversationCache(
-                        for: $0,
+                layouts = items.map { item in
+                    if let index = reusableLayouts[item.identifier],
+                       oldItems[index] == item,
+                       oldLayouts[index].fontRevision == ProfileNameFontCache.revision,
+                       oldLayouts[index].matchesAuthorPrimaryGuild(for: item, model: parent.model) {
+                        // Retained live rows are not reads from a layout cache.
+                        return oldLayouts[index]
+                    }
+                    return layoutUsingRecentConversationCache(
+                        for: item,
                         width: width,
                         presentationRevision: parent.presentationRevision
                     )

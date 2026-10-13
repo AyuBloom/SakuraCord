@@ -39,12 +39,12 @@ struct NativeTimelineMessageDrawInput {
 
 extension NativeTimelineRowPainter {
     static func drawMessage(_ input: NativeTimelineMessageDrawInput) {
-        drawMessageBubbleTint(input)
         drawMessageSearchContext(input)
         drawMessageSeparators(input)
         drawMessageIdentity(input)
         drawMessageReplyAndCommand(input)
         if input.hidesMessageContent { return }
+        drawMessageBubbleTint(input)
         drawForwardedHeaderAndSystemIcon(input)
         drawMessageContent(input)
         drawMessageTranslation(input)
@@ -52,6 +52,7 @@ extension NativeTimelineRowPainter {
         drawPollResult(input)
         drawMessageLinkedImages(input)
         drawMessageAttachments(input)
+        drawMessageVoiceMessage(input)
         drawMessageEmbeds(input)
         drawMessageComponentsAndStickers(input)
         drawMessageFooter(input)
@@ -225,23 +226,24 @@ extension NativeTimelineRowPainter {
             if let preview = input.row.replyPreview {
                 replyContext(
                     preview: preview,
-                    message: input.row.message,
                     frame: frame,
                     contentFrame: contentFrame,
-                    bubbleRegion: input.layout.bubbleRegion,
+                    bubbleConnector: input.layout.bubbleReferenceConnector,
+                    message: input.row.message,
                     model: input.model
                 )
             } else {
                 unavailableReplyContext(
                     frame: frame,
                     contentFrame: contentFrame,
-                    bubbleRegion: input.layout.bubbleRegion
+                    bubbleConnector: input.layout.bubbleReferenceConnector
                 )
             }
         }
         if let region = input.layout.commandInvocationRegion {
             commandInvocation(
                 region,
+                bubbleConnector: input.layout.bubbleReferenceConnector,
                 message: input.row.message,
                 cosmeticPolicy: input.model?.cosmeticPolicy ?? .init()
             )
@@ -387,6 +389,25 @@ extension NativeTimelineRowPainter {
     }
 
     static var attachmentCornerRadius: CGFloat { InterfaceScale.metric(8) }
+
+    private static func drawMessageVoiceMessage(_ input: NativeTimelineMessageDrawInput) {
+        guard let region = input.layout.voiceMessageRegion else { return }
+        let playback = input.model?.voiceMessagePlayback
+        let opacity = CGFloat(MessageOutboxPresentation.mediaOpacity(for: input.row.message.outboxState))
+        let context = NSGraphicsContext.current?.cgContext
+        context?.saveGState()
+        defer { context?.restoreGState() }
+        if opacity < 1 {
+            context?.setAlpha(opacity)
+            context?.beginTransparencyLayer(auxiliaryInfo: nil)
+        }
+        NativeTimelineVoiceMessagePainter.drawIdle(
+            region,
+            speedLabel: playback?.speedLabel ?? "1×",
+            isActive: playback?.isActive(region.playbackID) == true
+        )
+        if opacity < 1 { context?.endTransparencyLayer() }
+    }
 
     private static func drawMessageAttachments(_ input: NativeTimelineMessageDrawInput) {
         let layout = input.layout
@@ -856,45 +877,49 @@ extension NativeTimelineRowPainter {
 
     static func replyContext(
         preview: MessageReplyPreview,
-        message: Message,
         frame: CGRect,
         contentFrame: CGRect,
-        bubbleRegion: NativeTimelineBubbleRegion?,
+        bubbleConnector: NativeTimelineRowLayout.ReferenceConnector?,
+        message: Message,
         model: AppModel?
     ) {
-        // Outgoing bubbles are right-aligned, so the full-row reply frame
-        // would stretch the connector across empty space and starve the
-        // summary. Anchor the reply to the bubble instead.
-        let isOutgoingBubble = bubbleRegion?.isOutgoing == true
-        let effectiveFrame: CGRect = if isOutgoingBubble,
-            let bubbleRegion
-        {
-            CGRect(
-                x: bubbleRegion.frame.minX,
-                y: frame.minY,
-                width: max(
-                    0,
-                    frame.maxX - bubbleRegion.frame.minX
-                ),
-                height: frame.height
-            )
-        } else {
-            frame
-        }
-        replyConnector(in: replyConnectorFrame(
-            frame: frame,
-            contentFrame: contentFrame,
-            bubbleRegion: bubbleRegion
-        ))
-
+        referenceConnector(bubbleConnector, frame: frame, contentFrame: contentFrame)
+        // A bubble's preview is laid out at its natural width.
         replyPreviewLine(
             preview,
-            frame: effectiveFrame,
+            frame: bubbleConnector == nil ? frame : contentFrame,
             avatarFrame: NativeTimelineAvatarPresentation.replyAvatarFrame(in: contentFrame),
-            trailingInset: isOutgoingBubble ? 0 : 48,
+            trailingInset: bubbleConnector == nil ? 48 : 0,
+            reservesSummary: bubbleConnector != nil,
             message: message,
             model: model
         )
+    }
+
+    private static func referenceConnector(
+        _ bubbleConnector: NativeTimelineRowLayout.ReferenceConnector?,
+        frame: CGRect,
+        contentFrame: CGRect
+    ) {
+        if let bubbleConnector {
+            elbowConnector(
+                stemX: bubbleConnector.stemX,
+                fromY: bubbleConnector.fromY,
+                cornerY: bubbleConnector.cornerY,
+                toX: bubbleConnector.toX
+            )
+            return
+        }
+        replyConnector(in: CGRect(
+            x: frame.minX,
+            y: frame.minY,
+            width: max(
+                0,
+                contentFrame.minX - frame.minX
+                    - NativeTimelineReplyMetrics.horizontalSpacing
+            ),
+            height: InterfaceScale.metric(20)
+        ))
     }
 
     /// One line of a referenced message: avatar, author, and a plain summary.
@@ -903,39 +928,46 @@ extension NativeTimelineRowPainter {
         frame: CGRect,
         avatarFrame: CGRect,
         trailingInset: CGFloat,
+        reservesSummary: Bool = false,
+        showsReplyMention: Bool = true,
         message: Message,
         model: AppModel?
     ) {
+        let replySummary = NativeTimelineReplyMetrics.summary(for: preview, in: message, model: model)
+        let summary = replySummary.text
+        let mediaSymbol = NativeTimelineReplyMetrics.mediaSymbol(for: preview)
+        let mediaReserve = NativeTimelineReplyMetrics.mediaSymbolReserve
+        // A preview narrower than its natural width keeps part of the line
+        // for the summary and media symbol instead of giving it all to a
+        // long author name.
+        let summaryReserve = reservesSummary
+            ? min(
+                frame.width * 0.45,
+                NativeTimelineReplyMetrics.horizontalSpacing
+                    + NativeTimelineReplyMetrics.textWidth(summary, font: NativeTimelineReplyMetrics.summaryFont)
+                    + (mediaSymbol == nil ? 0 : mediaReserve)
+            )
+            : 0
         let authorFrame = replyAuthor(
             preview: preview,
-            frame: frame,
+            frame: CGRect(
+                x: frame.minX,
+                y: frame.minY,
+                width: max(0, frame.width - summaryReserve),
+                height: frame.height
+            ),
             avatarFrame: avatarFrame,
+            showsReplyMention: showsReplyMention,
             message: message,
             model: model
         )
-        let replySummary = if let model {
-            MessageReplySummary.summary(
-                content: preview.content,
-                mentionLabel: MessageMentionResolver(model: model, message: message).label
-            )
-        } else {
-            MessageReplySummary.summary(content: preview.content)
-        }
-        let summary = replySummary.text
-        let mediaSymbol: String? = switch preview.mediaKind {
-        case .image, .animatedImage: "photo.fill"
-        case .video: "film.fill"
-        case .audio: "waveform"
-        case .file: "paperclip"
-        case nil: nil
-        }
         let summaryX = authorFrame.maxX + NativeTimelineReplyMetrics.horizontalSpacing
         let summaryWidth = max(
             0,
             min(
                 NativeTimelineReplyMetrics.textWidth(summary, font: NativeTimelineReplyMetrics.summaryFont),
                 // A media symbol takes 24 points, from the trailing inset when there is one.
-                frame.maxX - summaryX - (mediaSymbol == nil ? trailingInset : max(InterfaceScale.metric(24), trailingInset - InterfaceScale.metric(24)))
+                frame.maxX - summaryX - (mediaSymbol == nil ? trailingInset : max(mediaReserve, trailingInset - mediaReserve))
             )
         )
         text(
@@ -950,64 +982,35 @@ extension NativeTimelineRowPainter {
             color: .secondaryLabelColor,
             concealedSpoilerRanges: replySummary.spoilerRanges
         )
-        if let mediaSymbol {
+        let mediaSymbolFrame = CGRect(
+            x: summaryX + summaryWidth + InterfaceScale.metric(4), y: frame.minY + 1,
+            width: InterfaceScale.metric(18), height: InterfaceScale.metric(18)
+        )
+        if let mediaSymbol, !reservesSummary || mediaSymbolFrame.maxX <= frame.maxX + 1 {
             systemSymbol(
                 mediaSymbol,
-                in: CGRect(x: summaryX + summaryWidth + InterfaceScale.metric(4), y: frame.minY + 1, width: InterfaceScale.metric(18), height: InterfaceScale.metric(18)),
+                in: mediaSymbolFrame,
                 color: .secondaryLabelColor,
                 inset: InterfaceScale.metric(2)
             )
         }
     }
 
-    /// Where the reply elbow sits. Incoming rows run it across the avatar
-    /// gutter. Outgoing bubbles put the content inside the bubble, so the
-    /// gap to the bubble edge is too narrow for the elbow; start it far
-    /// enough left of the content that the stem and its turn stay visible.
-    private static func replyConnectorFrame(
-        frame: CGRect,
-        contentFrame: CGRect,
-        bubbleRegion: NativeTimelineBubbleRegion?
-    ) -> CGRect {
-        let spacing = NativeTimelineReplyMetrics.horizontalSpacing
-        let minX: CGFloat = if let bubbleRegion, bubbleRegion.isOutgoing {
-            // The stem is drawn 19 points in; leave room for it to turn.
-            min(bubbleRegion.frame.minX, contentFrame.minX - spacing - InterfaceScale.metric(28))
-        } else {
-            frame.minX
-        }
-        return CGRect(
-            x: minX,
-            y: frame.minY,
-            width: max(0, contentFrame.minX - minX - spacing),
-            height: InterfaceScale.metric(20)
-        )
-    }
-
     static func unavailableReplyContext(
         frame: CGRect,
         contentFrame: CGRect,
-        bubbleRegion: NativeTimelineBubbleRegion?
+        bubbleConnector: NativeTimelineRowLayout.ReferenceConnector?
     ) {
-        replyConnector(in: replyConnectorFrame(
-            frame: frame,
-            contentFrame: contentFrame,
-            bubbleRegion: bubbleRegion
-        ))
-        let baseFont = NativeTimelineReplyMetrics.summaryFont
-        let italicFont = NSFont(
-            descriptor: baseFont.fontDescriptor.withSymbolicTraits(.italic),
-            size: baseFont.pointSize
-        ) ?? baseFont
+        referenceConnector(bubbleConnector, frame: frame, contentFrame: contentFrame)
         text(
-            "Message could not be loaded",
+            NativeTimelineReplyMetrics.unavailableText,
             in: CGRect(
                 x: contentFrame.minX,
                 y: frame.minY,
                 width: contentFrame.width,
                 height: InterfaceScale.metric(20)
             ),
-            font: italicFont,
+            font: NativeTimelineReplyMetrics.unavailableFont,
             color: .secondaryLabelColor
         )
     }
@@ -1016,6 +1019,7 @@ extension NativeTimelineRowPainter {
         preview: MessageReplyPreview,
         frame: CGRect,
         avatarFrame: CGRect,
+        showsReplyMention: Bool,
         message: Message,
         model: AppModel?
     ) -> CGRect {
@@ -1027,10 +1031,9 @@ extension NativeTimelineRowPainter {
             in: avatarFrame
         )
         let font = ProfileNameFontLoader.shared.resolvedFont(for: author, fallback: NativeTimelineReplyMetrics.authorFont)
-        // Discord prefixes the replied-to name with @ when the reply pinged them.
-        let displayName =
-            message.mentionedUsers.contains(where: { $0.id == preview.author.id })
-            ? "@\(author.displayName)" : author.displayName
+        let displayName = showsReplyMention
+            ? NativeTimelineReplyMetrics.authorDisplayName(author, in: message)
+            : author.displayName
         let width = NativeTimelineReplyMetrics.textWidth(
             displayName,
             font: font
@@ -1076,19 +1079,20 @@ extension NativeTimelineRowPainter {
         )
     }
 
-    /// A rounded elbow: a vertical stem from `fromY` that turns right at
-    /// `cornerY` and runs to `toX`. The stem may run up or down.
+    /// A rounded elbow: a vertical stem from `fromY` that turns toward `toX`
+    /// at `cornerY`. The stem may run up or down, and the arm left or right.
     static func elbowConnector(stemX: CGFloat, fromY: CGFloat, cornerY: CGFloat, toX: CGFloat) {
         let direction: CGFloat = fromY > cornerY ? 1 : -1
+        let horizontalDirection: CGFloat = toX >= stemX ? 1 : -1
         let connector = NSBezierPath()
         connector.lineWidth = 1.25
         connector.lineCapStyle = .round
         connector.move(to: CGPoint(x: stemX, y: fromY))
         connector.line(to: CGPoint(x: stemX, y: cornerY + 4 * direction))
         connector.curve(
-            to: CGPoint(x: stemX + InterfaceScale.metric(4), y: cornerY),
+            to: CGPoint(x: stemX + InterfaceScale.metric(4) * horizontalDirection, y: cornerY),
             controlPoint1: CGPoint(x: stemX, y: cornerY + 1.8 * direction),
-            controlPoint2: CGPoint(x: stemX + InterfaceScale.metric(2.2), y: cornerY)
+            controlPoint2: CGPoint(x: stemX + InterfaceScale.metric(2.2) * horizontalDirection, y: cornerY)
         )
         connector.line(to: CGPoint(x: toX, y: cornerY))
         NSColor.tertiaryLabelColor.setStroke()
@@ -1097,10 +1101,20 @@ extension NativeTimelineRowPainter {
 
     static func commandInvocation(
         _ region: NativeTimelineRowLayout.CommandInvocationRegion,
+        bubbleConnector: NativeTimelineRowLayout.ReferenceConnector?,
         message: Message,
         cosmeticPolicy: ProfileCosmeticPolicy
     ) {
-        replyConnector(in: region.connectorFrame)
+        if let bubbleConnector {
+            elbowConnector(
+                stemX: bubbleConnector.stemX,
+                fromY: bubbleConnector.fromY,
+                cornerY: bubbleConnector.cornerY,
+                toX: bubbleConnector.toX
+            )
+        } else {
+            replyConnector(in: region.connectorFrame)
+        }
         let user = message.interactionMetadata?.user.map(cosmeticPolicy.user)
         if let frame = region.avatarFrame, let user {
             avatar(

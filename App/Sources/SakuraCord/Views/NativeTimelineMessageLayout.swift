@@ -60,10 +60,54 @@ extension NativeTimelineRowLayout {
             )
         }
 
+        /// Replaces the estimated bubble width once the real content extent
+        /// is known.
+        private var fittedBubbleContentWidth: CGFloat?
+
         mutating func make() -> NativeTimelineRowLayout {
+            let unmeasured = self
+            let layout = assemble()
+            // Media bubbles start from an estimate. When the media renders
+            // narrower, lay the row out again so the bubble hugs it.
+            guard let fittedWidth = mediaBubbleContentWidth(of: layout) else { return layout }
+            self = unmeasured
+            fittedBubbleContentWidth = fittedWidth
+            return assemble()
+        }
+
+        private func mediaBubbleContentWidth(of layout: NativeTimelineRowLayout) -> CGFloat? {
+            guard usesBubbles, layout.bubbleRegion != nil,
+                  layout.pollLayout == nil, layout.pollResultFrame == nil,
+                  layout.translationRegion == nil, layout.threadFrame == nil,
+                  layout.forwardedSourceRegion == nil, layout.forwardedHeaderFrame == nil,
+                  layout.componentLayouts.isEmpty, layout.inviteRegions.isEmpty,
+                  layout.sakuraCordDeepLinkRegions.isEmpty,
+                  layout.embedRegions.allSatisfy({ $0.kind == .bareMedia })
+            else { return nil }
+            var extent = InterfaceScale.metric(28)
+            if let attributedContent = layout.attributedContent, let framesetter = layout.contentFramesetter {
+                extent = max(extent, NativeTimelineBubbleLayout.measuredTextWidth(
+                    framesetter,
+                    length: attributedContent.length,
+                    maximumWidth: contentWidth
+                ))
+            }
+            let mediaFrames = layout.linkedImageRegions.map(\.frame)
+                + layout.attachmentRegions.map(\.frame)
+                + [layout.voiceMessageRegion?.frame].compactMap { $0 }
+                + layout.embedFrames
+                + layout.stickerFrames
+            for frame in mediaFrames {
+                extent = max(extent, ceil(frame.maxX - contentX))
+            }
+            return extent < contentWidth - 1 ? extent : nil
+        }
+
+        private mutating func assemble() -> NativeTimelineRowLayout {
             prepareColumns()
             appendPrefix()
             appendIdentity()
+            appendBubbleReference()
             appendTextAndPoll()
             appendLinkedImages()
             appendAttachments()
@@ -83,7 +127,7 @@ extension NativeTimelineRowLayout {
             horizontalInset = searchContext == nil
                 ? MessageRowLayoutMetrics.horizontalInset
                 : 22
-            let columnGap = MessageRowLayoutMetrics.avatarColumnGap + timestampGutterWidth - avatarWidth
+            let columnGap = MessageRowLayoutMetrics.columnGap(timestampGutterWidth: metrics.timestampGutterWidth)
             if isOutgoingBubble {
                 contentPresentation = NativeTimelineTextPresentation.outgoingBubble(contentPresentation)
             }
@@ -97,7 +141,7 @@ extension NativeTimelineRowLayout {
             translationPresentation = NativeTimelineTranslationPresentation.make(
                 row: row, model: model, isOutgoingBubble: isOutgoingBubble
             )
-            let preferredBubbleContentWidth =
+            let preferredBubbleContentWidth = fittedBubbleContentWidth ??
                 NativeTimelineBubbleLayout.preferredContentWidth(
                     for: message,
                     row: row,
@@ -161,7 +205,8 @@ extension NativeTimelineRowLayout {
                 + (searchContext == nil ? externalTopSeparation : 4)
             verticalOffset = highlightMinY + highlightInsets.top
 
-            if row.replyMessageID != nil, message.type != .pollResult {
+            // Bubbles place the reference after the author header instead.
+            if !usesBubbleReference, row.replyMessageID != nil, message.type != .pollResult {
                 let frame = CGRect(
                     x: horizontalInset,
                     y: verticalOffset,
@@ -178,7 +223,7 @@ extension NativeTimelineRowLayout {
                 verticalOffset += InterfaceScale.metric(20)
             }
 
-            if message.type == .chatInputCommand {
+            if !usesBubbleReference, message.type == .chatInputCommand {
                 result.commandInvocationRegion = NativeTimelineRowLayout.commandInvocation(
                     message,
                     origin: CGPoint(x: horizontalInset, y: verticalOffset),
@@ -197,9 +242,11 @@ extension NativeTimelineRowLayout {
                 && showsIncomingIdentity
                 && (usesBubbles ? row.endsGroup : row.startsGroup)
             if showsIncomingAvatar {
+                // A bubble avatar keeps its gap to the bubble's tail.
+                let diameter = usesBubbles ? NativeTimelineBubbleLayout.avatarDiameter : avatarWidth
                 result.avatarFrame = CGRect(
-                    origin: CGPoint(x: horizontalInset, y: verticalOffset),
-                    size: CGSize(width: avatarWidth, height: avatarWidth)
+                    origin: CGPoint(x: horizontalInset + avatarWidth - diameter, y: verticalOffset),
+                    size: CGSize(width: diameter, height: diameter)
                 )
             }
             if row.startsGroup, !row.isResource, !isGenerated, !isOutgoingBubble,
@@ -230,6 +277,81 @@ extension NativeTimelineRowLayout {
                 )
             }
 
+        }
+
+        /// A bubble joins one reference to itself. A reply that is also a
+        /// command, or a command sent by the current user, keeps the
+        /// standard reference rows, which can show both and fit any width.
+        private var usesBubbleReference: Bool {
+            let isReply = row.replyMessageID != nil && message.type != .pollResult
+            let isCommand = message.type == .chatInputCommand
+            return usesBubbles
+                && isReply != isCommand
+                && !(isCommand && isOutgoingBubble)
+        }
+
+        /// A bubble's reply or command sits directly above the bubble, on the
+        /// bubble's own side, and its elbow meets the bubble's top edge.
+        private mutating func appendBubbleReference() {
+            guard usesBubbleReference else { return }
+            let isReply = row.replyMessageID != nil && message.type != .pollResult
+            let height = InterfaceScale.metric(20)
+            let padding = NativeTimelineBubbleLayout.horizontalPadding
+            // The stem lands where the bubble's top corner has flattened out.
+            let stemInset = InterfaceScale.metric(14)
+            let stemX = isOutgoingBubble
+                ? contentX + contentWidth + padding - stemInset
+                : contentX - padding + stemInset
+            let leadingGap = InterfaceScale.metric(4) + NativeTimelineReplyMetrics.horizontalSpacing
+            let referenceX = isOutgoingBubble ? stemX - leadingGap : stemX + leadingGap
+            let connectorEndX = isOutgoingBubble
+                ? referenceX + NativeTimelineReplyMetrics.horizontalSpacing
+                : referenceX - NativeTimelineReplyMetrics.horizontalSpacing
+            if isReply {
+                let naturalWidth = NativeTimelineReplyMetrics.previewWidth(
+                    row.replyPreview, in: message, model: model
+                )
+                // Outgoing previews grow leftward, up to the incoming avatar
+                // column, and neither side outgrows the bubble column.
+                let availableWidth = min(
+                    NativeTimelineBubbleLayout.maximumContentWidth(availableWidth: width),
+                    isOutgoingBubble
+                        ? referenceX - horizontalInset - avatarWidth
+                        : width - horizontalInset - referenceX
+                )
+                let previewWidth = max(0, min(ceil(naturalWidth), availableWidth))
+                let previewFrame = CGRect(
+                    x: isOutgoingBubble ? referenceX - previewWidth : referenceX,
+                    y: verticalOffset,
+                    width: previewWidth,
+                    height: height
+                )
+                result.replyContentFrame = previewFrame
+                result.replyFrame = previewFrame.union(CGRect(
+                    x: min(stemX, connectorEndX),
+                    y: verticalOffset,
+                    width: abs(connectorEndX - stemX),
+                    height: height
+                ))
+            } else {
+                let connectorReserve = InterfaceScale.metric(30) + 5
+                let origin = CGPoint(x: referenceX - connectorReserve, y: verticalOffset)
+                result.commandInvocationRegion = NativeTimelineRowLayout.commandInvocation(
+                    message,
+                    origin: origin,
+                    maximumWidth: width - horizontalInset - origin.x,
+                    cosmeticPolicy: model?.cosmeticPolicy ?? .init()
+                )
+            }
+            // A short gap keeps the stem legible between reference and bubble.
+            let bubbleGap = InterfaceScale.metric(3)
+            result.bubbleReferenceConnector = .init(
+                stemX: stemX,
+                fromY: verticalOffset + height + bubbleGap + 1,
+                cornerY: verticalOffset + height * 0.46,
+                toX: connectorEndX
+            )
+            verticalOffset += height + bubbleGap
         }
 
         private mutating func appendAuthorHeader() {
@@ -308,7 +430,7 @@ extension NativeTimelineRowLayout {
         private mutating func appendTextAndPoll() {
             bubbleStartY = verticalOffset
             if usesBubbles {
-                verticalOffset += InterfaceScale.metric(8)
+                verticalOffset += NativeTimelineBubbleLayout.verticalPadding
             }
 
             if message.forwardedSnapshot != nil {
@@ -408,6 +530,22 @@ extension NativeTimelineRowLayout {
         }
 
         private mutating func appendAttachments() {
+            if !usesComponentsV2, (message.forwardedSnapshot?.flags ?? message.flags).contains(.voiceMessage) {
+                let style: NativeTimelineVoiceMessageRegion.Style =
+                    usesBubbles ? (isOutgoingBubble ? .outgoingBubble : .incomingBubble) : .plain
+                let voiceY = verticalOffset + (hasRichContent ? InterfaceScale.metric(8) : 0)
+                if let region = NativeTimelineVoiceMessageRegion.make(
+                    message: message,
+                    origin: CGPoint(x: contentX, y: voiceY),
+                    maximumWidth: inlineMediaMaximumWidth,
+                    style: style
+                ) {
+                    result.voiceMessageRegion = region
+                    verticalOffset = region.frame.maxY
+                    hasRichContent = true
+                    return
+                }
+            }
             if !usesComponentsV2, !message.attachments.isEmpty {
                 if hasRichContent {
                     verticalOffset += InterfaceScale.metric(8)
@@ -665,19 +803,37 @@ extension NativeTimelineRowLayout {
             }
 
             if usesBubbles, hasRichContent {
-                verticalOffset += InterfaceScale.metric(8)
+                verticalOffset += NativeTimelineBubbleLayout.verticalPadding
                 let region = NativeTimelineBubbleLayout.region(
                     contentX: contentX,
                     contentWidth: contentWidth,
                     minY: bubbleStartY,
                     maxY: verticalOffset,
                     isOutgoing: isOutgoingBubble,
-                    showsTail: row.endsGroup
+                    showsTail: row.endsGroup,
+                    isBare: showsBareContent
                 )
                 result.bubbleRegion = region
                 result.avatarFrame = NativeTimelineBubbleLayout.bottomAlignedAvatarFrame(result.avatarFrame, to: region)
             }
 
+        }
+
+        /// Emoji-only text and stickers read as standalone content, as in
+        /// Messages, so their bubble draws no fill.
+        private var showsBareContent: Bool {
+            let isEmojiOnlyText = result.attributedContent == nil
+                || row.textPlan.preparedText?.isEmojiOnly == true
+            return isEmojiOnlyText
+                && (result.contentFrame != nil || !result.stickerFrames.isEmpty)
+                && result.linkedImageRegions.isEmpty && result.attachmentRegions.isEmpty
+                && result.voiceMessageRegion == nil
+                && result.embedRegions.isEmpty && result.componentLayouts.isEmpty
+                && result.inviteRegions.isEmpty && result.sakuraCordDeepLinkRegions.isEmpty
+                && result.translationRegion == nil && result.pollLayout == nil
+                && result.pollResultFrame == nil && result.threadFrame == nil
+                && result.forwardedHeaderFrame == nil && translationPresentation == nil
+                && !message.flags.contains(.loading)
         }
 
         private mutating func appendReactions() {
@@ -690,24 +846,39 @@ extension NativeTimelineRowLayout {
                         width: ReactionActionMenuPresentation.inline.width,
                         height: MessageReactionMetrics.pillHeight
                     )]
+                // Reactions sit below the bubble, so a short bubble must not
+                // narrow them. They wrap against the bubble column instead.
+                let rowWidth = usesBubbles
+                    ? max(contentWidth, min(
+                        NativeTimelineBubbleLayout.maximumContentWidth(availableWidth: width),
+                        isOutgoingBubble ? contentX + contentWidth - horizontalInset : ordinaryContentWidth
+                    ))
+                    : contentWidth
+                let rowX = isOutgoingBubble ? contentX + contentWidth - rowWidth : contentX
                 let wrapping = InlineWrappingLayoutPlan.frames(
                     sizes: sizes,
-                    maximumWidth: contentWidth,
+                    maximumWidth: rowWidth,
                     horizontalSpacing: MessageReactionMetrics.horizontalSpacing,
                     verticalSpacing: MessageReactionMetrics.verticalSpacing
                 )
+                // Each line of reactions follows an outgoing bubble to the
+                // trailing edge.
+                let lineEnds = wrapping.frames.reduce(into: [CGFloat: CGFloat]()) { ends, frame in
+                    ends[frame.minY] = max(ends[frame.minY] ?? 0, frame.maxX)
+                }
+                let frames = wrapping.frames.map { frame in
+                    let lineShift = isOutgoingBubble
+                        ? max(0, rowWidth - (lineEnds[frame.minY] ?? frame.maxX))
+                        : 0
+                    return frame.offsetBy(dx: rowX + lineShift, dy: verticalOffset)
+                }
                 result.reactionRegions = zip(
                     presentedReactions,
-                    wrapping.frames.prefix(presentedReactions.count)
+                    frames.prefix(presentedReactions.count)
                 ).map { reaction, frame in
-                    NativeTimelineRowLayout.reactionRegion(
-                        reaction,
-                        frame: frame.offsetBy(dx: contentX, dy: verticalOffset)
-                    )
+                    NativeTimelineRowLayout.reactionRegion(reaction, frame: frame)
                 }
-                if let frame = wrapping.frames.last {
-                    result.addReactionFrame = frame.offsetBy(dx: contentX, dy: verticalOffset)
-                }
+                result.addReactionFrame = frames.last
                 verticalOffset += wrapping.size.height
             }
 
@@ -768,7 +939,7 @@ extension NativeTimelineRowLayout {
                     visibleContentMaxY + highlightInsets.bottom,
                     highlightMinY
                         + highlightInsets.top
-                        + (showsIncomingAvatar
+                        + (showsIncomingAvatar && !usesBubbles
                             ? MessageRowLayoutMetrics.avatarDiameter
                             : MessageRowLayoutMetrics.compactContentHeight)
                         + highlightInsets.bottom

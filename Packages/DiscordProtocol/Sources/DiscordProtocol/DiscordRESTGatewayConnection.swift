@@ -326,8 +326,7 @@ extension DiscordRESTProvider {
             if wasReady, !gatewayReady { pendingStatusEditConnectionClosed() }
             if connectionState == .authenticationFailed {
                 failInitialGatewaySnapshot(ChatProviderError.unauthenticated)
-                await openSafetyCircuit(
-                    status: 401, discordCode: nil, route: "GATEWAY IDENTIFY/RESUME")
+                await stopAfterAuthenticationFailure(route: "GATEWAY IDENTIFY/RESUME")
                 return
             }
             failInitialGatewaySnapshotOnTerminalDisconnect(connectionState)

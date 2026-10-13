@@ -6,22 +6,30 @@ struct ModalGlassButton: View {
     let symbol: String
     let label: String
     var primary = false
+    /// Tints a primary button red for actions that need extra care.
+    var destructive = false
     /// Replaces the label with the interaction dots, keeping the button's size.
     var isLoading = false
+    /// Stretches the button across its container, for stacked footers.
+    var fillsWidth = false
+    /// Unscaled height; compact popovers pair a smaller capsule with less inset.
+    var height: CGFloat = 40
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label(label, systemImage: symbol)
                 .font(.interface(.body).weight(.semibold))
+                .lineLimit(1)
                 .opacity(isLoading ? 0 : 1)
                 .overlay { if isLoading { InteractionLoadingDotsView(tone: primary ? .onFill : .content) } }
                 .padding(.horizontal, InterfaceScale.metric(16))
-                .frame(height: InterfaceScale.metric(40))
+                .frame(maxWidth: fillsWidth ? .infinity : nil)
+                .frame(height: InterfaceScale.metric(height))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .glassEffect(primary ? .regular.tint(SakuraCordAccentColor.color).interactive() : .regular.interactive(), in: Capsule())
+        .glassEffect(primary ? .regular.tint(destructive ? .red : SakuraCordAccentColor.color).interactive() : .regular.interactive(), in: Capsule())
         .help(label)
         .accessibilityLabel(label)
     }

@@ -634,46 +634,13 @@ extension DiscordRESTProvider {
             gatewayLogger.debug(
                 "Discord REST \(route, privacy: .public) status=\(response.statusCode) bucket=\(bucket, privacy: .public)"
             )
-            if Self.isSafetyStop(
-                status: response.statusCode,
-                discordCode: discordCode,
-                method: method,
-                data: data,
-                path: path
-            ) {
-                await openSafetyCircuit(
-                    status: response.statusCode,
-                    discordCode: discordCode,
-                    route: route
-                )
-                if Self.isAuthenticationFailure(
-                    status: response.statusCode,
-                    discordCode: discordCode
-                ) {
-                    throw apiDiagnostics.coalescing(ChatProviderError.unauthenticated, with: response)
-                }
-                throw apiDiagnostics.coalescing(ChatProviderError.invalidRequest(
-                    Self.safetyStopMessage(
-                        status: response.statusCode,
-                        discordCode: discordCode
-                    )
-                ), with: response)
+            if Self.isAuthenticationFailure(status: response.statusCode, discordCode: discordCode) {
+                await stopAfterAuthenticationFailure(route: route)
+                throw apiDiagnostics.coalescing(ChatProviderError.unauthenticated, with: response)
             }
-            if response.statusCode == 404 {
-                if Self.isExpectedResourceNotFound(method: method, path: path) {
-                    unexpectedNotFoundCounts[route] = nil
-                } else {
-                    unexpectedNotFoundCounts[route, default: 0] += 1
-                    if unexpectedNotFoundCounts[route, default: 0] >= 2 {
-                        await openSafetyCircuit(status: 404, discordCode: discordCode, route: route)
-                        throw apiDiagnostics.coalescing(ChatProviderError.invalidRequest(
-                            requestSafetyStopReason
-                        ), with: response)
-                    }
-                }
-            } else if (200 ..< 300).contains(response.statusCode) {
-                unexpectedNotFoundCounts[route] = nil
-            }
+            // Rejections belong to the operation that received them. Let its
+            // error mapper report the failure without cancelling unrelated REST
+            // work or the Gateway, even after repeated missing-resource errors.
             return (data, response)
     }
 
@@ -930,19 +897,11 @@ extension DiscordRESTProvider {
             || (method == "POST" && path == "/users/@me/messages/search/tabs")
     }
 
-    func openSafetyCircuit(status: Int, discordCode: Int?, route: String) async {
+    func stopAfterAuthenticationFailure(route: String) async {
         guard !requestSafetyCircuitIsOpen else { return }
-        requestSafetyStopReason = status == 404
-            ? "Discord networking was stopped after repeated unexpected not-found responses from \(route) (HTTP 404)."
-            : Self.safetyStopMessage(status: status, discordCode: discordCode)
+        requestSafetyStopReason = ChatProviderError.unauthenticated.localizedDescription
         requestSafetyCircuitIsOpen = true
-        let authenticationFailure = Self.isAuthenticationFailure(
-            status: status,
-            discordCode: discordCode
-        )
-        if authenticationFailure {
-            authorizationValue = nil
-        }
+        authorizationValue = nil
         gatewayReady = false
         gatewayEventTask?.cancel()
         gatewayEventTask = nil
@@ -956,12 +915,9 @@ extension DiscordRESTProvider {
                 task.cancel()
             }
         }
-        continuation?.yield(
-            .connectionChanged(
-                authenticationFailure ? .authenticationFailed : .disconnected
-            ))
+        continuation?.yield(.connectionChanged(.authenticationFailed))
         gatewayLogger.fault(
-            "Discord network safety circuit opened route=\(route, privacy: .public) HTTP=\(status) code=\(discordCode ?? -1)"
+            "Discord session authentication failed route=\(route, privacy: .public)"
         )
     }
 
@@ -972,72 +928,8 @@ extension DiscordRESTProvider {
         return (object["code"] as? NSNumber)?.intValue
     }
 
-    static func isSafetyStop(status: Int, discordCode: Int?, method: String, data: Data, path: String = "")
-        -> Bool
-    {
-        if isAuthenticationFailure(status: status, discordCode: discordCode) {
-            return true
-        }
-        // A 403 can be scoped to one channel or lookup (for example 50001/50013).
-        // Keep those failures local instead of invalidating a healthy Gateway
-        // session; the account-wide codes below still fail closed.
-        if let discordCode, [40001, 40002, 40003, 40004, 40012, 40333].contains(discordCode) {
-            return true
-        }
-        // Only supported join challenges reach the explicit human-completion path.
-        if DiscordCaptchaChallenge.joinChallenge(data: data, status: status, method: method, path: path) != nil { return false }
-        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           object["captcha_key"] != nil || object["captcha_sitekey"] != nil
-           || object["captcha_service"] != nil
-        {
-            return true
-        }
-        // Invalid type-1 settings data: the settings writer reloads, so the server wins.
-        if status == 400, discordCode == 50105, method == "PATCH", path == "/users/@me/settings-proto/1" { return false }
-        // A structured error for user-entered profile text/media is editable.
-        // Known poll failures can race local expiry and permission checks.
-        if status == 400, profileValidationError(data: data, method: method, path: path) != nil { return false }
-        // A rejected friend nickname (for example, no longer a friend) is local to that edit.
-        if status == 400, method == "PATCH", path.hasPrefix("/users/@me/relationships/") { return false }
-        if status == 400, isExpectedPollFailure(discordCode: discordCode, method: method, path: path) { return false }
-        if status == 400, DiscordCaptchaChallenge.isJoinRoute(method: method, path: path), let discordCode,
-           [10006, 50270, 40007, 30001].contains(discordCode) { return false }
-        // Discord's per-server invite cap is an expected creation failure.
-        if status == 400, method == "POST", discordCode == 30016, path.hasPrefix("/channels/"), path.hasSuffix("/invites") { return false }
-        return status == 400 && method != "GET"
-    }
-
     static func isAuthenticationFailure(status: Int, discordCode: Int?) -> Bool {
         status == 401 || discordCode == 40001 || discordCode == 50014
-    }
-
-    static func isExpectedResourceNotFound(method: String, path: String) -> Bool {
-        let inviteParts = path.split(separator: "/")
-        if method == "GET" || method == "POST", inviteParts.count == 2, inviteParts[0] == "invites" { return true }
-        guard method == "GET" else { return false }
-        let segments = path.split(separator: "/")
-        if segments.count == 3, segments[0] == "channels", UInt64(segments[1]) != nil,
-           segments[2] == "application-command-index" { return true }
-        return segments.count == 3
-            && (segments[0] == "users" || segments[0] == "guilds")
-            && UInt64(segments[1]) != nil
-            && segments[2] == "profile"
-    }
-
-    static func safetyStopMessage(status: Int, discordCode: Int?) -> String {
-        switch discordCode {
-        case 10005:
-            "Discord could not resolve the command's application integration. SakuraCord networking has been stopped without retrying."
-        case 40002: "Discord requires account verification. SakuraCord networking has been stopped."
-        case 40003:
-            "Discord reported that direct messages are being opened too quickly. SakuraCord networking has been stopped."
-        case 40004:
-            "Discord temporarily disabled message sending. SakuraCord networking has been stopped without retrying."
-        case 40012: "Discord revoked the connection. SakuraCord networking has been stopped."
-        case 40333: "Discord rejected the request metadata. SakuraCord networking has been stopped."
-        default:
-            "Discord returned a safety-sensitive HTTP \(status) response. SakuraCord networking has been stopped."
-        }
     }
 
     static func routeTemplate(method: String, path: String) -> String {

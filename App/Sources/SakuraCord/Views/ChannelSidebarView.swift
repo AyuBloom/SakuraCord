@@ -170,14 +170,13 @@ struct ChannelSidebarView: View {
                             customizationTitle: voiceModel.customizationTitle(in: guild?.id),
                             hasCustomization: guild.map { voiceModel.hasChannelsAndRoles(in: $0.id) } ?? false,
                             hasGuide: guild.map { voiceModel.hasGuildGuide(in: $0.id) } ?? false,
-                            page: voiceModel.guildWorkspacePage,
                             channelGroups: voiceModel.selectedChannelGroups(channelGroups, guildID: guild?.id),
                             rulesChannelID: guild?.rulesChannelID,
                             activeVoiceChannelID: activeVoiceChannelID,
                             hiddenChannelIDs: hiddenChannelIDs,
                             checkingChannelIDs: checkingChannelIDs,
                             unreadCategoryIDs: unreadCategoryIDs,
-                            selectedChannelID: selection,
+                            sidebarSelection: guildSelection,
                             threadsByParentID: threads.threadsByParentID,
                             bottomContentInset: accountControlHeight
                         ),
@@ -358,19 +357,18 @@ nonisolated private struct GuildChannelListInput: Equatable, Sendable {
     var customizationTitle: String = "Channels & Roles"
     let hasCustomization: Bool
     let hasGuide: Bool
-    let page: GuildWorkspacePage?
     let channelGroups: [ChannelGroup]
     let rulesChannelID: ChannelID?
     let activeVoiceChannelID: ChannelID?
     let hiddenChannelIDs: Set<ChannelID>
     let checkingChannelIDs: Set<ChannelID>
     let unreadCategoryIDs: Set<ChannelID>
-    let selectedChannelID: ChannelID?
+    let sidebarSelection: GuildSidebarSelection?
     let threadsByParentID: [ChannelID: [SidebarThreadRow]]
     let bottomContentInset: CGFloat
 }
 
-nonisolated private enum GuildSidebarSelection: Hashable {
+nonisolated private enum GuildSidebarSelection: Hashable, Sendable {
     case channel(ChannelID)
     case thread(ChannelID)
     case page(GuildWorkspacePage)
@@ -400,7 +398,6 @@ private struct GuildChannelList: View, Equatable {
             }
             if input.hasGuide || input.hasCustomization {
                 Divider()
-                    .padding(.horizontal, InterfaceScale.metric(16))
                     .listRowInsets(EdgeInsets())
                     .selectionDisabled()
                     .accessibilityHidden(true)
@@ -416,7 +413,7 @@ private struct GuildChannelList: View, Equatable {
                             : 0,
                     rulesChannelID: input.rulesChannelID,
                     activeVoiceChannelID: input.activeVoiceChannelID,
-                    selectedChannelID: input.selectedChannelID,
+                    sidebarSelection: input.sidebarSelection,
                     hiddenChannelIDs: input.hiddenChannelIDs,
                     checkingChannelIDs: input.checkingChannelIDs,
                     threadsByParentID: input.threadsByParentID,
@@ -452,7 +449,7 @@ private struct GuildChannelList: View, Equatable {
         .interfaceFontOverride(.interfaceSystem(size: InterfaceTypographyMetrics.interfaceTextSize))
         .accessibilityElement(children: .combine)
         .tag(GuildSidebarSelection.page(page))
-        .overlay { ChannelRowHoverBridge(isSelected: input.page == page) }
+        .overlay { ChannelRowHoverBridge(isSelected: input.sidebarSelection == .page(page)) }
     }
 
 }
@@ -581,7 +578,7 @@ private struct ChannelGroupRows: View {
     let bottomContentInset: CGFloat
     let rulesChannelID: ChannelID?
     let activeVoiceChannelID: ChannelID?
-    let selectedChannelID: ChannelID?
+    let sidebarSelection: GuildSidebarSelection?
     let hiddenChannelIDs: Set<ChannelID>
     let checkingChannelIDs: Set<ChannelID>
     let threadsByParentID: [ChannelID: [SidebarThreadRow]]
@@ -597,7 +594,7 @@ private struct ChannelGroupRows: View {
         bottomContentInset: CGFloat,
         rulesChannelID: ChannelID?,
         activeVoiceChannelID: ChannelID?,
-        selectedChannelID: ChannelID?,
+        sidebarSelection: GuildSidebarSelection?,
         hiddenChannelIDs: Set<ChannelID>,
         checkingChannelIDs: Set<ChannelID>,
         threadsByParentID: [ChannelID: [SidebarThreadRow]],
@@ -609,7 +606,7 @@ private struct ChannelGroupRows: View {
         self.bottomContentInset = bottomContentInset
         self.rulesChannelID = rulesChannelID
         self.activeVoiceChannelID = activeVoiceChannelID
-        self.selectedChannelID = selectedChannelID
+        self.sidebarSelection = sidebarSelection
         self.hiddenChannelIDs = hiddenChannelIDs
         self.checkingChannelIDs = checkingChannelIDs
         self.threadsByParentID = threadsByParentID
@@ -665,6 +662,7 @@ private struct ChannelGroupRows: View {
                     ChannelRow(
                         model: model,
                         channel: channel,
+                        isSelected: sidebarSelection == .channel(channel.id),
                         rulesChannelID: rulesChannelID,
                         isVoiceConnected: activeVoiceChannelID == channel.id,
                         isHidden: hiddenChannelIDs.contains(channel.id),
@@ -681,6 +679,7 @@ private struct ChannelGroupRows: View {
                     ChannelRow(
                         model: model,
                         channel: channel,
+                        isSelected: sidebarSelection == .channel(channel.id),
                         rulesChannelID: rulesChannelID,
                         isHidden: hiddenChannelIDs.contains(channel.id),
                         isChecking: checkingChannelIDs.contains(channel.id)
@@ -691,6 +690,7 @@ private struct ChannelGroupRows: View {
                         ThreadRow(
                             model: model,
                             row: row,
+                            isSelected: sidebarSelection == .thread(row.id),
                             continuesBelow: row.id != threads.last?.id
                         )
                         .tag(GuildSidebarSelection.thread(row.id))
@@ -801,7 +801,7 @@ private struct ChannelGroupRows: View {
             false
         }
         return group.channels.filter { channel in
-            channel.id == selectedChannelID
+            sidebarSelection == .channel(channel.id)
                 || threadsByParentID[channel.id]?.isEmpty == false
                 || channel.mentionCount > 0
                 || (!isCategoryMuted && channel.unreadCount > 0)
@@ -1364,6 +1364,7 @@ private struct ChannelRow: View {
 
     let model: AppModel
     let channel: Channel
+    let isSelected: Bool
     var rulesChannelID: ChannelID?
     var isVoiceConnected = false
     var isHidden = false
@@ -1415,7 +1416,7 @@ private struct ChannelRow: View {
         .accessibilityValue(accessibilityValue)
         .overlay {
             ChannelContextMenuBridge(
-                isSelected: model.selectedChannelID == channel.id,
+                isSelected: isSelected,
                 isUnread: channel.unreadCount > 0,
                 isMutationPending:
                     model.isChannelNotificationMutationPending(channel.id),
@@ -1483,13 +1484,13 @@ private struct ChannelRow: View {
     }
 
     private var channelIconForegroundStyle: Color {
-        if model.selectedChannelID == channel.id { return .primary }
+        if isSelected { return .primary }
         if isMuted { return .primary.opacity(0.32) }
         return showsUnread ? .primary : .primary.opacity(0.70)
     }
 
     private var channelNameForegroundStyle: Color {
-        if model.selectedChannelID == channel.id { return .primary }
+        if isSelected { return .primary }
         if isMuted { return .primary.opacity(0.32) }
         return showsUnread ? .primary : .primary.opacity(0.70)
     }
@@ -1522,6 +1523,7 @@ private struct ThreadRow: View {
 
     let model: AppModel
     let row: SidebarThreadRow
+    let isSelected: Bool
     let continuesBelow: Bool
 
     var body: some View {
@@ -1553,12 +1555,13 @@ private struct ThreadRow: View {
             row.isUnread ? [SidebarUnreadRowAnchor(id: row.id, anchor: $0, color: nameForegroundStyle.resolve(in: environment))] : []
         }
         .accessibilityElement(children: .combine)
-        .overlay { ThreadContextMenuBridge(model: model, row: row) }
+        .overlay { ThreadContextMenuBridge(model: model, row: row, isSelected: isSelected) }
         .accessibilityLabel("\(row.thread.name), thread")
         .accessibilityValue(accessibilityValue)
     }
 
     private var nameForegroundStyle: Color {
+        if isSelected { return .primary }
         if row.isMuted { return .primary.opacity(0.35) }
         return row.isUnread ? .primary : .primary.opacity(0.78)
     }

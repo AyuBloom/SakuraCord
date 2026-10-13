@@ -423,9 +423,10 @@ switching protocol cannot be published into the catalog.
    publisher's GitHub App credentials.
 3. Land the trusted publication workflow on `main` before relying on its
    `workflow_run` trigger. PR CI must contain the packaging changes and the
-   current app/Sparkle switching protocol. Ship the app's installation warning
-   before enabling automatic fork publication; a catalog refresh cannot add the
-   warning to older app versions. Validate a fresh successful PR run,
+   current app/Sparkle switching protocol. Workflow and catalog deployment is
+   independent of app releases. The native installation warning reaches users
+   with an app update; a catalog refresh cannot add it to older app versions.
+   Validate a fresh successful PR run,
    inspect its public catalog entry and signed downloads, and exercise an
    actual app switch and return before claiming live distribution verification.
 

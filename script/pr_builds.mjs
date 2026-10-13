@@ -66,6 +66,22 @@ export function validateOrigin(run, artifact, metadata, workflowID) {
   return { ...metadata, fork };
 }
 
+export async function resolvePullRequest(run, metadata, request = api) {
+  check(integer(metadata.pullRequest), 'Invalid PR number');
+  const pr = await request(SOURCE, `pulls/${metadata.pullRequest}`);
+  check(pr?.number === metadata.pullRequest && pr.head?.repo?.id === run.head_repository?.id,
+    'PR repository provenance mismatch');
+  // Fork runs can omit PR summaries, and the commit-to-PR endpoint can return
+  // nothing even for the current fork head. Bind directly to the PR's commit
+  // history when GitHub did not record the association on the run.
+  if (!run.pull_requests?.some(item => item.number === pr.number)) {
+    check(pr.head.sha === run.head_sha ||
+      (await pages(SOURCE, `pulls/${pr.number}/commits`, null, {}, request)).some(commit => commit.sha === run.head_sha),
+    'CI commit is not part of the pull request');
+  }
+  return pr;
+}
+
 async function prepare(directory) {
   const runID = Number(process.env.PR_BUILD_RUN_ID);
   const attempt = Number(process.env.PR_BUILD_RUN_ATTEMPT);
@@ -89,12 +105,8 @@ async function prepare(directory) {
   await writeFile(path.join(directory, 'artifact.zip'), bytes);
   python('unwrap', path.join(directory, 'artifact.zip'), directory);
   const metadata = JSON.parse(await readFile(path.join(directory, 'build.json'), 'utf8'));
-  // GitHub's run PR summary tracks the PR's CURRENT head/base, not the historical
-  // run. head_sha is immutable. Fork workflow_run payloads can omit PR summaries.
-  if (!run.pull_requests?.some(pr => pr.number === metadata.pullRequest)) {
-    run.pull_requests = await pages(SOURCE, `commits/${run.head_sha}/pulls`);
-  }
-  const context = validateOrigin(run, artifact, metadata, workflow.id);
+  const pr = await resolvePullRequest(run, metadata);
+  const context = validateOrigin({ ...run, pull_requests: [pr] }, artifact, metadata, workflow.id);
   const commit = await api(SOURCE, `commits/${context.builtSHA}`);
   check(commit && (context.builtSHA === context.headSHA ||
     (commit.parents.length === 2 && commit.parents[0].sha === context.baseSHA && commit.parents[1].sha === context.headSHA)),
@@ -115,7 +127,6 @@ async function prepare(directory) {
     check(appJob.steps.some(step => step.name === name && step.conclusion === 'success'),
       'Packaging and upload must succeed in the exact attempt');
   }
-  const pr = await api(SOURCE, `pulls/${context.pullRequest}`);
   context.title = pr.title;
   context.createdAt = artifact.created_at;
   context.artifactID = artifact.id;

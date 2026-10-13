@@ -446,8 +446,7 @@ private struct GuildChannelList: View, Equatable {
                 .foregroundStyle(isSelected ? Color.primary : .primary.opacity(0.70))
                 .frame(width: ChannelSidebarLayoutMetrics.iconWidth)
             Text(title)
-                .font(.interfaceSystem(size: 14, weight: .medium))
-                .fontWeight(.medium)
+                .font(.interfaceSystem(size: 14, weight: .regular))
                 .foregroundStyle(isSelected ? Color.primary : .primary.opacity(0.70))
                 .lineLimit(1)
             Spacer()
@@ -720,12 +719,12 @@ private struct ChannelGroupRows: View {
                         let nextValue = !isExpanded
                         withAnimation(.snappy(duration: 0.18)) {
                             isExpanded = nextValue
+                            model.setCategoryCollapsed(
+                                !nextValue,
+                                guildID: guildID,
+                                categoryID: categoryID
+                            )
                         }
-                        model.setCategoryCollapsed(
-                            !nextValue,
-                            guildID: guildID,
-                            categoryID: categoryID
-                        )
                     } label: {
                         HStack(spacing: InterfaceScale.metric(5)) {
                             Text(name)
@@ -1385,8 +1384,7 @@ private struct ChannelRow: View {
                 .foregroundStyle(channelIconForegroundStyle)
                 .frame(width: ChannelSidebarLayoutMetrics.iconWidth)
             Text(channel.name)
-                .font(.interfaceSystem(size: 14, weight: .medium))
-                .fontWeight(.medium)
+                .font(.interfaceSystem(size: 14, weight: showsUnread && !isMuted ? .medium : .regular))
                 .foregroundStyle(channelNameForegroundStyle)
                 .lineLimit(1)
             Spacer()
@@ -1542,8 +1540,7 @@ private struct ThreadRow: View {
                 )
                 .frame(width: ChannelSidebarLayoutMetrics.iconWidth)
             Text(row.thread.name)
-                .font(.interfaceSystem(size: 14, weight: .medium))
-                .fontWeight(.medium)
+                .font(.interfaceSystem(size: 14, weight: row.isUnread && !row.isMuted ? .medium : .regular))
                 .foregroundStyle(nameForegroundStyle)
                 .lineLimit(1)
             Spacer()

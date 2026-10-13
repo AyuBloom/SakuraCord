@@ -1299,8 +1299,10 @@ struct AccountReadStateModelTests {
         #expect(model.unread(channelID: threadID) == !acknowledgementSucceeds)
     }
 
-    @Test func `later acknowledgement failure preserves an earlier accepted boundary`() {
+    @Test(arguments: [[UInt64(13)], [12, 14], [14, 12]])
+    func `later acknowledgement failure preserves an earlier accepted boundary`(failureOrder: [UInt64]) {
         let model = makeModel(latest: 12, acknowledged: 10, mentions: 2)
+        let acceptedBoundary: UInt64 = failureOrder.count == 1 ? 12 : 13
         model.markAcknowledgementPending(
             channelID: channelID,
             messageID: MessageID(rawValue: 12)
@@ -1309,31 +1311,41 @@ struct AccountReadStateModelTests {
             message(id: 13, mentionedUsers: [currentUser]),
             currentUserID: currentUser.id
         ).accepted)
+        if acceptedBoundary == 13 {
+            model.markAcknowledgementPending(channelID: channelID, messageID: MessageID(rawValue: 13))
+            #expect(model.receive(
+                message(id: 14, mentionedUsers: [currentUser]),
+                currentUserID: currentUser.id
+            ).accepted)
+        }
         model.markAcknowledgementPending(
             channelID: channelID,
-            messageID: MessageID(rawValue: 13)
+            messageID: MessageID(rawValue: acceptedBoundary + 1)
         )
+        #expect(model.receive(
+            message(id: acceptedBoundary + 2, mentionedUsers: [currentUser]),
+            currentUserID: currentUser.id
+        ).accepted)
 
         model.completeAcknowledgement(
             channelID: channelID,
-            messageID: MessageID(rawValue: 12),
-            token: "accepted-12"
+            messageID: MessageID(rawValue: acceptedBoundary),
+            token: "accepted"
         )
-        model.failAcknowledgement(
-            channelID: channelID,
-            messageID: MessageID(rawValue: 13)
-        )
+        for target in failureOrder {
+            model.failAcknowledgement(channelID: channelID, messageID: MessageID(rawValue: target))
+        }
 
-        #expect(model.entries[channelID]?.lastAcknowledgedMessageID == MessageID(rawValue: 12))
+        #expect(model.entries[channelID]?.lastAcknowledgedMessageID == MessageID(rawValue: acceptedBoundary))
         #expect(model.entries[channelID]?.pendingAcknowledgementID == nil)
-        #expect(model.mentions(channelID: channelID) == 1)
-        #expect(model.unreadMessageCount(channelID: channelID) == 1)
+        #expect(model.mentions(channelID: channelID) == 2)
+        #expect(model.unreadMessageCount(channelID: channelID) == 2)
         #expect(model.unread(channelID: channelID))
-        #expect(model.acknowledgementToken == "accepted-12")
+        #expect(model.acknowledgementToken == "accepted")
     }
 
-    @Test(arguments: [false, true])
-    func `overlapping failures restore every unread contribution exactly once`(manualUnread: Bool) {
+    @Test(arguments: [false, true], [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]])
+    func `overlapping failures restore every unread contribution exactly once`(manualUnread: Bool, failureOrder: [Int]) {
         let model = makeModel(latest: 12, acknowledged: manualUnread ? 12 : 10, mentions: manualUnread ? 0 : 2)
         let firstTarget = MessageID(rawValue: manualUnread ? 5 : 12)
         if manualUnread {
@@ -1349,20 +1361,28 @@ struct AccountReadStateModelTests {
             channelID: channelID,
             messageID: MessageID(rawValue: 13)
         )
+        #expect(model.receive(
+            message(id: 14, mentionedUsers: [currentUser]),
+            currentUserID: currentUser.id
+        ).accepted)
+        model.markAcknowledgementPending(
+            channelID: channelID,
+            messageID: MessageID(rawValue: 14)
+        )
+        #expect(model.receive(
+            message(id: 15, mentionedUsers: [currentUser]),
+            currentUserID: currentUser.id
+        ).accepted)
 
-        model.failAcknowledgement(
-            channelID: channelID,
-            messageID: firstTarget
-        )
-        model.failAcknowledgement(
-            channelID: channelID,
-            messageID: MessageID(rawValue: 13)
-        )
+        let targets = [firstTarget, MessageID(rawValue: 13), MessageID(rawValue: 14)]
+        for index in failureOrder {
+            model.failAcknowledgement(channelID: channelID, messageID: targets[index])
+        }
 
         #expect(model.entries[channelID]?.lastAcknowledgedMessageID == MessageID(rawValue: manualUnread ? 12 : 10))
         #expect(model.entries[channelID]?.pendingAcknowledgementID == nil)
-        #expect(model.mentions(channelID: channelID) == (manualUnread ? 1 : 3))
-        #expect(model.unreadMessageCount(channelID: channelID) == (manualUnread ? 1 : 2))
+        #expect(model.mentions(channelID: channelID) == (manualUnread ? 3 : 5))
+        #expect(model.unreadMessageCount(channelID: channelID) == (manualUnread ? 3 : 4))
         #expect(model.unread(channelID: channelID))
     }
 

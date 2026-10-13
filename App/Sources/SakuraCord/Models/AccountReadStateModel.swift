@@ -1305,6 +1305,15 @@ extension AccountReadStateModel {
             entry.unreadMessageCount = rollback.unreadMessageCount
                 + rollback.receivedUnreadMessageCount
             entry.pendingAcknowledgementID = rollback.predecessorMessageID
+            if let predecessorID = rollback.predecessorMessageID,
+               var predecessor = pendingRollbacks[channelID]?[predecessorID]
+            {
+                // Bulk and channel ACKs can finish out of order. Retain these
+                // arrivals if the earlier request subsequently fails too.
+                predecessor.receivedMentionCount += rollback.receivedMentionCount
+                predecessor.receivedUnreadMessageCount += rollback.receivedUnreadMessageCount
+                pendingRollbacks[channelID]?[predecessorID] = predecessor
+            }
             pendingRollbacks[channelID]?[messageID] = nil
             if pendingRollbacks[channelID]?.isEmpty == true {
                 pendingRollbacks[channelID] = nil
@@ -1330,7 +1339,18 @@ extension AccountReadStateModel {
         }?.messageID
         if let childID, var child = pendingRollbacks[channelID]?[childID] {
             child.predecessorMessageID = discarded.predecessorMessageID
-            if !succeeded {
+            if succeeded {
+                // The accepted boundary supersedes every earlier intent. A
+                // later failure must not reach behind it through the chain.
+                child.predecessorMessageID = nil
+                var predecessorID = discarded.predecessorMessageID
+                while let priorID = predecessorID,
+                      let predecessor = pendingRollbacks[channelID]?[priorID]
+                {
+                    predecessorID = predecessor.predecessorMessageID
+                    pendingRollbacks[channelID]?[priorID] = nil
+                }
+            } else {
                 child.lastAcknowledgedMessageID = discarded.lastAcknowledgedMessageID
                 child.latestUnreadMessageID = maximum(child.latestUnreadMessageID, discarded.latestUnreadMessageID)
                 child.mentionCount = discarded.mentionCount
@@ -1339,6 +1359,16 @@ extension AccountReadStateModel {
                     + max(0, child.unreadMessageCount - discarded.optimisticUnreadMessageCount)
             }
             pendingRollbacks[channelID]?[childID] = child
+        }
+        if !succeeded,
+           let predecessorID = discarded.predecessorMessageID,
+           var predecessor = pendingRollbacks[channelID]?[predecessorID]
+        {
+            // A failed interior intent's arrivals are already in its child's
+            // rollback boundary, but must also survive its predecessor failing.
+            predecessor.receivedMentionCount += discarded.receivedMentionCount
+            predecessor.receivedUnreadMessageCount += discarded.receivedUnreadMessageCount
+            pendingRollbacks[channelID]?[predecessorID] = predecessor
         }
         pendingRollbacks[channelID]?[messageID] = nil
         if pendingRollbacks[channelID]?.isEmpty == true {

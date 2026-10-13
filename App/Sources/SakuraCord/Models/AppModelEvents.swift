@@ -527,7 +527,7 @@ extension AppModel {
         typingState.clear(userID: message.author.id, in: message.channelID)
         if let nonce = message.nonce {
             enrichInteractionResponse(&message)
-            composer.outbox.noteConfirmation(nonce: nonce)
+            composer.outbox.noteConfirmation(nonce: nonce, channelID: message.channelID)
             // Discord has the upload; the recording is no longer needed.
             if let outgoing = composer.outbox.draftsByNonce[nonce] { discardVoiceMessageFile(for: outgoing) }
             composer.outbox.draftsByNonce[nonce] = nil

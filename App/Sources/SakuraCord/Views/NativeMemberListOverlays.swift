@@ -446,7 +446,33 @@ extension NativeMemberListCanvasView {
                 self?.dismissProfile(ifCurrent: presentation.requestID)
             },
             presentationIdentity: AnyHashable(presentation.member.id),
-            content: AnyView(ProfilePresentationContent(presentation: presentation, openProfile: openProfile, userMenu: { [weak self] in self?.rowMenu?(presentation.member) })
+            outsideClickHandler: { [weak self] event in
+                guard let self, event.type == .leftMouseDown,
+                      !event.modifierFlags.contains(.control),
+                      event.window === self.window,
+                      !self.interactionsBlocked,
+                      WindowModalCoordinator.allowsInput(for: self)
+                else { return false }
+                let point = self.convert(event.locationInWindow, from: nil)
+                guard self.visibleRect.contains(point),
+                      self.serverTagIndex(at: point) == nil,
+                      let index = self.index(at: point),
+                      case .member(let member, _) = self.items[index]
+                else { return false }
+                // Trailing Friends controls own their clicks; only ordinary
+                // profile-row clicks should replace the reusable card.
+                if self.rowAccessory != nil,
+                   point.x >= self.bounds.maxX - NativeMemberListMetrics.horizontalInset - self.presentation.trailingAccessoryWidth
+                { return false }
+                self.selectMember(member)
+                return true
+            },
+            content: AnyView(ProfilePresentationContent(
+                presentation: presentation,
+                openProfile: openProfile,
+                userMenu: { [weak self] in self?.rowMenu?(presentation.member) },
+                sendMessage: sendProfileMessage
+            )
                 .environment(\.profileCosmeticPolicy, cosmeticPolicy)
                 .environment(\.serverTagCardModel, serverTagCardModel))
         )

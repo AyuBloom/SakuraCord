@@ -68,6 +68,7 @@ struct MemberInspectorView: View {
     let viewportIdentity: ChannelID?
     let updateViewport: (ClosedRange<Int>) -> Void
     var openProfile: ((ProfilePresentationState) -> Void)?
+    var sendProfileMessage: ((UserID, String, String) async -> Bool)?
     var userMenu: (Member) -> NSMenu? = { _ in nil }
     var userAccessibilityActions: (Member) -> [NSAccessibilityCustomAction] = { _ in [] }
     var presentation = NativeMemberListPresentation()
@@ -82,6 +83,7 @@ struct MemberInspectorView: View {
         viewportIdentity: ChannelID? = nil,
         presentation: NativeMemberListPresentation = .init(),
         openProfile: ((ProfilePresentationState) -> Void)? = nil,
+        sendProfileMessage: ((UserID, String, String) async -> Bool)? = nil,
         userMenu: @escaping (Member) -> NSMenu? = { _ in nil },
         userAccessibilityActions: @escaping (Member) -> [NSAccessibilityCustomAction] = { _ in [] },
         updateViewport: @escaping (ClosedRange<Int>) -> Void = { _ in }
@@ -96,6 +98,7 @@ struct MemberInspectorView: View {
         self.presentation = presentation
         self.updateViewport = updateViewport
         self.openProfile = openProfile
+        self.sendProfileMessage = sendProfileMessage
         self.userMenu = userMenu
         self.userAccessibilityActions = userAccessibilityActions
     }
@@ -113,6 +116,7 @@ struct MemberInspectorView: View {
             presentation: presentation,
             onViewportRange: updateViewport,
             openProfile: openProfile,
+            sendProfileMessage: sendProfileMessage,
             rowMenu: userMenu,
             rowAccessibilityActions: userAccessibilityActions
         )

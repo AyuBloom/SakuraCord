@@ -426,7 +426,6 @@ private struct GuildChannelList: View, Equatable {
                     .position(x: width / 2, y: geometry[row.anchor].midY)
                 }
             }
-            .clipped()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }

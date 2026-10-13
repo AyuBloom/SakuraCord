@@ -77,6 +77,12 @@ extension DiscordRESTProvider {
                       memberListRefreshRetryAttempts[guildID]?.contains(memberListID) != true,
                       isMemberListAccessible(guildID: guildID, memberListID: memberListID, subscription: current)
                 else { return }
+                // A newer cooldown can arrive while this refresh waits in the
+                // guild queue. A local refusal must not spend its wire attempt.
+                if let cooldown = gatewayOpcodeRateLimitDates[37], cooldown > Date.now {
+                    scheduleMemberListRefreshRetry(guildID: guildID)
+                    return
+                }
                 memberListRefreshRetryAttempts[guildID, default: []].insert(memberListID)
             }
             try await performGuildSubscription(

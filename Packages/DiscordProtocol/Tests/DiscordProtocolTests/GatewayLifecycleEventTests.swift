@@ -658,53 +658,6 @@ struct GatewayLifecycleEventTests {
         await provider.disconnect()
     }
 
-    @Test func `older sends preserve a newer invalidation and cooldown recovery is bounded`() async throws {
-        let fixture = try await makeMemberListProvider()
-        let (provider, socket) = (fixture.provider, fixture.socket)
-        let memberListID = fixture.memberListID
-        await socket.holdNextSend(opcode: 37)
-        let first = Task {
-            try await provider.subscribeToMemberList(
-                guildID: guildID, channelID: textChannelID, ranges: [0 ... 199]
-            )
-        }
-        await socket.waitForHeldSend()
-        let firstID = try #require(await provider.guildSubscriptionTaskIDs[guildID])
-        let invalidation = Task {
-            await provider.receiveGatewayDispatchForTesting(
-                name: "GUILD_MEMBER_LIST_UPDATE",
-                data: memberListInvalidation(id: memberListID, range: 100 ... 199)
-            )
-        }
-        await provider.waitForNextGuildSubscriptionForTesting(guildID: guildID, after: firstID)
-        let rateLimit: JSONValue = .object([
-            "opcode": .number(37), "retry_after": .number(60),
-            "meta": .object(["guild_id": .string("100")]),
-        ])
-        await provider.receiveGatewayDispatchForTesting(name: "RATE_LIMITED", data: rateLimit)
-        let refresh = try #require(await provider.memberListsNeedingRefresh[guildID]?[memberListID])
-        await socket.releaseHeldSend()
-        try await first.value
-        await invalidation.value
-        #expect(await provider.memberListsNeedingRefresh[guildID]?[memberListID] == refresh)
-        await #expect(throws: ChatProviderError.self) {
-            try await provider.updateMemberListViewport(
-                in: guildID, channelID: textChannelID, visibleRange: 500 ... 510
-            )
-        }
-        #expect(await provider.memberListSubscriptions[guildID]?[memberListID]?.ranges == [0 ... 199])
-        let sends = await socket.sentPayloadCount(opcode: 37)
-        #expect(await provider.runScheduledMemberListRefreshForTesting(guildID: guildID))
-        #expect(await socket.sentPayloadCount(opcode: 37) == sends + 1)
-        #expect(await provider.memberListSubscriptions[guildID]?[memberListID]?.ranges
-            == [0 ... 99, 400 ... 499, 500 ... 599])
-        #expect(await provider.memberListsNeedingRefresh[guildID]?[memberListID] == nil)
-        await provider.receiveGatewayDispatchForTesting(name: "RATE_LIMITED", data: rateLimit)
-        #expect(await provider.memberListsNeedingRefresh[guildID]?[memberListID] != nil)
-        #expect(await provider.memberListRefreshRetryTasks[guildID] == nil)
-        await provider.disconnect()
-    }
-
     @Test func `a viewable channel changing member-list identity restores its desired viewport`() async throws {
         let fixture = try await makeMemberListProvider()
         let (provider, socket) = (fixture.provider, fixture.socket)
@@ -1304,6 +1257,75 @@ private final class GatewayDispatchCountingURLProtocol: URLProtocol, @unchecked 
 }
 
 extension GatewayLifecycleEventTests {
+    @Test func `older sends preserve a newer invalidation and cooldown recovery is bounded`() async throws {
+        let fixture = try await makeMemberListProvider()
+        let (provider, socket) = (fixture.provider, fixture.socket)
+        let memberListID = fixture.memberListID
+        await socket.holdNextSend(opcode: 37)
+        let first = Task {
+            try await provider.subscribeToMemberList(
+                guildID: guildID, channelID: textChannelID, ranges: [0 ... 199]
+            )
+        }
+        await socket.waitForHeldSend()
+        let firstID = try #require(await provider.guildSubscriptionTaskIDs[guildID])
+        let invalidation = Task {
+            await provider.receiveGatewayDispatchForTesting(
+                name: "GUILD_MEMBER_LIST_UPDATE",
+                data: memberListInvalidation(id: memberListID, range: 100 ... 199)
+            )
+        }
+        await provider.waitForNextGuildSubscriptionForTesting(guildID: guildID, after: firstID)
+        let rateLimit: JSONValue = .object([
+            "opcode": .number(37), "retry_after": .number(60),
+            "meta": .object(["guild_id": .string("100")]),
+        ])
+        await provider.receiveGatewayDispatchForTesting(name: "RATE_LIMITED", data: rateLimit)
+        let refresh = try #require(await provider.memberListsNeedingRefresh[guildID]?[memberListID])
+        await socket.releaseHeldSend()
+        try await first.value
+        await invalidation.value
+        #expect(await provider.memberListsNeedingRefresh[guildID]?[memberListID] == refresh)
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.updateMemberListViewport(
+                in: guildID, channelID: textChannelID, visibleRange: 500 ... 510
+            )
+        }
+        #expect(await provider.memberListSubscriptions[guildID]?[memberListID]?.ranges == [0 ... 199])
+        let sends = await socket.sentPayloadCount(opcode: 37)
+        // Advance the first cooldown, then block a normal send ahead of the
+        // deferred refresh. A newer rejection arrives while it is queued.
+        await provider.receiveGatewayDispatchForTesting(
+            name: "RATE_LIMITED",
+            data: .object(["opcode": .number(37), "retry_after": .number(0)])
+        )
+        await socket.holdNextSend(opcode: 37)
+        let blockingSend = Task { try await provider.sendThreadMemberSubscription(guildID: guildID) }
+        await socket.waitForHeldSend()
+        let blockingID = try #require(await provider.guildSubscriptionTaskIDs[guildID])
+        let queuedRefresh = Task {
+            await provider.runScheduledMemberListRefreshForTesting(guildID: guildID)
+        }
+        await provider.waitForNextGuildSubscriptionForTesting(guildID: guildID, after: blockingID)
+        await provider.receiveGatewayDispatchForTesting(name: "RATE_LIMITED", data: rateLimit)
+        await socket.releaseHeldSend()
+        try await blockingSend.value
+        #expect(await queuedRefresh.value)
+        #expect(await socket.sentPayloadCount(opcode: 37) == sends + 1)
+        #expect(await provider.memberListRefreshRetryAttempts[guildID]?.contains(memberListID) != true)
+        #expect(await provider.memberListRefreshRetryTasks[guildID] != nil)
+        #expect(await provider.memberListsNeedingRefresh[guildID]?[memberListID] != nil)
+        #expect(await provider.runScheduledMemberListRefreshForTesting(guildID: guildID))
+        #expect(await socket.sentPayloadCount(opcode: 37) == sends + 2)
+        #expect(await provider.memberListSubscriptions[guildID]?[memberListID]?.ranges
+            == [0 ... 99, 400 ... 499, 500 ... 599])
+        #expect(await provider.memberListsNeedingRefresh[guildID]?[memberListID] == nil)
+        await provider.receiveGatewayDispatchForTesting(name: "RATE_LIMITED", data: rateLimit)
+        #expect(await provider.memberListsNeedingRefresh[guildID]?[memberListID] != nil)
+        #expect(await provider.memberListRefreshRetryTasks[guildID] == nil)
+        await provider.disconnect()
+    }
+
     @Test(arguments: [true, false])
     func `returning from an inaccessible viewport restores accessible member rows`(sharedList: Bool) async throws {
         let fixture = try await makeMemberListProvider()

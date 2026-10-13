@@ -73,7 +73,8 @@ struct NativeTimelineTextPlan: Equatable, Sendable {
         for message: Message,
         currentUserID: UserID? = nil,
         systemRecipient: User? = nil,
-        systemActorColor: NSColor? = nil
+        systemActorColor: NSColor? = nil,
+        systemLinkColor: NSColor? = nil
     ) -> Self {
         let baseFontSize: CGFloat =
             if message.type.hasGeneratedContent {
@@ -122,7 +123,8 @@ struct NativeTimelineTextPlan: Equatable, Sendable {
                     currentUserID: currentUserID,
                     recipient: systemRecipient,
                     baseFontSize: baseFontSize,
-                    actorColor: systemActorColor
+                    actorColor: systemActorColor,
+                    linkColor: systemLinkColor
                 )
             )
         } else if let prepared, prepared.tokens.isEmpty {

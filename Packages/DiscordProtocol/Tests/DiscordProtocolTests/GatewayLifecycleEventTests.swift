@@ -394,6 +394,41 @@ struct GatewayLifecycleEventTests {
         await provider.disconnect()
     }
 
+    @Test func `resumed member subscription preserves the selected channel and deep viewport`() async throws {
+        let fixture = try await makeMemberListProvider()
+        let (provider, socket) = (fixture.provider, fixture.socket)
+        // Both channels share a list, so the resumed send replaces its ranges.
+        try await provider.updateMemberListViewport(
+            in: guildID, channelID: forumChannelID, visibleRange: 150 ... 169
+        )
+        let expectedRanges = [0 ... 99, 100 ... 199]
+        let sends = await socket.sentPayloadCount(opcode: 37)
+
+        await provider.handleGatewaySessionEvent(.stateChanged(.disconnected))
+        await socket.push(gatewayMessage(
+            op: 0, data: .object([:]), sequence: 2, eventName: "RESUMED"
+        ))
+        #expect(await eventually {
+            await socket.sentPayloadCount(opcode: 37) == sends + 1
+        })
+        let payloads = await socket.sentPayloads
+        let latest = try #require(payloads.last { data in
+            let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (payload?["op"] as? NSNumber)?.intValue == 37
+        })
+        let payload = try #require(try JSONSerialization.jsonObject(with: latest) as? [String: Any])
+        let body = try #require(payload["d"] as? [String: Any])
+        let subscriptions = try #require(body["subscriptions"] as? [String: Any])
+        let guild = try #require(subscriptions[guildID.description] as? [String: Any])
+        let channels = try #require(guild["channels"] as? [String: [[Int]]])
+        #expect(channels[forumChannelID.description] == [[0, 99], [100, 199]])
+        #expect(await provider.selectedMemberListID[guildID] == fixture.memberListID)
+        let viewportRequests = await provider.memberListViewportRequests
+        #expect(viewportRequests[guildID]?.subscription
+            == DiscordMemberListSubscription(channelID: forumChannelID, ranges: expectedRanges))
+        await provider.disconnect()
+    }
+
     @Test func `concurrent member subscriptions preserve the latest ranges and thread selection`() async throws {
         let fixture = try await makeMemberListProvider()
         let (provider, socket) = (fixture.provider, fixture.socket)

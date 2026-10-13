@@ -365,7 +365,7 @@ extension DiscordRESTProvider {
                     }
                 }
                 if let pendingMemberGuildID {
-                    await attemptMemberSubscription(guildID: pendingMemberGuildID)
+                    await attemptMemberSubscription(guildID: pendingMemberGuildID, restoringViewport: true)
                 }
             }
         case .dispatch(let name, let value):
@@ -408,8 +408,16 @@ extension DiscordRESTProvider {
         )
     }
 
-    func attemptMemberSubscription(guildID: GuildID) async {
-        do { try await subscribeToMemberList(guildID: guildID) } catch {
+    func attemptMemberSubscription(guildID: GuildID, restoringViewport: Bool = false) async {
+        // RESUMED retains the selected channel and its latest requested ranges.
+        // A fresh READY clears the viewport and starts with the initial block.
+        let viewport = restoringViewport ? memberListViewportRequests[guildID]?.subscription : nil
+        do {
+            try await subscribeToMemberList(
+                guildID: guildID, channelID: viewport?.channelID,
+                ranges: viewport?.ranges ?? [DiscordMemberListRangePolicy.initialRange]
+            )
+        } catch {
             gatewayLogger.error(
                 "Lazy member-list subscription failed: \(error.localizedDescription, privacy: .public)"
             )

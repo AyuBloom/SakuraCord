@@ -156,6 +156,9 @@ An inaccessible viewport supersedes the prior selection without sending a
 subscription. Returning to an accessible retained list republishes its cached
 rows even when its ranges are unchanged; a purged shared-list alias requires a
 fresh subscription.
+Gateway resume restores the selected channel's latest requested ranges instead
+of resetting a scrolled member list to the first block. A fresh `READY` clears
+that viewport with the session snapshots and starts from the initial block.
 Member-only queue resets preserve a pending readable thread subscription and
 requeue it under the current generation. Request ownership prevents an older
 failure from removing a successor's desired thread. Closing/archiving a thread,

@@ -171,7 +171,7 @@ extension DiscordRESTProvider {
             let update = try? JSONValueDecoder().decode(
                 GatewayGuildMemberEventDTO.self, from: body
             ), let guildID = GuildID(update.guildID),
-            let member = try? update.member.domain(
+            var member = try? update.member.domain(
                 currentUserID: currentUser?.id,
                 currentStatus: presenceStatus,
                 guildRoles: cachedGuildRoles[guildID] ?? [],
@@ -179,6 +179,11 @@ extension DiscordRESTProvider {
             )
         else { return }
         let previousMember = cachedMembers[guildID]?.first { $0.id == member.id }
+        // An omitted timeout leaves the prior value intact; explicit null ends it.
+        if name == "GUILD_MEMBER_UPDATE", case let .object(fields) = body,
+           fields["communication_disabled_until"] == nil {
+            member.communicationDisabledUntil = previousMember?.communicationDisabledUntil
+        }
         let membershipAdded = quickSwitcherGuildMemberUserIDsByGuildID[guildID, default: []].insert(member.id).inserted
         let wasJoined = quickSwitcherJoinedMemberIDsByGuildID[guildID]?.contains(member.id) == true
         if update.member.joinedAt != nil, member.isPending != true {
@@ -241,6 +246,9 @@ extension DiscordRESTProvider {
         if update.guildID == nil {
             cachePrivatePresence(update)
             continuation?.yield(.privateMembersChanged(privateMembersInChannelOrder()))
+            if let userID = UserID(update.user.id) {
+                publishRelationshipPresences(complete: false, userIDs: [userID])
+            }
             return
         }
         guard let guildID = update.guildID.flatMap(GuildID.init),

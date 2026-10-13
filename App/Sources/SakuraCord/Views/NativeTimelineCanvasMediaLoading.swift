@@ -184,6 +184,7 @@ extension NativeTimelineCanvasView {
             if !dirtyRect.isNull {
                 self.setNeedsDisplay(dirtyRect)
             }
+            self.refreshSendTransitionContent(for: identifiers)
         }
     }
 
@@ -335,6 +336,9 @@ extension NativeTimelineCanvasView {
             (author?.user ?? message.author).avatarDecorationURL
         {
             keys.append(.avatarDecoration(url))
+        }
+        if let url = layout.serverTagRegion?.presentation.identity.badgeURL {
+            keys.append(.media(url, maximumPixelDimension: 32))
         }
         if let url = message.interactionMetadata?.user?.avatarURL {
             keys.append(.avatar(url))
@@ -506,7 +510,9 @@ extension NativeTimelineCanvasView {
                           store: spoilerRevealStore
                       )
                 else { continue }
-                keys.append(.media(media.displayURL))
+                if let previewURL = media.previewURL {
+                    keys.append(.media(previewURL))
+                }
             }
             for button in componentLayout.buttons {
                 guard !NativeTimelineSpoilerConcealmentPolicy

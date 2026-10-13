@@ -822,6 +822,7 @@ extension AppModel {
     }
 
     func updateOutgoingState(_ state: OutboxState, nonce: String, channelID: ChannelID) {
+        composer.outbox.updateState(state, nonce: nonce, channelID: channelID)
         if openThread?.id == channelID,
            let index = threadMessages.firstIndex(where: { $0.nonce == nonce })
         {
@@ -860,13 +861,18 @@ extension AppModel {
     }
 
     func outgoingState(nonce: String, channelID: ChannelID) -> OutboxState? {
+        let visibleState: OutboxState?
         if openThread?.id == channelID {
-            return threadMessages.first { $0.nonce == nonce }?.outboxState
+            visibleState = threadMessages.first { $0.nonce == nonce }?.outboxState
+        } else if selectedChannelID == channelID {
+            visibleState = messages.first { $0.nonce == nonce }?.outboxState
+        } else {
+            visibleState = messageCache[channelID]?.first { $0.nonce == nonce }?.outboxState
         }
-        if selectedChannelID == channelID {
-            return messages.first { $0.nonce == nonce }?.outboxState
-        }
-        return messageCache[channelID]?.first { $0.nonce == nonce }?.outboxState
+        // Fresh authoritative history can settle a failed send even when its
+        // Gateway event was missed. An old optimistic row cannot downgrade it.
+        if visibleState == .confirmed { return .confirmed }
+        return composer.outbox.state(nonce: nonce, channelID: channelID) ?? visibleState
     }
 
     func reconcileThread(_ message: Message) {
@@ -923,8 +929,13 @@ extension AppModel {
         return lowerBound
     }
 
+    /// Unconfirmed local sends stay below settled messages in submission
+    /// order. A confirmation carries a later server timestamp than the local
+    /// time of the sends queued behind it, so it settles in place.
     static func messagePrecedes(_ lhs: Message, _ rhs: Message) -> Bool {
-        lhs.timestamp != rhs.timestamp ? lhs.timestamp < rhs.timestamp : lhs.id < rhs.id
+        let lhsUnconfirmed = lhs.isUnconfirmedLocalSend
+        if lhsUnconfirmed != rhs.isUnconfirmedLocalSend { return !lhsUnconfirmed }
+        return lhs.timestamp != rhs.timestamp ? lhs.timestamp < rhs.timestamp : lhs.id < rhs.id
     }
 
     func cache(_ message: Message) {

@@ -2,6 +2,12 @@ import DiscordProtocol
 import Foundation
 import SakuraCordModels
 
+/// The Direct Messages home destinations: Friends above every conversation.
+nonisolated enum DirectMessageSidebarSelection: Hashable, Sendable {
+    case friends
+    case channel(ChannelID)
+}
+
 extension AppModel {
     func selectGuild(_ guildID: GuildID?) {
         startConversationNavigation { model, account in
@@ -16,7 +22,8 @@ extension AppModel {
     }
 
     private var navigationChannel: Channel? {
-        snapshot?.channels.first { $0.id == selectedChannelID }
+        if isThreadFullWidth, let openThread { return threadNavigationChannel(openThread) }
+        return snapshot?.channels.first { $0.id == selectedChannelID }
             ?? visibleChannels.first { $0.id == selectedChannelID }
     }
 
@@ -91,6 +98,7 @@ extension AppModel {
     }
 
     func updateMemberListViewport(_ visibleRange: ClosedRange<Int>) {
+        guard !isThreadFullWidth || openThreadParentChannel?.kind == .announcement else { return }
         guard let guildID = selectedGuildID,
               let channelID = selectedChannelID
         else { return }
@@ -214,6 +222,10 @@ extension AppModel {
         historyDestination: ConversationNavigationHistory.Destination? = nil
     ) {
         onboarding.presentedGuildID = nil
+        if let thread = sidebarThread(channelID) {
+            openSidebarThread(thread, historyDestination: historyDestination)
+            return
+        }
         guard
             let channel = snapshot?.channels.first(where: { $0.id == channelID })
             ?? visibleChannels.first(where: { $0.id == channelID })
@@ -229,6 +241,7 @@ extension AppModel {
                   model.isCurrentAccountSession(account)
             else { return }
             model.recordForwardDestinationVisit(channel.id)
+            model.closeThread()
             model.selectedChannelID = channel.id
         }
     }
@@ -237,7 +250,8 @@ extension AppModel {
         to guildID: GuildID?,
         linkedChannelID channelID: ChannelID,
         messageID: MessageID? = nil,
-        initialMessages: [Message] = []
+        initialMessages: [Message] = [],
+        fullWidthThread: Bool = false
     ) {
         let isKnownRootChannel =
             snapshot?.channels.contains(where: { $0.id == channelID }) == true
@@ -311,6 +325,7 @@ extension AppModel {
                 post,
                 initialMessages: initialMessages,
                 messageID: messageID,
+                fullWidth: fullWidthThread,
                 session: session
             )
         }
@@ -320,19 +335,27 @@ extension AppModel {
         _ post: ForumPost,
         initialMessages: [Message],
         messageID: MessageID?,
+        fullWidth: Bool,
         session: AppModelAccountSession
     ) async {
-        if initialMessages.isEmpty {
-            open(post)
-        } else {
+        let wasShowingMessage = openThread?.id == post.id
+            && threadMessages.contains(where: { $0.id == messageID })
+        // Search keeps the results beside the destination conversation, so
+        // establish the thread's primary-pane presentation before loading it.
+        if !initialMessages.isEmpty || openThread?.id != post.id {
             readState.merge(forumPost: post)
             openThreadConversation(
                 post.thread,
                 starter: post.owner ?? post.firstMessage?.author,
                 startedAt: post.firstMessage?.timestamp ?? post.createdAt,
                 starterMessageID: post.firstMessage?.id,
-                initialMessages: initialMessages
+                initialMessages: initialMessages.isEmpty
+                    ? post.firstMessage.map { [$0] } ?? [] : initialMessages,
+                fullWidth: fullWidth
             )
+        } else if fullWidth {
+            isThreadFullWidth = true
+            suspendSelectedConversationPresentation()
         }
         guard let messageID else { return }
         await threadLoadTask?.value
@@ -375,11 +398,16 @@ extension AppModel {
         messageNavigationRequest = MessageNavigationRequest(
             requestID: messageNavigationRequestID,
             channelID: post.id,
-            messageID: messageID
+            messageID: messageID,
+            glides: wasShowingMessage
         )
     }
 
-    func navigate(to guildID: GuildID?, channelID: ChannelID, messageID: MessageID) {
+    func navigate(
+        to guildID: GuildID?,
+        channelID: ChannelID,
+        messageID: MessageID
+    ) {
         startConversationNavigation { [weak self] _, session in
             guard let self else { return }
             if selectedGuildID != guildID {
@@ -393,6 +421,9 @@ extension AppModel {
                 errorMessage = "That message's channel has not been discovered yet."
                 return
             }
+            let wasShowingMessage = !isThreadFullWidth && selectedChannelID == channel.id
+                && messages.contains(where: { $0.id == messageID })
+            closeThread()
             if selectedChannelID != channel.id {
                 selectedChannelID = channel.id
             }
@@ -440,7 +471,8 @@ extension AppModel {
             messageNavigationRequest = MessageNavigationRequest(
                 requestID: messageNavigationRequestID,
                 channelID: channel.id,
-                messageID: messageID
+                messageID: messageID,
+                glides: wasShowingMessage
             )
         }
     }
@@ -503,8 +535,18 @@ extension AppModel {
         // Snapshot this before changing the selected guild. A synchronous
         // workspace projection may select that guild's first channel while
         // activation is in flight, which must not replace the user's memory.
-        let rememberedChannelID = guildID.flatMap { lastOpenedChannelIDsByGuild[$0] }
+        let rememberedDirectMessage = lastDirectMessageSelection
+        let rememberedChannelID: ChannelID? = if let guildID {
+            lastOpenedChannelIDsByGuild[guildID]
+        } else if case .channel(let channelID) = rememberedDirectMessage {
+            channelID
+        } else { nil }
+        let keepsFriends = guildID == nil && (rememberedDirectMessage == .friends || friends.isPresented)
         dismissAllProfiles()
+        // Friends stays the Direct Messages home; clear the server channel
+        // first so automatic reselection does not replace it.
+        if keepsFriends { selectedChannelID = nil }
+        if guildID == nil { friends.isPresented = keepsFriends }
         selectedGuildID = guildID
         refreshSelectedGuildOnboarding()
         beginCurrentUserProfilePrefetch(in: guildID, account: session)
@@ -554,6 +596,11 @@ extension AppModel {
             await loadEmojis(for: guildID)
             guard isCurrentAccountSession(session) else { return }
         }
+        restoreGuildChannelSelection(guildID: guildID, rememberedChannelID: rememberedChannelID, keepsFriends: keepsFriends)
+        beginMemberLoad(for: guildID)
+    }
+
+    private func restoreGuildChannelSelection(guildID: GuildID?, rememberedChannelID: ChannelID?, keepsFriends: Bool) {
         let permissionBasis = guildID.flatMap {
             conversationPermissionBasis(for: $0)
         }
@@ -572,9 +619,12 @@ extension AppModel {
                 ? rememberedID
                 : nil
         }
-        if restoredChannelID != nil
-            || !visibleChannels.contains(where: { $0.id == selectedChannelID })
-        {
+        if keepsFriends {
+            friends.isPresented = true
+            selectedChannelID = nil
+            lastDirectMessageSelection = .friends
+        }
+        if !keepsFriends, restoredChannelID != nil || !visibleChannels.contains(where: { $0.id == selectedChannelID }) {
             let preferredChannelID = restoredChannelID
                 ?? Self.preferredInitialChannelID(in: selectableChannels)
             pendingAutomaticChannelAccessID = preferredChannelID.flatMap { id in
@@ -586,8 +636,11 @@ extension AppModel {
                 }
             }
             selectedChannelID = preferredChannelID
+            if guildID == nil, preferredChannelID == nil {
+                friends.isPresented = true
+                lastDirectMessageSelection = .friends
+            }
         }
-        beginMemberLoad(for: guildID)
     }
 
     func restoreMemberPresentation(for guildID: GuildID?) {

@@ -4,13 +4,19 @@ import SakuraCordModels
 import SwiftUI
 import UserNotifications
 
-@main
+/// Starts the application from the executable while keeping its implementation shared with tests.
+@MainActor
+public func runSakuraCord() {
+    SakuraCordApp.main()
+}
+
 struct SakuraCordApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
     private let opensForumPerformanceFixture: Bool
     private let opensChatPerformanceFixture: Bool
     private let opensPinsPerformanceFixture: Bool
+    private let runsFriendsPerformanceBenchmark: Bool
     private let runsChatLiveArrivalStress: Bool
     private let runsAuthenticatedNavigationBenchmark: Bool
     private let runsAuthenticatedAccountSwitchBenchmark: Bool
@@ -31,6 +37,7 @@ struct SakuraCordApp: App {
         opensForumPerformanceFixture = configuration.includesForumPerformanceFixture
         opensChatPerformanceFixture = configuration.includesChatPerformanceFixture
         opensPinsPerformanceFixture = configuration.includesPinsPerformanceFixture
+        runsFriendsPerformanceBenchmark = configuration.runsFriendsPerformanceBenchmark
         runsChatLiveArrivalStress = configuration.runsChatLiveArrivalStress
         runsAuthenticatedNavigationBenchmark =
             configuration.runsAuthenticatedNavigationBenchmark
@@ -64,8 +71,11 @@ struct SakuraCordApp: App {
                 pinnedMessageCount: configuration.includesPinsPerformanceFixture ? 5_000 : nil,
                 timelineIncludesAnimatedMedia:
                     configuration.includesChatMediaPerformanceFixture,
+                timelineIncludesVoiceMessages:
+                    configuration.includesChatVoicePerformanceFixture,
                 includesIncomingPrivateCall:
-                    configuration.includesIncomingPrivateCallFixture
+                    configuration.includesIncomingPrivateCallFixture,
+                friendCount: configuration.runsFriendsPerformanceBenchmark ? 1_000 : nil
             )
             : nil
         performanceMockProvider = mockProvider
@@ -90,6 +100,7 @@ struct SakuraCordApp: App {
         AppAppearanceController.shared.apply(
             appModel.appearanceSettings.colorScheme
         )
+        InterfaceScale.shared.update(appModel.appearanceSettings.interfaceSize)
         SakuraCordRuntimeModelHolder.shared.model = appModel
         _model = State(initialValue: appModel)
     }
@@ -99,9 +110,16 @@ struct SakuraCordApp: App {
         // every previously opened main window on the next launch.
         Window("SakuraCord", id: "main") {
             RootView(model: model)
+                .modifier(TranslationTaskHost(coordinator: model.translation.coordinator))
+                .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in
+                    model.resetAllTranslations()
+                }
                 .focusedSceneValue(\.shortcutCommandContext, .workspace(model))
                 .windowModalInputScope()
-                .frame(minWidth: 860, minHeight: 560)
+                .frame(
+                    minWidth: ChatChromeMetrics.windowMinimumSize.width,
+                    minHeight: ChatChromeMetrics.windowMinimumSize.height
+                )
                 .onAppear {
                     appDelegate.model = model
                     AppPerformanceSignposts.reportRootViewAppeared()
@@ -147,6 +165,9 @@ struct SakuraCordApp: App {
                         model.selectedChannelID = ChannelID(rawValue: 220)
                     } else if opensChatPerformanceFixture {
                         model.selectedChannelID = ChannelID(rawValue: 210)
+                    }
+                    if runsFriendsPerformanceBenchmark {
+                        await FriendsPerformanceBenchmark.run(model: model, provider: performanceMockProvider)
                     }
                     if opensPinsPerformanceFixture {
                         await model.channelLoadTask?.value

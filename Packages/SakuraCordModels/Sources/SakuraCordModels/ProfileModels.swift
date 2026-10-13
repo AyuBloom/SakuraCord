@@ -141,7 +141,7 @@ public struct UserProfile: Identifiable, Codable, Hashable, Sendable {
         user.id
     }
 
-    /// Nil when an older profile response did not report visibility.
+    /// Nil when the profile response did not report visibility.
     public var isPrivate: Bool?
     public var user: User
     public var displayName: String

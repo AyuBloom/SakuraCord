@@ -27,17 +27,24 @@ struct ProfileAvatarExpansion: ViewModifier {
 }
 
 struct ProfileQuickMessageView: View {
-    let user: User
+    let displayName: String
     let send: (String, String) async -> Bool
+    var releaseNonce: (String) -> Void = { _ in }
     @State private var draft = ""
     @State private var nonce = ClientNonce.make()
     @State private var isSending = false
-    @State private var result: String?
+    @State private var result: LocalizedStringResource?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                TextField("Message @\(user.displayName)", text: $draft)
+        VStack(alignment: .leading, spacing: InterfaceScale.metric(6)) {
+            HStack(spacing: InterfaceScale.metric(8)) {
+                TextField("Message @\(displayName)", text: Binding(
+                    get: { draft },
+                    set: {
+                        draft = $0
+                        result = nil
+                    }
+                ))
                     .textFieldStyle(.plain)
                     .onSubmit(submit)
                     .disabled(isSending)
@@ -53,17 +60,20 @@ struct ProfileQuickMessageView: View {
                     .accessibilityLabel("Send message")
                 }
             }
-            .padding(12)
+            .padding(InterfaceScale.metric(12))
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
             .overlay { RoundedRectangle(cornerRadius: 8).stroke(.separator, lineWidth: 1) }
             if let result {
-                Text(result).font(.caption).foregroundStyle(.secondary)
+                Text(result).font(.interface(.caption)).foregroundStyle(.secondary)
             }
         }
-        .onChange(of: draft) { _, value in
-            if !isSending { nonce = ClientNonce.make() }
-            if !value.isEmpty { result = nil }
+        .onChange(of: draft) { _, _ in
+            if !isSending {
+                releaseNonce(nonce)
+                nonce = ClientNonce.make()
+            }
         }
+        .onDisappear { releaseNonce(nonce) }
     }
 
     private func submit() {
@@ -75,6 +85,7 @@ struct ProfileQuickMessageView: View {
         Task { @MainActor in
             let sent = await send(content, submissionNonce)
             if sent {
+                releaseNonce(submissionNonce)
                 draft = ""
                 nonce = ClientNonce.make()
             }

@@ -11,30 +11,30 @@ struct EmojiAutocompleteRow: View {
 
     var body: some View {
         Button(action: select) {
-            HStack(spacing: 9) {
+            HStack(spacing: InterfaceScale.metric(9)) {
                 if let url = suggestion.imageURL {
                     AnimatedRemoteImage(
                         url: url,
                     )
-                        .frame(width: 28, height: 28)
+                        .frame(width: InterfaceScale.metric(28), height: InterfaceScale.metric(28))
                 } else {
                     Text(suggestion.value)
-                        .font(.title3)
-                        .frame(width: 28, height: 28)
+                        .font(.interface(.title3))
+                        .frame(width: InterfaceScale.metric(28), height: InterfaceScale.metric(28))
                 }
                 Text(suggestion.detail)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Spacer(minLength: 10)
+                Spacer(minLength: InterfaceScale.metric(10))
                 if let source = suggestion.source {
                     Text(source)
-                        .font(.callout)
+                        .font(.interface(.callout))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 9)
-            .frame(height: 40)
+            .padding(.horizontal, InterfaceScale.metric(9))
+            .frame(height: InterfaceScale.metric(40))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -58,7 +58,7 @@ struct EmojiAutocompleteRow: View {
 struct UploadProgressView: View {
     let progress: MessageSendProgress
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: InterfaceScale.metric(8)) {
             switch progress {
             case .preparing:
                 ProgressView()
@@ -69,7 +69,7 @@ struct UploadProgressView: View {
             case let .uploading(fileName, completed, total):
                 ProgressView(value: total > 0 ? Double(completed) / Double(total) : 0)
                     .tint(SakuraCordAccentColor.color)
-                    .frame(width: 90)
+                    .frame(width: InterfaceScale.metric(90))
                 Text("Uploading \(fileName)…").lineLimit(1)
             case .submitting:
                 ProgressView()
@@ -82,7 +82,7 @@ struct UploadProgressView: View {
                 Text("Sent")
             }
         }
-        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 6)
+        .font(.interface(.caption)).foregroundStyle(.secondary).padding(.horizontal, InterfaceScale.metric(6))
     }
 }
 
@@ -112,6 +112,8 @@ struct ComposerActionButton: View {
     var showsHoverBackground = true
     var appearance: ComposerBarAppearance = .defaultStyle
     var cornerRadius: CGFloat?
+    /// A destructive button is tinted red, like the message delete action.
+    var role: ButtonRole?
     var onHoverChanged: ((Bool) -> Void)?
     let action: (() -> Void)?
 
@@ -122,7 +124,7 @@ struct ComposerActionButton: View {
     var body: some View {
         Group {
             if let action {
-                Button(action: action) { buttonLabel }
+                Button(role: role, action: action) { buttonLabel }
             } else {
                 buttonLabel
             }
@@ -140,10 +142,15 @@ struct ComposerActionButton: View {
     private var buttonLabel: some View {
         icon
             .symbolVariant(.none)
-            .font(.system(size: iconSize, weight: iconWeight))
-            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+            .font(.interfaceSystem(size: iconSize, weight: iconWeight))
+            .foregroundStyle(iconColor)
             .frame(width: size, height: size)
             .contentShape(buttonShape)
+    }
+
+    private var iconColor: Color {
+        if role == .destructive { return .red }
+        return colorScheme == .dark ? .white : .black
     }
 
     private var buttonShape: AnyShape {
@@ -162,14 +169,13 @@ struct ComposerActionButton: View {
         case .defaultStyle:
             AnyShape(Circle())
         case .legacy:
-            AnyShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            AnyShape(RoundedRectangle(cornerRadius: InterfaceScale.metric(9), style: .continuous))
         }
     }
 
     private var hoverColor: Color {
-        showsHoverBackground && isHovering && isEnabled
-            ? .primary.opacity(0.14)
-            : .clear
+        guard showsHoverBackground, isHovering, isEnabled else { return .clear }
+        return role == .destructive ? .red.opacity(0.18) : .primary.opacity(0.14)
     }
 }
 
@@ -200,7 +206,7 @@ struct ComposerSendButton: View {
 
     private var buttonLabel: some View {
         Image(systemName: "paperplane.circle.fill")
-            .font(.system(size: 21, weight: .medium))
+            .font(.interfaceSystem(size: 21, weight: .medium))
             .foregroundStyle(
                 isEnabled && !isSlowmodeBlocked
                     ? (colorScheme == .dark ? Color.white : Color.black)
@@ -218,7 +224,7 @@ struct ComposerSendButton: View {
         case .defaultStyle:
             AnyShape(Circle())
         case .legacy:
-            AnyShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            AnyShape(RoundedRectangle(cornerRadius: InterfaceScale.metric(9), style: .continuous))
         }
     }
 

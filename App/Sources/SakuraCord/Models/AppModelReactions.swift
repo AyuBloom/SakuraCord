@@ -4,13 +4,14 @@ import SakuraCordModels
 
 extension AppModel {
     func edit(_ message: Message, content: String) async {
-        guard !message.hasPoll else { return }
+        guard !message.hasPoll, !message.flags.contains(.voiceMessage) else { return }
         let session = accountSession()
         do {
             let updated = try await session.provider.edit(
                 messageID: message.id, channelID: message.channelID, content: content
             )
             guard isCurrentAccountSession(session) else { return }
+            invalidateMessageTranslation(updated.id, content: updated.content)
             let reconciled = reconcileVisibleOrCached(updated)
             recordAuthoritativeMessageUpsert(reconciled)
         } catch {
@@ -39,6 +40,7 @@ extension AppModel {
 
     func dismissEphemeralMessage(_ message: Message) {
         guard message.flags.contains(.ephemeral) else { return }
+        invalidateMessageTranslation(message.id)
         if message.channelID == selectedChannelID {
             mutateSelectedMessages {
                 $0.removeAll { $0.id == message.id }
@@ -86,6 +88,7 @@ extension AppModel {
             )
         state.emoji = emoji
         state.desiredReacted.toggle()
+        if state.desiredReacted { recordReactionEmojiUsage(emoji) }
         state.generation &+= 1
         reactionMutations[key] = state
         applyCurrentUserReactionState(state.desiredReacted, for: key, emoji: emoji)

@@ -77,14 +77,14 @@ extension AppModel {
         if channelID == selectedChannelID {
             guard await prepareChannelMessageSubmission(channelID: channelID, account: session) else { return .rejected }
         }
-        guard isCurrentAccountSession(session), canCreatePoll(in: channelID) else { return .rejected }
-        // The poll appears as an outgoing message with retry, so the creator
-        // does not wait for the server.
-        startAccountChildTask(account: session) { model, _ in
-            _ = await model.sendChannelMessage(channelID: channelID, content: "", replyTo: nil,
-                                               replyPreview: nil, attachments: [], clearsComposer: false, poll: poll)
-        }
-        return .enqueued(serverConfirmed: false)
+        guard isCurrentAccountSession(session), canCreatePoll(in: channelID),
+              allowOutgoingQueueSubmission(),
+              // The poll appears as an outgoing message with retry, so the
+              // creator does not wait for the server.
+              let delivery = enqueueChannelMessage(channelID: channelID, content: "", replyTo: nil,
+                                                   replyPreview: nil, attachments: [], clearsComposer: false, poll: poll)
+        else { return .rejected }
+        return .enqueued(delivery: delivery)
     }
 
     /// Shows the current user's selection immediately and coalesces requests.
@@ -179,8 +179,8 @@ extension AppModel {
 }
 
 extension AppModel {
-    func messageSearchPagePreservingPollVotes(_ incoming: MessageSearchPage) -> MessageSearchPage {
-        let mutations = messageSearch.pollRefreshJournal?.mutationsByMessageID ?? [:]
+    func messageSearchPagePreservingPollVotes(_ incoming: MessageSearchPage, search: MessageSearchState? = nil) -> MessageSearchPage {
+        let mutations = (search ?? messageSearch).pollRefreshJournal?.mutationsByMessageID ?? [:]
         guard !pollVoteMutations.isEmpty || !mutations.isEmpty else { return incoming }
         var page = incoming
         for resultIndex in page.results.indices {
@@ -196,28 +196,30 @@ extension AppModel {
     }
 
     func reconcilePollSearchMessage(_ message: Message) {
-        guard message.poll != nil, var page = messageSearch.page else { return }
-        var changed = false
-        for resultIndex in page.results.indices {
-            for index in page.results[resultIndex].messages.indices
-            where page.results[resultIndex].messages[index].id == message.id {
-                guard page.results[resultIndex].messages[index].poll != message.poll else { continue }
-                page.results[resultIndex].messages[index].poll = message.poll
-                page.results[resultIndex].messages[index].hasPoll = true
-                changed = true
+        for search in retainedMessageSearches {
+            guard message.poll != nil, var page = search.page else { continue }
+            var changed = false
+            for resultIndex in page.results.indices {
+                for index in page.results[resultIndex].messages.indices
+                where page.results[resultIndex].messages[index].id == message.id {
+                    guard page.results[resultIndex].messages[index].poll != message.poll else { continue }
+                    page.results[resultIndex].messages[index].poll = message.poll
+                    page.results[resultIndex].messages[index].hasPoll = true
+                    changed = true
+                }
             }
+            guard changed else { continue }
+            let oldRows = search.rows
+            search.page = page
+            search.rows = MessageSearchPresentation.rows(for: page, channelsByID: messageSearchChannelsByID(additionalChannels: page.channels))
+            let revision = search.rowsRevision &+ 1
+            search.rowsUpdateJournal.append(MessageRowsUpdateRecordBuilder.make(oldRows: oldRows, newRows: search.rows, revision: revision))
+            search.rowsRevision = revision
         }
-        guard changed else { return }
-        let oldRows = messageSearch.rows
-        messageSearch.page = page
-        messageSearch.rows = MessageSearchPresentation.rows(for: page, channelsByID: messageSearchChannelsByID(additionalChannels: page.channels))
-        let revision = messageSearch.rowsRevision &+ 1
-        messageSearch.rowsUpdateJournal.append(MessageRowsUpdateRecordBuilder.make(oldRows: oldRows, newRows: messageSearch.rows, revision: revision))
-        messageSearch.rowsRevision = revision
     }
 
     func recordPollRefreshMutation(_ mutation: ConversationRefreshMutation, messageID: MessageID, channelID: ChannelID) {
-        guard pollResultRefreshJournals[messageID] != nil || messageSearch.pollRefreshJournal != nil else { return }
+        guard pollResultRefreshJournals[messageID] != nil || retainedMessageSearches.contains(where: { $0.pollRefreshJournal != nil }) else { return }
         let updates: [MessagePollUpdate]
         switch mutation {
         case .upsert(let message):
@@ -235,7 +237,9 @@ extension AppModel {
         var patch = MessageUpdate(messageID: messageID, channelID: channelID)
         patch.pollUpdates = updates
         pollResultRefreshJournals[messageID]?.record(.patch(patch), messageID: messageID)
-        messageSearch.pollRefreshJournal?.record(.patch(patch), messageID: messageID)
+        for search in retainedMessageSearches {
+            search.pollRefreshJournal?.record(.patch(patch), messageID: messageID)
+        }
     }
 
     func loadUnknownPollResults(_ message: Message) async {

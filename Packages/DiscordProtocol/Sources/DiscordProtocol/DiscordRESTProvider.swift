@@ -60,6 +60,8 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     static let maximumReactionReactorCacheEntries = 256
     static let maximumConcurrentReactionReactorReads = 4
 
+    var prepareEmojiFrecencySave: (@Sendable () async -> EmojiFrecencySaveContribution?)?
+
     var credentialSource: DiscordCredentialSource
     var accountID: String?
     var restSession: URLSession
@@ -154,7 +156,6 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
         [String: [UUID: CheckedContinuation<Void, Never>]] = [:]
     var requestSafetyCircuitIsOpen = false
     var requestSafetyStopReason = "Discord networking is stopped for this session."
-    var unexpectedNotFoundCounts: [String: Int] = [:]
     var gatewaySession: GatewaySession?
     var gatewayEventTask: Task<Void, Never>?
     var gatewayGuildIDs: [GuildID] = []
@@ -185,6 +186,8 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
         [GuildID: [String: [GuildMemberListUpdateDTO.Item?]]] = [:]
     var cachedMemberListGroups:
         [GuildID: [String: [GuildMemberListGroup]]] = [:]
+    var threadMemberSubscriptions: [GuildID: [ChannelID]] = [:]
+    var cachedThreadMemberIDs: [ChannelID: [UserID]] = [:]
     var selectedMemberListID: [GuildID: String] = [:]
     var memberListSubscriptions:
         [GuildID: [String: DiscordMemberListSubscription]] = [:]
@@ -213,6 +216,16 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var cachedFriendUserIDs: Set<UserID> = []
     var cachedBlockedOrIgnoredUserIDs: Set<UserID> = []
     var cachedRelationshipNicknamesByUserID: [UserID: String] = [:]
+    /// Authoritative relationship records; the friend and nickname caches derive from them.
+    var cachedRelationships: [UserID: RelationshipRecord] = [:]
+    /// Advances with each READY; a full relationship read is scoped to one.
+    var relationshipGeneration: UInt64 = 0
+    /// The generation whose full relationship read has started or finished.
+    var relationshipLoadGeneration: UInt64?
+    /// Per-user revisions keep unrelated relationship events from suppressing saves.
+    var relationshipRevisions: [UserID: UInt64] = [:]
+    var cachedUserRevisions: [String: UInt64] = [:]
+    var relationshipUserPublicationTask: Task<Void, Never>?
     var cachedGuildRoles: [GuildID: [GuildRoleDTO]] = [:]
     var guildRoleTasks: [GuildID: Task<[GuildRoleDTO], Error>] = [:]
     var pendingMemberSearchRequests: [String: PendingMemberSearchRequest] = [:]
@@ -240,6 +253,7 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var profileEditingGeneration: UInt64 = 0
     var profilePresentationGeneration: UInt64 = 0
     var profilePresentationRevisions: [UserID: UInt64] = [:]
+    var memberPresentationRevisions: [ProfileCacheKey: UInt64] = [:]
     var profileResponses: [ProfileCacheKey: UserProfileDTO] = [:]
     var profileSaveID: UUID?
     var cachedEmojis: [GuildID: EmojiCacheEntry] = [:]

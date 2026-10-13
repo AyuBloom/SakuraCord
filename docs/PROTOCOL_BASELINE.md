@@ -14,6 +14,7 @@ dated observations establish why a wire shape was chosen.
 | [Messages and uploads](protocol/MESSAGING.md) | Sends, history, reactions, polls, threads, commands, media preparation. |
 | [Read state and Inbox](protocol/READ_STATE.md) | Acknowledgements, Undo, mentions, events, notifications. |
 | [Guilds and membership](protocol/GUILDS.md) | Invites, onboarding, channel customization, Guide, member discovery. |
+| [Friends and relationships](protocol/RELATIONSHIPS.md) | Relationship records, friend presence, requests, blocking, CAPTCHA replay. |
 | [Profiles and synchronized settings](protocol/SETTINGS.md) | Profile saves, widgets, status, protobuf updates, folders and favourites. |
 | [Voice and streams](protocol/VOICE.md) | Calls, screen sharing, voice recovery, soundboard. |
 
@@ -32,9 +33,13 @@ Development owns [launch and verification procedures](DEVELOPMENT.md).
 - Keep retries bounded. A lost mutation response does not establish that the
   server rejected the action. Reconcile through returned state/Gateway rather
   than replaying an ambiguous mutation automatically.
-- Permission/not-found errors remain operation-scoped when they do not indicate
-  an account/session failure. Authentication, restrictions, unsupported challenges
-  and malformed mutation responses retain the shared safety boundary.
+- Non-rate-limit REST rejections remain operation-scoped, including restrictions, unsupported
+  challenges, invalid mutation payloads and repeated not-found responses. Surface
+  the operation's error and keep unrelated REST/Gateway work available; do not
+  replay rejected mutations automatically. Only invalid authentication stops the
+  account session. Local event-delivery overflow still invalidates an incomplete
+  session projection. This is SakuraCord's recovery policy; wire contracts and
+  attempt budgets are unchanged.
 - Preserve typed snowflakes and unknown protobuf fields. Presentation order,
   cache presence and missing optional fields are not substitutes for permission
   checks or authoritative state.
@@ -49,6 +54,7 @@ and each topic's contract tests before changing them.
 | --- | --- |
 | Ordinary authenticated read, including read-only DM-search POST | At most two created requests: retry after server `429` cooldown or once on a replacement pool after a confirmed REST stall. |
 | Ordinary authenticated mutation | One attempt; no automatic replay after `429`, timeout or ambiguous result. |
+| Message creation (ordinary, sticker and poll sends) | Original plus at most four replays after a non-slowmode `429` cooldown, retaining the nonce. Slowmode `429`, timeouts and ambiguous results are not replayed. See [sends](protocol/MESSAGING.md#sends-and-history). |
 | User-initiated status/custom-status save | One additional `429` attempt when the server delay is at most 30 seconds. Automatic pending-status saves do not retry. See [status](protocol/SETTINGS.md#status-and-custom-status). |
 | Command-index readiness | At most three created GETs for the tested `202`/`429` flow. |
 | Message-search indexing | Original plus at most five `202` retries, using the server delay or a five-second fallback when absent. Each logical read retains the ordinary read budget. |
@@ -57,7 +63,8 @@ and each topic's contract tests before changing them.
 | Password/MFA | Original plus at most two bounded retries for the documented transient status set above. |
 | Report-service OAuth2 authorization | One ordinary read of the consent details, then one authorizing POST that is never replayed. See [report-service sign-in](protocol/SESSION.md#report-service-sign-in). |
 | Remote-auth ticket exchange | Original plus at most three bounded transient-status retries. |
-| User-completed login or invite CAPTCHA | At most one challenged-request replay after human completion; a second challenge terminates the attempt. |
+| User-completed login, server-join or relationship CAPTCHA | At most one challenged-request replay after human completion; a second challenge terminates the attempt. |
+| Full relationship read | At most once per Gateway connection, on the ordinary read budget. |
 
 A later explicit user action is distinct from automatic retry. Message retry
 retains its nonce; operation-specific exceptions must be documented beside their

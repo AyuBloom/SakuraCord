@@ -60,12 +60,12 @@ extension NativeTimelineCanvasView {
 
     func accessibilityMessageActions(
         _ row: MessageRowPresentation,
-        rowFrame: CGRect,
         rowIndex: Int
     ) -> [NSAccessibilityCustomAction] {
         let message = row.message
         guard MessageOutboxPresentation.interactionMode(for: message).allowsMessageContextMenu else { return [] }
-        let canEdit = !message.hasPoll && message.author.id == model?.snapshot?.currentUser.id
+        let canEdit = !message.hasPoll && !message.flags.contains(.voiceMessage)
+            && message.author.id == model?.snapshot?.currentUser.id
             && MessageReplyPresentationPolicy.allowsReplyAction(for: message)
         let canDelete = model?.canDeleteMessage(message) == true
         if messageInteractionContext != .conversation {
@@ -87,10 +87,7 @@ extension NativeTimelineCanvasView {
             })
             return result
         }
-        result.append(accessibilityReactionAction(
-            for: message,
-            rowFrame: rowFrame
-        ))
+        result.append(accessibilityReactionAction(for: message))
         if MessageReplyPresentationPolicy.allowsReplyAction(for: message),
            let reply = actions?.reply
         {
@@ -129,6 +126,9 @@ extension NativeTimelineCanvasView {
         if let pinAction = pinAccessibilityAction(for: message) {
             result.append(pinAction)
         }
+        if !row.isResource {
+            result.append(contentsOf: translationAccessibilityActions(for: message))
+        }
         result.append(NSAccessibilityCustomAction(
             name: "Copy Text"
         ) {
@@ -160,21 +160,11 @@ extension NativeTimelineCanvasView {
     }
 
     private func accessibilityReactionAction(
-        for message: Message,
-        rowFrame: CGRect
+        for message: Message
     ) -> NSAccessibilityCustomAction {
         NSAccessibilityCustomAction(name: "Add Reaction") { [weak self] in
             guard let self else { return false }
-            self.showReactionPicker(
-                for: message,
-                anchor: CGRect(
-                    x: rowFrame.maxX - 32,
-                    y: rowFrame.minY,
-                    width: 28,
-                    height: 28
-                ),
-                preferredEdge: .minY
-            )
+            self.showReactionPicker(forMessageRow: message)
             return true
         }
     }
@@ -248,7 +238,8 @@ extension NativeTimelineCanvasView {
         if message.type.hasGeneratedContent {
             return SystemMessagePresentation.label(
                 for: message,
-                currentUserID: model?.snapshot?.currentUser.id
+                currentUserID: model?.snapshot?.currentUser.id,
+                recipient: model?.systemMessageRecipient(for: message)
             )
         }
         if message.flags.contains(.isComponentsV2) {
@@ -304,7 +295,10 @@ extension NativeTimelineCanvasView {
     ) -> NSAccessibilityElement {
         let element: NSAccessibilityElement =
             if let press {
-                NativeTimelineAccessibilityElement(press: press)
+                NativeTimelineAccessibilityElement { [weak self] in
+                    guard let self, !self.sendTransitionBlocksInteractions else { return false }
+                    return press()
+                }
             } else {
                 NSAccessibilityElement()
             }
@@ -360,7 +354,7 @@ extension NativeTimelineCanvasView {
                 sourceFrame: frame ?? .zero,
                 rowIndex: rowIndex,
                 mediaKey: NativeTimelineMediaKey.attachment(attachment),
-                cornerRadius: 8,
+                cornerRadius: InterfaceScale.metric(8),
                 fillsFrame: MediaGalleryImagePresentation.fillsFrame(
                     itemCount: layouts[rowIndex].attachmentRegions.count
                 )
@@ -390,7 +384,7 @@ extension NativeTimelineCanvasView {
                 mediaKey: region?.mediaURL.map {
                     NativeTimelineMediaKey.media($0)
                 },
-                cornerRadius: 8,
+                cornerRadius: InterfaceScale.metric(8),
                 fillsFrame: false
             )
             return true

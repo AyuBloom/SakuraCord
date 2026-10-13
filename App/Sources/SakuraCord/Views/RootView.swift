@@ -17,12 +17,13 @@ struct RootView: View {
                     model: model,
                     toolbarSearchFieldMetrics: toolbarSearchFieldMetrics
                 )
+                .modifier(FriendsActionPresentation(model: model))
                 .windowModal(
                     item: Binding(
                         get: { model.issueReports.presentation },
                         set: { if $0 == nil { model.issueReports.dismiss() } }
                     ),
-                    cornerRadius: 32,
+                    cornerRadius: InterfaceScale.metric(32),
                     cornerStyle: .circular
                 ) { _ in
                     IssueReportView(model: model)
@@ -54,8 +55,10 @@ struct RootView: View {
                                     : (model.errorMessage ?? "Discord account bootstrap failed for an unknown reason.")
                             }
                         )
+                        .interfaceScaleRoot()
                     } else {
                         AccountSwitcherView(model: model, showsCancel: false)
+                            .interfaceScaleRoot()
                     }
                 } else {
                     SakuraCordSessionLoadingView(
@@ -68,7 +71,10 @@ struct RootView: View {
                 // sign-in, so do not expose chat skeletons or toolbar chrome.
                 SakuraCordSignInBackdrop()
                     .ignoresSafeArea()
-                    .frame(minWidth: 860, minHeight: 600)
+                    .frame(
+                        minWidth: InterfaceScale.windowLength(860, axis: .horizontal),
+                        minHeight: InterfaceScale.windowLength(600, axis: .vertical)
+                    )
                     .toolbar(removing: .title)
                     .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             case .connecting:
@@ -90,7 +96,8 @@ struct RootView: View {
             ZStack {
                 MessageSearchToolbarBridge(
                     model: model,
-                    isVisible: showsMessageSearchToolbar || (model.isBrowsingGuildChannels && !model.hasOpenGuildSupplementaryConversation),
+                    isVisible: showsMessageSearchToolbar || model.isFriendsSearchActive
+                        || (model.isBrowsingGuildChannels && !model.hasOpenGuildSupplementaryConversation),
                     metrics: $toolbarSearchFieldMetrics
                 )
                 ToolbarSearchFieldLoadingStyler(isActive: showsSessionLoadingChrome)
@@ -128,6 +135,7 @@ struct RootView: View {
             )
         }
         .environment(\.profileCosmeticPolicy, model.cosmeticPolicy)
+        .environment(\.serverTagCardModel, model)
         .environment(\.roleColorDisplay, model.accessibilitySettings.roleColorDisplay)
         .modifier(SakuraCordWindowBackground(opacity: model.appearanceSettings.windowOpacity))
     }
@@ -147,17 +155,15 @@ struct RootView: View {
         case .workspace:
             model.onboardingEntryGuildID == nil && model.guildWorkspacePage == nil
                 && (model.isSwitchingAccounts
-                || MessageSearchSurfacePolicy.showsToolbar(
-                    channelKind: model.selectedChannel?.kind,
-                    hasOpenThread: model.hasThreadPane
-                ))
+                || model.canShowMessageSearch)
         case .signedOut:
             model.launchMode != .normal && !model.includesOfflineSignIn
         }
     }
 
     private var messageSearchPrompt: Text {
-        Text(showsSessionLoadingChrome ? "" : (model.isBrowsingGuildChannels ? "Search Channels" : model.messageSearchPromptTitle))
+        Text(showsSessionLoadingChrome ? "" : model.isFriendsSearchActive ? "Search"
+            : (model.isBrowsingGuildChannels ? "Search Channels" : model.messageSearchPromptTitle))
     }
 
     private var showsSessionLoadingChrome: Bool {
@@ -183,19 +189,19 @@ private struct ChatRootView: View {
     @State private var supplementaryPaneFrame = CGRect.zero
     @State private var supplementaryToolbarSpacerWidth: CGFloat = 0
     @State private var workspaceFrame = CGRect.zero
-    @State private var sidebarWidth = ChatChromeMetrics.serverRailWidth + 230
+    @State private var sidebarWidth = ChatChromeMetrics.serverRailWidth + InterfaceScale.metric(230)
     @State private var presentsForumComposer = false
     @State private var isFileDropTargeted = false
     @State private var isInstantUpload = false
     @State private var hoveredFileDropDestination: MessageComposerDestination?
-    @State private var modifierPollingTask: Task<Void, Never>?
+    @State private var fileDropWatchdogTask: Task<Void, Never>?
     @State private var composerDropInteraction = ComposerDropInteractionState()
 
     @ViewBuilder private var workspace: some View {
         @Bindable var model = model
         NavigationSplitView(columnVisibility: $columnVisibility) {
             HStack(spacing: 0) {
-                ServerRailContainer(model: model)
+                ServerRailContainer(model: model, sidebarWidth: sidebarWidth)
                 .zIndex(200)
                 ChannelSidebarView(
                     voiceModel: model,
@@ -220,6 +226,9 @@ private struct ChatRootView: View {
                     updateStatus: { await model.updateStatus($0) }
                 )
             }
+            // Column content follows the interface size; the window toolbar
+            // is system chrome and keeps its native item sizing.
+            .interfaceScaleRoot()
             .opacity(model.isSwitchingAccounts ? 0 : 1)
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.width
@@ -228,9 +237,9 @@ private struct ChatRootView: View {
                 sidebarWidth = width
             }
             .navigationSplitViewColumnWidth(
-                min: ChatChromeMetrics.serverRailWidth + 190,
-                ideal: ChatChromeMetrics.serverRailWidth + 230,
-                max: ChatChromeMetrics.serverRailWidth + 310
+                min: ChatChromeMetrics.serverRailWidth + InterfaceScale.metric(190),
+                ideal: ChatChromeMetrics.serverRailWidth + InterfaceScale.metric(230),
+                max: ChatChromeMetrics.serverRailWidth + InterfaceScale.metric(310)
             )
         } detail: {
             Group {
@@ -247,6 +256,7 @@ private struct ChatRootView: View {
                     )
                 }
             }
+            .interfaceScaleRoot()
             .navigationTitle("")
             .toolbar {
                 detailToolbar
@@ -270,25 +280,25 @@ private struct ChatRootView: View {
                 if columnVisibility != .detailOnly {
                     if model.isSwitchingAccounts {
                         SkeletonShimmerTimeline {
-                            SkeletonShape(cornerRadius: 4)
-                                .frame(width: 132, height: 14)
+                            SkeletonShape(cornerRadius: InterfaceScale.metric(4))
+                                .frame(width: InterfaceScale.metric(132), height: InterfaceScale.metric(14))
                         }
                         .offset(
                             x: ChatChromeMetrics.sidebarTitleLeadingOffset,
-                            y: ChatChromeMetrics.sidebarTitleTopOffset + 7
+                            y: ChatChromeMetrics.sidebarTitleTopOffset(height: InterfaceScale.metric(14))
                         )
                     } else {
                         Text(sidebarDisplayName)
-                            .font(.system(
+                            .font(.interfaceSystem(
                                 size: InterfaceTypographyMetrics.interfaceTextSize + 2,
                                 weight: .semibold
                             ))
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .frame(width: 150, height: 28, alignment: .leading)
+                            .frame(width: InterfaceScale.metric(150), height: InterfaceScale.metric(28), alignment: .leading)
                             .offset(
                                 x: ChatChromeMetrics.sidebarTitleLeadingOffset,
-                                y: ChatChromeMetrics.sidebarTitleTopOffset
+                                y: ChatChromeMetrics.sidebarTitleTopOffset(height: InterfaceScale.metric(28))
                             )
                     }
                 }
@@ -328,6 +338,7 @@ private struct ChatRootView: View {
             .frame(width: 0, height: 0)
         }
         .modifier(ExpandedProfilePresentationModifier(model: model))
+        .modifier(NicknameEditorPresentationModifier(model: model))
         .modifier(ProfileGamePresentationModifier(model: model))
         .background {
             CommunicationWindowOverlays(model: model)
@@ -381,9 +392,12 @@ private struct ChatRootView: View {
                     hoveredDestination: effectiveFileDropDestination,
                     isInstantUpload: effectiveInstantUpload
                 )
+                .interfaceScaleRoot()
                 .allowsHitTesting(false)
+                .transition(.opacity)
             }
         }
+        .animation(.smooth(duration: 0.22), value: showsFileDropEffect)
     }
 
     var body: some View {
@@ -394,32 +408,17 @@ private struct ChatRootView: View {
         } action: { frame in
             workspaceFrame = frame
         }
-        .dropDestination(
-            for: URL.self,
-            action: { urls, location in
-                guard canAcceptWindowDrops,
-                      let destination = composerDestination(at: location)
-                else { return false }
-                hoveredFileDropDestination = destination
-                let isInstant = NSEvent.modifierFlags.contains(.shift)
-                Task {
-                    await model.receiveComposerAttachments(
-                        .external(urls),
-                        to: destination,
-                        sendingImmediately: isInstant
-                    )
-                }
-                return !urls.isEmpty
-            },
-            isTargeted: { targeted in
-                isFileDropTargeted = targeted
-                isInstantUpload = targeted && NSEvent.modifierFlags.contains(.shift)
-                hoveredFileDropDestination =
-                    targeted ? composerDestinationForCurrentPointer() : nil
-                updateModifierPolling(isTargeted: targeted)
+        .overlay { fileDropBridge }
+        .onChange(of: showsFileDropEffect) { _, isShown in
+            // Driven by the combined state, not per-target callbacks: during a
+            // handoff the next target lights up before the previous one exits.
+            if isShown {
+                if fileDropWatchdogTask == nil { startFileDropWatchdog() }
+            } else {
+                fileDropWatchdogTask?.cancel()
+                fileDropWatchdogTask = nil
             }
-        )
-        .overlay { promisedFileDropBridge }
+        }
         .onPreferenceChange(ThreadPaneFramePreferenceKey.self) { frame in
             supplementaryPaneFrame = frame
         }
@@ -451,8 +450,8 @@ private struct ChatRootView: View {
             )
         }
         .onDisappear {
-            modifierPollingTask?.cancel()
-            modifierPollingTask = nil
+            fileDropWatchdogTask?.cancel()
+            fileDropWatchdogTask = nil
             model.mediaViewerPresentation = nil
         }
         .sheet(isPresented: $showAccountSwitcher) {
@@ -461,6 +460,7 @@ private struct ChatRootView: View {
                 showsCancel: true,
                 accountActivated: { showAccountSwitcher = false }
             )
+            .interfaceScaleRoot()
         }
         .background {
             AttachmentPromptPresenter(model: model)
@@ -472,25 +472,31 @@ private struct ChatRootView: View {
                 ZStack {
                     Color.black.opacity(0.28)
                         .ignoresSafeArea()
-                    VStack(spacing: 14) {
+                    VStack(spacing: InterfaceScale.metric(14)) {
                         ProgressView()
                             .controlSize(.large)
                         Text(upload.map { "Uploading to \($0.service.displayName)…" } ?? "Compressing file…")
-                            .font(.headline)
+                            .font(.interface(.headline))
                         Text(upload?.fileName ?? compaction?.fileURL.lastPathComponent ?? "")
-                            .font(.callout)
+                            .font(.interface(.callout))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Button("Cancel", role: .cancel) {
                             if compaction != nil { model.cancelAttachmentCompaction() } else { model.cancelExternalAttachmentUpload() }
                         }
                     }
-                    .padding(24)
-                    .frame(minWidth: 280)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                    .shadow(radius: 18)
+                    .padding(InterfaceScale.metric(24))
+                    .frame(minWidth: InterfaceScale.metric(280))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(16)))
+                    .shadow(radius: InterfaceScale.metric(18))
                 }
+                .interfaceScaleRoot()
             }
+        }
+        .alert("Whoa there. Way too spicy!", isPresented: $model.isSendQueueFullAlertPresented) {
+            Button("Enter the chill zone") {}
+        } message: {
+            Text("You’re sending messages too quickly!")
         }
         .alert("SakuraCord", isPresented: Binding(get: { model.errorMessage != nil }, set: {
             if !$0 {
@@ -519,17 +525,30 @@ private struct ChatRootView: View {
         }
     }
 
-    private func updateModifierPolling(isTargeted: Bool) {
-        modifierPollingTask?.cancel()
-        modifierPollingTask = nil
-        guard isTargeted else { return }
-        modifierPollingTask = Task { @MainActor in
+    private func startFileDropWatchdog() {
+        fileDropWatchdogTask?.cancel()
+        fileDropWatchdogTask = Task { @MainActor in
             while !Task.isCancelled {
-                isInstantUpload = NSEvent.modifierFlags.contains(.shift)
-                hoveredFileDropDestination = composerDestinationForCurrentPointer()
+                // Native destinations send periodic updates even during a
+                // stationary or button-free drag. Ordinary pointer movement
+                // cannot keep a finished session alive.
+                let idle = ContinuousClock.now - composerDropInteraction.lastDragActivity
+                if idle > .seconds(1) {
+                    resetFileDropState()
+                    return
+                }
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+    }
+
+    private func resetFileDropState() {
+        fileDropWatchdogTask?.cancel()
+        fileDropWatchdogTask = nil
+        isFileDropTargeted = false
+        isInstantUpload = false
+        hoveredFileDropDestination = nil
+        composerDropInteraction.reset()
     }
 
     @ToolbarContentBuilder
@@ -562,21 +581,21 @@ private struct ChatRootView: View {
         ToolbarSpacer(.fixed, placement: .navigation)
 
         if !model.isSwitchingAccounts {
+            if model.isFriendsPresented {
+                FriendsToolbarSections(model: model)
+            }
             if model.guildWorkspacePage == .channelsAndRoles, model.featuresSettings.channelManagement,
                let guildID = model.selectedGuildID, model.hasCustomizationQuestions(in: guildID) {
-                ToolbarItemGroup(placement: .principal) {
-                    Toggle("Customize", systemImage: "slider.horizontal.3", isOn: Binding(
-                        get: { !model.isBrowsingGuildChannels },
-                        set: { if $0 { model.showGuildCustomizationChannels(false) } }
-                    ))
-                    .labelStyle(.titleAndIcon)
-                    .tint(SakuraCordAccentColor.color)
-                    Toggle("Browse Channels", systemImage: "list.bullet", isOn: Binding(
+                ToolbarItem(placement: .principal) {
+                    Picker("Channels & Roles", selection: Binding(
                         get: { model.isBrowsingGuildChannels },
-                        set: { if $0 { model.showGuildCustomizationChannels(true) } }
-                    ))
-                    .labelStyle(.titleAndIcon)
-                    .tint(SakuraCordAccentColor.color)
+                        set: { model.showGuildCustomizationChannels($0) }
+                    )) {
+                        Text("Customize").tag(false)
+                        Text("Browse Channels").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
             }
             if let presentation = supplementaryToolbarPresentation {
@@ -617,6 +636,16 @@ private struct ChatRootView: View {
                         }
                         .labelStyle(.iconOnly)
                         .help("Add to Channel List")
+                    }
+                }
+
+                if let thread = model.openThread {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Open in Full View", systemImage: "arrow.up.left.and.arrow.down.right") {
+                            model.openSidebarThread(thread)
+                        }
+                        .labelStyle(.iconOnly)
+                        .help("Open thread in full view")
                     }
                 }
 
@@ -746,7 +775,7 @@ private struct ChatRootView: View {
         }
 
         if model.isSwitchingAccounts
-            || (model.guildWorkspacePage == nil && model.onboardingEntryGuildID == nil
+            || (model.guildWorkspacePage == nil && model.onboardingEntryGuildID == nil && !model.isFriendsPresented
                 && !hasOpenSupplementaryToolbarConversation && selectedVoiceChannel == nil)
         {
             if !model.isSwitchingAccounts {
@@ -790,14 +819,28 @@ private struct ChatRootView: View {
         return guild.name.isEmpty ? "Unnamed Server" : guild.name
     }
 
-    private var promisedFileDropBridge: some View {
-            ComposerPromisedFileDropBridge(
+    private var fileDropBridge: some View {
+            ComposerFileDropBridge(
                 isEnabled: canAcceptWindowDrops,
                 targetChanged: { targeted, location, instant in
+                    if targeted { composerDropInteraction.noteDragActivity() }
                     let destination = targeted ? composerDestination(at: location) : nil
                     isFileDropTargeted = destination != nil
                     isInstantUpload = destination != nil && instant
                     hoveredFileDropDestination = destination
+                },
+                receiveURLs: { urls, location, instant in
+                    guard canAcceptWindowDrops,
+                          let destination = composerDestination(at: location)
+                    else { return false }
+                    Task {
+                        await model.receiveComposerAttachments(
+                            .external(urls),
+                            to: destination,
+                            sendingImmediately: instant
+                        )
+                    }
+                    return true
                 },
                 receiveFiles: { batch, location, instant in
                     guard let destination = composerDestination(at: location) else {
@@ -852,17 +895,6 @@ private struct ChatRootView: View {
             return horizontalPosition >= localThreadLeadingEdge ? .thread : .channel
         }
         return .channel
-    }
-
-    private func composerDestinationForCurrentPointer() -> MessageComposerDestination? {
-        guard let window =
-            NSApp.keyWindow
-                ?? NSApp.mainWindow
-                ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain })
-        else { return nil }
-        let windowPoint = window.convertPoint(fromScreen: NSEvent.mouseLocation)
-        let proposed = proposedComposerDestination(atX: windowPoint.x - workspaceFrame.minX)
-        return model.isComposerDropEligible(proposed) ? proposed : nil
     }
 
     private func channelToolbarSymbol(_ channel: Channel) -> String {
@@ -930,11 +962,11 @@ private struct ChatRootView: View {
 
     private var hasOpenSupplementaryConversation: Bool {
         hasOpenSupplementaryToolbarConversation
-            || model.messageSearch.isPresented
+            || model.isMessageSearchVisible
     }
 
     private var hasOpenSupplementaryToolbarConversation: Bool {
-        model.hasThreadPane
+        (model.hasThreadPane && !model.isThreadFullWidth)
             || model.isVoiceChatOpen
             || model.hasOpenGuildSupplementaryConversation
     }
@@ -951,16 +983,20 @@ private struct ChatRootView: View {
 
     private var toolbarPinsChannelID: ChannelID? {
         guard model.guildWorkspacePage == nil, model.onboardingEntryGuildID == nil,
-              selectedVoiceChannel == nil, !model.hasThreadPane
+              selectedVoiceChannel == nil, !model.hasThreadPane || model.isThreadFullWidth
         else { return nil }
         return model.activePinsChannelID
     }
 
     private var conversationToolbarPresentation: ConversationToolbarPresentation? {
+        if model.isThreadFullWidth, let thread = model.openThread {
+            return .init(title: thread.name, systemImage: SakuraCordSystemSymbol.thread)
+        }
         if let page = model.guildWorkspacePage {
             return .init(title: page == .guide ? "Server Guide" : model.customizationTitle(in: model.selectedGuildID),
                          systemImage: page == .guide ? "signpost.right" : "slider.horizontal.3")
         }
+        if model.isFriendsPresented { return .init(title: "Friends", systemImage: "person.2.fill") }
         guard let channel = model.selectedChannel else { return nil }
         return .init(title: channel.name, systemImage: channelToolbarSymbol(channel),
                      subtitle: isDirectMessageSelected ? directMessageToolbarSubtitle(for: channel) : nil,
@@ -971,6 +1007,7 @@ private struct ChatRootView: View {
     }
 
     private var supplementaryToolbarPresentation: SupplementaryToolbarPresentation? {
+        guard !model.isThreadFullWidth else { return nil }
         if model.hasThreadPane {
             return SupplementaryToolbarPresentation(
                 title: model.openThread?.name ?? "New Thread",
@@ -1122,7 +1159,7 @@ private struct MessageSearchExperienceModifier: ViewModifier {
             .onChange(of: isEnabled) { wasVisible, isVisible in
                 guard wasVisible, !isVisible else { return }
                 search.isFilterModalPresented = false
-                model.dismissMessageSearch()
+                search.isInputFocused = false
             }
     }
 }
@@ -1136,17 +1173,33 @@ private struct MessageSearchToolbarBridge: View {
         @Bindable var model = model
         @Bindable var search = model.messageSearch
         @Bindable var onboarding = model.onboarding
-        let local = model.isBrowsingGuildChannels
+        @Bindable var friends = model.friends
+        let friendsSearch = model.isFriendsSearchActive
+        let local = friendsSearch || model.isBrowsingGuildChannels
         ToolbarSearchFieldGeometryReader(
-            searchText: local ? $onboarding.channelSearch : $model.messageSearchInputText,
+            searchText: friendsSearch ? $model.friendsSearchText : local ? $onboarding.channelSearch : $model.messageSearchInputText,
             searchTokens: local ? .constant([]) : $search.tokens,
-            isSearchFocused: local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
+            isSearchFocused: friendsSearch ? $friends.isSearchFocused
+                : local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
             isToolbarItemVisible: isVisible,
+            preferredFieldWidth: ChatChromeMetrics.toolbarSearchMaximumFieldWidth,
             didUseBuiltInClear: {
-                if local { onboarding.channelSearch = "" } else { model.clearMessageSearchUsingBuiltInButton() }
+                if friendsSearch {
+                    model.friendsSearchText = ""
+                } else if local {
+                    onboarding.channelSearch = ""
+                } else {
+                    model.clearMessageSearchUsingBuiltInButton()
+                }
             },
             didEndEditing: {
-                if local { onboarding.isChannelSearchFocused = false } else { model.messageSearchEditingDidEnd() }
+                if friendsSearch {
+                    friends.isSearchFocused = false
+                } else if local {
+                    onboarding.isChannelSearchFocused = false
+                } else {
+                    model.messageSearchEditingDidEnd()
+                }
             },
             pasteCanonicalSyntax: { value in
                 if local { return .init(tokens: [], text: value) }
@@ -1170,12 +1223,15 @@ private struct MessageSearchToolbarModifier: ViewModifier {
         @Bindable var model = model
         @Bindable var search = search
         @Bindable var onboarding = model.onboarding
-        let local = model.isBrowsingGuildChannels
+        @Bindable var friends = model.friends
+        let friendsSearch = model.isFriendsSearchActive
+        let local = friendsSearch || model.isBrowsingGuildChannels
         content
             .searchable(
-                text: local ? $onboarding.channelSearch : $model.messageSearchInputText,
+                text: friendsSearch ? $model.friendsSearchText : local ? $onboarding.channelSearch : $model.messageSearchInputText,
                 tokens: local ? .constant([]) : $search.tokens,
-                isPresented: local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
+                isPresented: friendsSearch ? $friends.isSearchFocused
+                    : local ? $onboarding.isChannelSearchFocused : $search.isInputFocused,
                 placement: .toolbar,
                 prompt: prompt
             ) { token in
@@ -1188,6 +1244,7 @@ private struct MessageSearchToolbarModifier: ViewModifier {
 }
 
 private struct ComposerFileDropOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let model: AppModel
     let workspaceFrame: CGRect
     let supplementaryPaneFrame: CGRect
@@ -1217,6 +1274,7 @@ private struct ComposerFileDropOverlay: View {
                     )
                 }
             }
+            .animation(.smooth(duration: 0.22), value: hoveredDestination)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -1234,19 +1292,21 @@ private struct ComposerFileDropOverlay: View {
         if hoveredDestination == destination, model.isComposerDropEligible(destination) {
             ZStack {
                 Color.black.opacity(0.6)
+                    .transition(.opacity)
 
-                GlassEffectContainer(spacing: 14) {
-                    VStack(spacing: 18) {
+                GlassEffectContainer(spacing: InterfaceScale.metric(14)) {
+                    VStack(spacing: InterfaceScale.metric(18)) {
                         Image(
                             systemName: isInstantUpload
                                 ? "paperplane.fill" : "tray.and.arrow.down.fill"
                         )
-                        .font(.system(size: 50, weight: .semibold))
+                        .font(.interfaceSystem(size: 50, weight: .semibold))
                         .foregroundStyle(.primary)
                         .symbolEffect(.bounce, value: isInstantUpload)
+                        .symbolEffectsRemoved(reduceMotion)
 
                         Text(isInstantUpload ? "Upload directly to" : "Upload to")
-                            .font(.title2.weight(.bold))
+                            .font(.interface(.title2).weight(.bold))
 
                         Label {
                             Text(title)
@@ -1257,35 +1317,35 @@ private struct ComposerFileDropOverlay: View {
                                         ? "bubble.left.and.bubble.right.fill" : SakuraCordSystemSymbol.thread) : "number"
                             )
                         }
-                        .font(.headline.weight(.semibold))
+                        .font(.interface(.headline).weight(.semibold))
                         .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, InterfaceScale.metric(14))
+                        .padding(.vertical, InterfaceScale.metric(7))
                         .glassEffect(.regular, in: Capsule())
 
-                        VStack(spacing: 10) {
+                        VStack(spacing: InterfaceScale.metric(10)) {
                             Text(
                                 isInstantUpload
                                     ? "Release to upload immediately."
                                     : "You can add a message before uploading."
                             )
-                            .font(.callout)
+                            .font(.interface(.callout))
                             .foregroundStyle(.secondary)
 
                             if !isInstantUpload {
-                                HStack(spacing: 7) {
+                                HStack(spacing: InterfaceScale.metric(7)) {
                                     Text("⇧")
-                                        .font(.caption.weight(.bold))
-                                        .frame(width: 21, height: 19)
+                                        .font(.interface(.caption).weight(.bold))
+                                        .frame(width: InterfaceScale.metric(21), height: InterfaceScale.metric(19))
                                         .glassEffect(
                                             .regular,
                                             in: ConcentricRectangle(
-                                                cornerRadius: 6,
+                                                cornerRadius: InterfaceScale.metric(6),
                                                 style: .continuous
                                             )
                                         )
                                     Text("Hold Shift to upload directly")
-                                        .font(.caption.weight(.medium))
+                                        .font(.interface(.caption).weight(.medium))
                                 }
                                 .foregroundStyle(.secondary)
                             }
@@ -1293,16 +1353,20 @@ private struct ComposerFileDropOverlay: View {
                         .fixedSize(horizontal: false, vertical: true)
                     }
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 48)
-                    .padding(.vertical, 38)
-                    .frame(maxWidth: 460)
+                    .padding(.horizontal, InterfaceScale.metric(48))
+                    .padding(.vertical, InterfaceScale.metric(38))
+                    .frame(maxWidth: InterfaceScale.metric(460))
                     .glassEffect(
                         .regular,
-                        in: ConcentricRectangle(cornerRadius: 28, style: .continuous)
+                        in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(28), style: .continuous)
                     )
-                    .padding(24)
+                    .padding(InterfaceScale.metric(24))
+                    .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: isInstantUpload)
                 }
+                // The card lifts toward the pointer as files come over it.
+                .transition(reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity))
             }
+            .transition(.opacity)
         } else {
             Color.clear
         }
@@ -1435,7 +1499,37 @@ private struct ChannelTopicPopover: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
             .tint(SakuraCordAccentColor.color)
-            .padding(16)
-            .frame(width: 320, alignment: .leading)
+            .padding(InterfaceScale.metric(16))
+            .frame(width: InterfaceScale.metric(320), alignment: .leading)
+            .interfaceScaleRoot()
+    }
+}
+
+/// Friends categories use the same principal placement as Channels & Roles.
+private struct FriendsToolbarSections: ToolbarContent {
+    let model: AppModel
+
+    var body: some ToolbarContent {
+        ToolbarItem(id: "friends-categories", placement: .principal) {
+            Picker("Friends", selection: Binding(
+                get: { model.friendsSection },
+                set: { model.selectFriendsSection($0) }
+            )) {
+                ForEach(model.visibleFriendsSections, id: \.self) { section in
+                    Text(title(section)).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+    }
+
+    private func title(_ section: FriendsSection) -> String {
+        switch section {
+        case .online: "Online"
+        case .all: "All"
+        case .pending: model.incomingFriendRequestCount > 0 ? "Pending (\(model.incomingFriendRequestCount))" : "Pending"
+        case .addFriend: "Add Friend"
+        }
     }
 }

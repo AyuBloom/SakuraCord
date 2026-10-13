@@ -30,13 +30,13 @@ nonisolated enum TimelineInlineVideoPolicy {
 }
 
 enum NativeTimelineDateSeparatorMetrics {
-    static let rowHeight: CGFloat = 37
-    static let verticalPadding: CGFloat = 12
-    static let lineSpacing: CGFloat = 10
-    static let labelHeight: CGFloat = 13
+    static var rowHeight: CGFloat { InterfaceScale.metric(37) }
+    static var verticalPadding: CGFloat { InterfaceScale.metric(12) }
+    static var lineSpacing: CGFloat { InterfaceScale.metric(10) }
+    static var labelHeight: CGFloat { InterfaceScale.metric(13) }
 
     static var font: NSFont {
-        .systemFont(ofSize: 10, weight: .semibold)
+        .interfaceSystemFont(ofSize: 10, weight: .semibold)
     }
 
     static func labelWidth(_ label: String) -> CGFloat {
@@ -65,14 +65,14 @@ enum NativeTimelineDateSeparatorMetrics {
 }
 
 enum NativeTimelineUnreadSeparatorMetrics {
-    static let rowHeight: CGFloat = 29
-    static let capsuleHeight: CGFloat = 19
-    static let verticalPadding: CGFloat = 5
+    static var rowHeight: CGFloat { InterfaceScale.metric(29) }
+    static var capsuleHeight: CGFloat { InterfaceScale.metric(19) }
+    static var verticalPadding: CGFloat { InterfaceScale.metric(5) }
 }
 
 /// Text rules for the timeline thread card, matching Discord's client.
 nonisolated enum NativeTimelineThreadCard {
-    static let height: CGFloat = 54
+    static var height: CGFloat { InterfaceScale.metric(54) }
     /// Discord capped message counts at 50 for threads created before July 2022.
     private static let cappedCountCutoff = Date(timeIntervalSince1970: 1_656_712_657)
 
@@ -104,10 +104,10 @@ nonisolated enum NativeTimelineThreadCard {
 }
 
 enum NativeTimelineReplyMetrics {
-    static let horizontalSpacing: CGFloat = 5
+    static var horizontalSpacing: CGFloat { InterfaceScale.metric(5) }
 
     static var authorFont: NSFont {
-        .systemFont(
+        .interfaceSystemFont(
             ofSize: NSFont.preferredFont(
                 forTextStyle: .caption2
             ).pointSize,
@@ -116,7 +116,72 @@ enum NativeTimelineReplyMetrics {
     }
 
     static var summaryFont: NSFont {
-        .preferredFont(forTextStyle: .caption1)
+        .interfacePreferredFont(forTextStyle: .caption1)
+    }
+
+    static var avatarDiameter: CGFloat { InterfaceScale.metric(14) }
+
+    /// The media symbol's width and its gap from the summary.
+    static var mediaSymbolReserve: CGFloat { InterfaceScale.metric(24) }
+
+    static func summary(
+        for preview: MessageReplyPreview,
+        in message: Message,
+        model: AppModel?
+    ) -> MessageReplySummary.Prepared {
+        if let model {
+            MessageReplySummary.summary(
+                content: preview.content,
+                mentionLabel: MessageMentionResolver(model: model, message: message).label
+            )
+        } else {
+            MessageReplySummary.summary(content: preview.content)
+        }
+    }
+
+    static func mediaSymbol(for preview: MessageReplyPreview) -> String? {
+        switch preview.mediaKind {
+        case .image, .animatedImage: "photo.fill"
+        case .video: "film.fill"
+        case .audio: "waveform"
+        case .file: "paperclip"
+        case nil: nil
+        }
+    }
+
+    static var unavailableFont: NSFont {
+        let baseFont = summaryFont
+        return NSFont(
+            descriptor: baseFont.fontDescriptor.withSymbolicTraits(.italic),
+            size: baseFont.pointSize
+        ) ?? baseFont
+    }
+
+    static let unavailableText = "Message could not be loaded"
+
+    /// The natural width of a one-line reply preview, from its avatar to the
+    /// end of its summary or media symbol.
+    static func previewWidth(
+        _ preview: MessageReplyPreview?,
+        in message: Message,
+        model: AppModel?
+    ) -> CGFloat {
+        guard let preview else {
+            return textWidth(unavailableText, font: unavailableFont)
+        }
+        let presentation = model?.authorPresentation(for: preview, in: message)
+        let author = presentation?.user ?? preview.author
+        let authorFont = ProfileNameFontLoader.shared.resolvedFont(for: author, fallback: authorFont)
+        let showsIndicator = model?.accessibilitySettings.roleColorDisplay == .nextToNames
+            && presentation?.roleColorHex != nil
+        let summary = summary(for: preview, in: message, model: model).text
+        return avatarDiameter
+            + horizontalSpacing
+            + (showsIndicator ? InterfaceScale.metric(14) : 0)
+            + textWidth(author.displayName, font: authorFont)
+            + horizontalSpacing
+            + textWidth(summary, font: summaryFont)
+            + (mediaSymbol(for: preview) == nil ? 0 : mediaSymbolReserve)
     }
 
     static func textWidth(

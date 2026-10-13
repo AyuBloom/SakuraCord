@@ -31,6 +31,12 @@ struct ComposerView: View {
     @State private var autocompleteIndex = 0
     @State private var autocompleteKeyboardSelectionRevision = 0
     @State private var isAutocompleteDismissed = false
+    @State private var sendTransitionAnchor = ComposerSendTransitionAnchor()
+    @State private var holdsPlaceholderForSendTransition = false
+    /// A send clears the composer under the message leaving it, so the
+    /// composer collapses at once rather than animating.
+    @State private var isClearingForSend = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var model = model
@@ -41,6 +47,7 @@ struct ComposerView: View {
             focus: { isFocused = true },
             header: {
                 VStack(alignment: .leading, spacing: 0) {
+                    ComposerTranslationHeader(model: model, destination: conversation)
                     if !hasActiveCommand, let reply = activeReply {
                         let author = model.authorPresentation(for: reply)
                         ComposerReplyHeader(
@@ -53,11 +60,15 @@ struct ComposerView: View {
                             toggleMention: toggleReplyMention,
                             cancel: cancelReply
                         )
+                        .transition(Self.headerTransition)
                         Divider()
+                            .transition(.opacity)
                     }
                     if !hasActiveCommand, !attachments.isEmpty {
                         ComposerAttachmentTray(
                             attachments: attachments,
+                            checkingIDs: model.composer.checkingAttachmentIDs,
+                            sendTransitionAnchor: sendTransitionAnchor,
                             open: openComposerAttachment,
                             toggleSpoiler: {
                                 model.toggleComposerAttachmentSpoiler($0, in: conversation)
@@ -69,37 +80,38 @@ struct ComposerView: View {
                                 model.removeComposerAttachment($0, from: conversation)
                             }
                         )
+                        .transition(Self.headerTransition)
                         Divider()
-                            .padding(.horizontal, 11)
+                            .padding(.horizontal, InterfaceScale.metric(11))
+                            .transition(.opacity)
                     }
                 }
+                // The composer grows upward, so the header rises out of the
+                // field rather than dropping in from above.
+                .clipped()
             },
             leading: {
                 Group {
                     if hasActiveCommand, let commandDraft = commandComposer.draft {
                         ApplicationCommandComposerBadge(command: commandDraft.command, cancel: cancelCommand)
                     } else if !isCreatingThread {
-                        ComposerAttachmentButton(appearance: appearance) {
-                            showComposerActions.toggle()
-                        }
-                        .disabled(hasActiveCommand || !hasComposerActions)
-                        .opacity(hasComposerActions ? 1 : 0.4)
+                        composerLeadingButton(appearance: appearance)
                         .escapeDismissiblePopover(isPresented: $showComposerActions, arrowEdge: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: InterfaceScale.metric(4)) {
                                 if canAddAttachments {
                                     Button {
                                         showComposerActions = false
                                         showFileImporter = true
                                     } label: {
                                         Label("Upload a File", systemImage: "doc.badge.plus")
-                                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                            .frame(maxWidth: .infinity, alignment: .leading).padding(InterfaceScale.metric(8))
                                     }
                                     Button {
                                         showComposerActions = false
                                         showPhotosPicker = true
                                     } label: {
                                         Label("Select from Photos", systemImage: "photo.on.rectangle")
-                                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                            .frame(maxWidth: .infinity, alignment: .leading).padding(InterfaceScale.metric(8))
                                     }
                                 }
                                 if canCreateThread {
@@ -112,7 +124,7 @@ struct ComposerView: View {
                                         } icon: {
                                             SakuraCordSystemSymbol.swiftUIImage(named: SakuraCordSystemSymbol.thread)
                                         }
-                                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                            .frame(maxWidth: .infinity, alignment: .leading).padding(InterfaceScale.metric(8))
                                     }
                                 }
                                 if canCreatePoll {
@@ -121,12 +133,15 @@ struct ComposerView: View {
                                         showPollCreator = true
                                     } label: {
                                         Label("Create a Poll", systemImage: "chart.bar.xaxis")
-                                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                            .frame(maxWidth: .infinity, alignment: .leading).padding(InterfaceScale.metric(8))
                                     }
+                                }
+                                ComposerTranslateDraftRow(model: model, destination: conversation) {
+                                    showComposerActions = false
                                 }
                             }
                             .labelStyle(ComposerActionLabelStyle())
-                            .buttonStyle(PopoverRowButtonStyle()).padding(6).frame(width: 200)
+                            .buttonStyle(PopoverRowButtonStyle()).padding(InterfaceScale.metric(6)).frame(width: InterfaceScale.metric(200))
                         }
                     }
                 }
@@ -162,6 +177,7 @@ struct ComposerView: View {
                             ComposerTextView(
                                 text: draft,
                                 conversationID: activeConversationID,
+                                translationEditID: model.translation.draftEditIDs[conversation],
                                 placeholder: composerPlaceholder,
                                 sendWithReturn: model.generalInputSettings.sendsWithReturn,
                                 generalInputSettings: model.generalInputSettings,
@@ -195,31 +211,42 @@ struct ComposerView: View {
                                     return true
                                 },
                                 canReceiveAttachments: { model.isComposerDropEligible(conversation) },
-                                onCompositionStateChange: { isComposing = $0 },
+                                onCompositionStateChange: {
+                                    isComposing = $0
+                                    if $0, model.draftTranslation(for: conversation)?.phase == .translating {
+                                        model.dismissDraftTranslation(in: conversation)
+                                    }
+                                },
                                 capturesUnfocusedTyping: capturesUnfocusedTyping,
                                 verticalContentInset: appearance == .defaultStyle
                                     ? ChatChromeMetrics.composerTextVerticalInset
                                     : 0,
+                                sendTransitionAnchor: sendTransitionAnchor,
                                 selection: $draftSelection,
+                                // The hidden editor takes no typing while a voice message is shown.
                                 isFocused: Binding(
-                                    get: { !hasActiveCommand && isFocused },
-                                    set: { if !hasActiveCommand { isFocused = $0 } }
+                                    get: { !hasActiveCommand && !isVoiceMessageActive && isFocused },
+                                    set: { if !hasActiveCommand, !isVoiceMessageActive { isFocused = $0 } }
                                 )
                             )
                             .frame(minHeight: ChatChromeMetrics.composerControlHeight)
-                            if draft.isEmpty, !isComposing {
+                            .opacity(isVoiceMessageActive ? 0 : 1)
+                            .allowsHitTesting(!isVoiceMessageActive)
+                            .accessibilityHidden(isVoiceMessageActive)
+                            if draft.isEmpty, !isComposing, !isVoiceMessageActive {
                                 Text(composerPlaceholder)
                                     .foregroundStyle(.tertiary)
-                                    .font(.system(size: 15))
+                                    .font(.interfaceSystem(size: 15))
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                     .allowsHitTesting(false)
                                     .accessibilityHidden(true)
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        maxHeight: .infinity,
-                                        alignment: .leading
-                                    )
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                    // Typing swaps it for text at once; the composer's animations don't fade it.
+                                    .transition(.identity)
+                                    // Sent text leaves from this spot; let it go first.
+                                    .opacity(holdsPlaceholderForSendTransition ? 0 : 1)
+                                    .animation(.easeIn(duration: 0.15), value: holdsPlaceholderForSendTransition)
                             }
                             if ChatCharacterLimitPolicy.shouldShowCounter(
                                 characterCount: draft.count,
@@ -230,6 +257,7 @@ struct ComposerView: View {
                                     premiumType: model.currentUser?.premiumType
                                 )
                             }
+                            if isVoiceMessageActive { voiceMessageField }
                         }
                     }
                 }
@@ -238,7 +266,7 @@ struct ComposerView: View {
             },
             accessories: {
                 HStack(spacing: 1) {
-                    Group {
+                    if !isVoiceMessageActive {
                         ForEach(model.appearanceSettings.composerIcons.order) { icon in
                             switch icon {
                             case .gif:
@@ -292,24 +320,13 @@ struct ComposerView: View {
                                 }
                             }
                         }
-                    }
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    } else if voiceMessage.phase.recording != nil { voiceMessageDiscardButton(appearance: appearance) }
                 }
                 .frame(height: ChatChromeMetrics.composerControlHeight)
                 .disabled(hasActiveCommand)
             },
-            send: {
-                TimelineView(.periodic(from: .now, by: 0.25)) { context in
-                    let coolingDown = activeConversationID.map {
-                        model.slowmodeRemaining(in: $0, now: context.date) > 0
-                    } ?? false
-                    ComposerSendButton(
-                        action: submitComposer,
-                        appearance: appearance,
-                        isSlowmodeBlocked: coolingDown
-                    )
-                    .disabled(!composerCanSubmit && !coolingDown)
-                }
-            },
+            send: { composerSendSlot(appearance: appearance) },
             overlay: { composerOverlay }
         )
         VStack(spacing: 0) {
@@ -317,6 +334,12 @@ struct ComposerView: View {
                 ComposerSlowmodeIndicator(model: model, channelID: activeConversationID)
             }
             chrome
+                .animation(.smooth(duration: 0.42, extraBounce: 0.08), value: voiceMessagePhaseKey)
+                .animation(.smooth(duration: 0.3), value: showsVoiceMessageButton)
+                .animation(animatesChromeResize ? ComposerResizeMotion.animation : nil, value: chromeKey)
+                // Another conversation's composer appears in place, as the
+                // timeline does.
+                .transaction(value: activeConversationID) { $0.disablesAnimations = true }
                 .padding(.horizontal, ChatChromeMetrics.composerWindowInset)
                 .padding(.bottom, ChatChromeMetrics.composerWindowInset)
                 .keyframeAnimator(
@@ -334,7 +357,7 @@ struct ComposerView: View {
                     LinearKeyframe(0, duration: 0.04)
                 }
         }
-        .windowModal(isPresented: $showPollCreator, cornerRadius: 32, cornerStyle: .circular) {
+        .windowModal(isPresented: $showPollCreator, cornerRadius: InterfaceScale.metric(32), cornerStyle: .circular) {
             if let channelID = activeConversationID {
                 PollCreationView(model: model, channelID: channelID)
             }
@@ -418,6 +441,12 @@ struct ComposerView: View {
             updateSlashPicker(for: value)
             updateMentionMemberSearch()
         }
+        .onChange(of: chromeKey) { previous, current in
+            guard animatesChromeResize,
+                  previous.conversationID == current.conversationID
+            else { return }
+            model.composer.noteAnimatedResize(of: conversation)
+        }
         .onChange(of: draftSelection) { _, _ in
             isAutocompleteDismissed = false
             autocompleteIndex = 0
@@ -436,9 +465,21 @@ struct ComposerView: View {
             updateCommandMemberSearch(current)
         }
         .onDisappear {
+            voiceMessage.discard(playback: model.voiceMessagePlayback)
             composerDropInteraction?.clear(destination: conversation)
+            if let channelID = sendTransitionAnchor.channelID {
+                model.timelineSendTransitionStore.discard(channelID)
+            }
+        }
+        .onChange(of: voiceMessage.errorMessage) { _, message in
+            guard let message else { return }
+            model.errorMessage = message
+            voiceMessage.clearError()
         }
         .task(id: composerPresentationID) {
+            voiceMessage.discard(playback: model.voiceMessagePlayback)
+            sendTransitionAnchor.channelID = activeConversationID
+            model.timelineSendTransitionStore.registerComposer(sendTransitionAnchor)
             draftSelection = nil
             selectionBeforeEmojiPicker = nil
             showFileImporter = false
@@ -505,7 +546,7 @@ struct ComposerView: View {
                 cornerRadius: commandPanelCornerRadius
             )
         } else if hasActiveCommand, let draft = commandComposer.draft {
-            VStack(spacing: 6) {
+            VStack(spacing: InterfaceScale.metric(6)) {
                 if let content = visibleCommandSuggestionContent {
                     ApplicationCommandSuggestionPanel(
                         content: content,
@@ -697,7 +738,8 @@ struct ComposerView: View {
     private func send() {
         guard !isSubmitting, allowsSubmission() else { return }
         if isCreatingThread, !model.validateThreadCreation() { return }
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty,
+              !hasCheckingAttachments
         else { return }
         isSubmitting = true
         draftSelection = nil
@@ -705,9 +747,22 @@ struct ComposerView: View {
         let staged = attachments
         let conversationID = activeConversationID
         let keepsCreationDraft = isCreatingThread
+        if !keepsCreationDraft, let conversationID {
+            registerSendTransition(channelID: conversationID, attachments: staged)
+        }
         model.beginUsingOwnedPromisedFiles(staged.map(\.url))
         if !keepsCreationDraft {
-            model.clearComposerAttachments(for: conversation)
+            isClearingForSend = true
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                model.clearComposerAttachments(for: conversation)
+            }
+            Task { @MainActor in
+                // The draft and reply clear once the message is enqueued.
+                try? await Task.sleep(for: .milliseconds(250))
+                isClearingForSend = false
+            }
         }
         Task {
             defer {
@@ -726,6 +781,10 @@ struct ComposerView: View {
                 await model.submitComposerMessage(attachments: staged)
             case .thread:
                 await model.submitThreadComposerMessage(attachments: staged)
+            }
+            if !result.consumedComposer, let conversationID {
+                // Nothing will arrive to take the held message over.
+                model.timelineSendTransitionStore.discard(conversationID)
             }
             if !keepsCreationDraft, !result.consumedComposer, activeConversationID == conversationID {
                 model.restoreComposerAttachments(staged, to: conversation)
@@ -768,9 +827,9 @@ struct ComposerView: View {
         case .member:
             return MentionAutocompleteSuggestionFactory.memberSuggestions(
                 query: context.query,
-                recentMessages: activeMessages,
-                localMembers: model.mentionAutocompleteMembers,
-                remoteMembers: model.mentionMemberResults,
+                recentMessages: activeMessages.filter { !model.isMessageSuppressed($0) },
+                localMembers: model.mentionAutocompleteMembers.filter { !model.isUserIgnored($0.id) },
+                remoteMembers: model.mentionMemberResults.filter { !model.isUserIgnored($0.id) },
                 roles: model.guildRoles,
                 canMentionNonMentionableRoles:
                 MentionAutocompleteSuggestionFactory.canMentionNonMentionableRoles(
@@ -859,6 +918,7 @@ struct ComposerView: View {
             return true
         }
         return !isSubmitting
+            && !hasCheckingAttachments
             && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !attachments.isEmpty)
             && draft.count <= ChatCharacterLimitPolicy.limit(
@@ -878,7 +938,6 @@ struct ComposerView: View {
             customValue: model.composerText(for:),
             customSource: { model.serverRailGuildsByID[$0.guildID]?.name },
             discordFavoriteKeys: Set(model.discordFavoriteEmojiKeys),
-            usageCounts: model.emojiUsageCounts,
             discordUsageScores: model.discordEmojiUsageScores,
             discordSettingsAreLoaded: model.hasLoadedDiscordEmojiSettings
         )
@@ -901,7 +960,6 @@ struct ComposerView: View {
                 replacing: context.range
             )
         )
-        model.recordEmojiUse(suggestion.usageKey)
         draftSelection = selection
         autocompleteIndex = 0
         isAutocompleteDismissed = true
@@ -971,6 +1029,10 @@ struct ComposerView: View {
     }
 
     private func submitComposer() {
+        if isVoiceMessageActive {
+            if sendSlotMode == .sendVoice { sendVoiceMessage() }
+            return
+        }
         if !hasActiveCommand, model.canPresentIssueReport,
            let command = SakuraCordBuiltInCommands.commands.first(where: {
                draft.trimmingCharacters(in: .whitespacesAndNewlines) == "/\($0.name)"
@@ -1125,7 +1187,6 @@ struct ComposerView: View {
             ComposerEmojiImageStore.shared.register(emoji)
         }
         let result = insertInDraft(suggestion.value, replacing: context.range)
-        model.recordEmojiUse(suggestion.usageKey)
         draftSelection = result
         autocompleteIndex = 0
         isAutocompleteDismissed = true
@@ -1158,6 +1219,7 @@ struct ComposerView: View {
         conversation == (model.hasThreadPane ? .thread : .channel)
             && model.threadCreation?.isSubmitting != true
             && !showEmojiPicker && !showGIFPicker && !showStickerPicker
+            && !isVoiceMessageActive
     }
 
     private var commandComposer: ApplicationCommandComposerModel {
@@ -1186,7 +1248,7 @@ struct ComposerView: View {
     }
 
     private var hasComposerActions: Bool {
-        canAddAttachments || canCreatePoll || canCreateThread
+        canAddAttachments || canCreatePoll || canCreateThread || model.translation.settings.isEnabled
     }
 
     /// The thread pane composes a thread's first message before Discord has
@@ -1224,40 +1286,6 @@ struct ComposerView: View {
         }
     }
 
-    private var activeReply: Message? {
-        switch conversation {
-        case .channel: model.replyingTo
-        case .thread: model.threadReplyingTo
-        }
-    }
-
-    private var activeReplyMentionsAuthor: Bool {
-        switch conversation {
-        case .channel: model.replyMentionsAuthor
-        case .thread: model.threadReplyMentionsAuthor
-        }
-    }
-
-    private var attachments: [ForumPostAttachment] {
-        model.composerAttachments(for: conversation)
-    }
-
-    private var draft: String {
-        switch conversation {
-        case .channel: model.draft
-        case .thread: model.threadDraft
-        }
-    }
-
-    private func updateDraft(_ value: String) {
-        switch conversation {
-        case .channel:
-            model.updateDraft(value)
-        case .thread:
-            model.updateThreadDraft(value)
-        }
-    }
-
     private func cancelReply() {
         model.cancelReply(in: conversation)
     }
@@ -1270,10 +1298,263 @@ struct ComposerView: View {
     }
 }
 
+extension ComposerView {
+    /// One button morphs between attaching, discarding a recording, and
+    /// previewing it.
+    func composerLeadingButton(appearance: ComposerBarAppearance) -> some View {
+        ComposerActionButton(
+            icon: Image(systemName: leadingSymbol),
+            help: leadingHelp,
+            iconSize: 19,
+            iconWeight: .regular,
+            showsHoverBackground: appearance == .legacy,
+            appearance: appearance,
+            action: performLeadingAction
+        )
+        .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp.byLayer)))
+        .disabled(hasActiveCommand || (!hasComposerActions && !isVoiceMessageActive) || !voiceMessage.canPreview)
+        .opacity((hasComposerActions || isVoiceMessageActive) && voiceMessage.canPreview ? 1 : 0.4)
+        .animation(.smooth(duration: 0.2), value: voiceMessage.canPreview)
+    }
+
+    /// Sits where the composer icons were, tinted like the delete action.
+    func voiceMessageDiscardButton(appearance: ComposerBarAppearance) -> some View {
+        ComposerActionButton(
+            icon: Image(systemName: "trash"),
+            help: "Delete voice message",
+            iconSize: 19,
+            size: appearance.accessoryButtonSize,
+            appearance: appearance,
+            role: .destructive,
+            action: discardVoiceMessage
+        )
+        .fixedSize()
+        .transition(.scale(scale: 0.6).combined(with: .opacity))
+    }
+
+    var voiceMessageField: some View {
+        ComposerVoiceMessageField(
+            state: voiceMessage,
+            playback: model.voiceMessagePlayback
+        )
+        .transition(
+            .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)),
+                removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .leading))
+            )
+        )
+    }
+
+    func composerSendSlot(appearance: ComposerBarAppearance) -> some View {
+        let deadline = activeConversationID.flatMap { channelID in
+            let configuration = model.slowmodeConfiguration(in: channelID)
+            return model.composer.slowmode.deadline(
+                in: channelID, interval: configuration.interval, immune: configuration.immune
+            )
+        }
+        return TimelineView(ComposerSlowmodeTimelineSchedule(deadline: deadline)) { context in
+            let coolingDown = deadline.map { $0 > context.date } ?? false
+            ComposerSendSlot(
+                mode: sendSlotMode,
+                appearance: appearance,
+                isSlowmodeBlocked: coolingDown,
+                send: sendSlotMode == .sendVoice ? sendVoiceMessage : submitComposer,
+                startRecording: startVoiceMessage,
+                stopRecording: { voiceMessage.stop() }
+            )
+            .disabled(sendSlotIsDisabled(coolingDown: coolingDown))
+        }
+    }
+
+    private var voiceMessage: VoiceMessageComposerState {
+        model.voiceMessageComposer(for: conversation)
+    }
+
+    private var isVoiceMessageActive: Bool {
+        voiceMessage.phase.isActive
+    }
+
+    /// Changes only between phases, not with every recording level.
+    private var voiceMessagePhaseKey: Int {
+        switch voiceMessage.phase {
+        case .idle: 0
+        case .starting: 1
+        case .recording: 2
+        case .finishing: 3
+        case .recorded: 4
+        }
+    }
+
+    /// With nothing to send, the send button records a voice message instead.
+    private var showsVoiceMessageButton: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && attachments.isEmpty && !hasActiveCommand && !isCreatingThread
+            && model.canSendVoiceMessages(in: conversation)
+    }
+
+    private var sendSlotMode: ComposerSendSlot.Mode {
+        switch voiceMessage.phase {
+        case .idle: showsVoiceMessageButton ? .voice : .send
+        case .starting, .recording, .finishing: .stop
+        case .recorded: .sendVoice
+        }
+    }
+
+    private func sendSlotIsDisabled(coolingDown: Bool) -> Bool {
+        switch sendSlotMode {
+        case .send: !composerCanSubmit && !coolingDown
+        case .voice: false
+        case .stop: voiceMessage.phase == .finishing
+        case .sendVoice: isSubmitting || coolingDown
+        }
+    }
+
+    private var leadingSymbol: String {
+        switch voiceMessage.phase {
+        case .idle: "plus"
+        case .starting, .recording, .finishing: "trash"
+        case .recorded:
+            model.voiceMessagePlayback.phase(of: voiceMessage.playbackID) == .playing ? "pause.fill" : "play.fill"
+        }
+    }
+
+    private var leadingHelp: String {
+        switch voiceMessage.phase {
+        case .idle: "Add attachments"
+        case .starting, .recording, .finishing: "Delete voice message"
+        case .recorded where !voiceMessage.canPreview:
+            "Waiting for your headset to switch back from its microphone"
+        case .recorded:
+            model.voiceMessagePlayback.phase(of: voiceMessage.playbackID) == .playing ? "Pause" : "Play voice message"
+        }
+    }
+
+    private func performLeadingAction() {
+        switch voiceMessage.phase {
+        case .idle:
+            showComposerActions.toggle()
+        case .starting, .recording, .finishing:
+            discardVoiceMessage()
+        case let .recorded(recording):
+            model.voiceMessagePlayback.toggle(
+                voiceMessage.playbackID,
+                source: .local(recording.fileURL),
+                duration: recording.duration
+            )
+        }
+    }
+
+    private func startVoiceMessage() {
+        showComposerActions = false
+        showEmojiPicker = false
+        showGIFPicker = false
+        showStickerPicker = false
+        voiceMessage.start(inputDeviceID: model.voiceMessageInputDeviceID)
+    }
+
+    private func discardVoiceMessage() {
+        voiceMessage.discard(playback: model.voiceMessagePlayback)
+        isFocused = true
+    }
+
+    private func sendVoiceMessage() {
+        guard !isSubmitting, allowsSubmission() else { return }
+        isSubmitting = true
+        Task {
+            _ = await model.submitVoiceMessage(from: conversation)
+            isSubmitting = false
+            isFocused = true
+        }
+    }
+}
+
+private extension ComposerView {
+    var draft: String {
+        switch conversation {
+        case .channel: model.draft
+        case .thread: model.threadDraft
+        }
+    }
+
+    func updateDraft(_ value: String) {
+        switch conversation {
+        case .channel:
+            model.updateDraft(value)
+        case .thread:
+            model.updateThreadDraft(value)
+        }
+    }
+
+    var activeReply: Message? {
+        switch conversation {
+        case .channel: model.replyingTo
+        case .thread: model.threadReplyingTo
+        }
+    }
+
+    var activeReplyMentionsAuthor: Bool {
+        switch conversation {
+        case .channel: model.replyMentionsAuthor
+        case .thread: model.threadReplyMentionsAuthor
+        }
+    }
+
+    var attachments: [ForumPostAttachment] {
+        model.composerAttachments(for: conversation)
+    }
+
+    var hasCheckingAttachments: Bool {
+        let checking = model.composer.checkingAttachmentIDs
+        return !checking.isEmpty && attachments.contains { checking.contains($0.id) }
+    }
+
+    static var headerTransition: AnyTransition {
+        AnyTransition(.blurReplace).combined(with: .offset(y: InterfaceScale.metric(14)))
+    }
+
+    var chromeKey: ComposerChromeKey {
+        ComposerChromeKey(
+            conversationID: activeConversationID,
+            attachmentIDs: hasActiveCommand ? [] : attachments.map(\.id),
+            replyID: hasActiveCommand ? nil : activeReply?.id,
+            hasActiveCommand: hasActiveCommand,
+            hasTranslationHeader: model.draftTranslation(for: conversation) != nil
+        )
+    }
+
+    var animatesChromeResize: Bool {
+        !reduceMotion && !isClearingForSend
+    }
+
+    /// The timeline animates a sent message out of the field, as a bubble or
+    /// as plain text; it consumes this when the optimistic row arrives.
+    func registerSendTransition(
+        channelID: ChannelID,
+        attachments: [ForumPostAttachment]
+    ) {
+        // A send from older history first loads the newest messages, so
+        // the field stays editable and nothing arrives to take it over yet.
+        guard model.animatesMessageSending,
+              conversation == .thread || !model.hasMoreLaterMessages,
+              let source = sendTransitionAnchor.source(
+                  channelID: channelID,
+                  content: draft.trimmingCharacters(in: .whitespacesAndNewlines),
+                  attachments: attachments
+              )
+        else { return }
+        model.timelineSendTransitionStore.register(source)
+        holdsPlaceholderForSendTransition = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            holdsPlaceholderForSendTransition = false
+        }
+    }
+}
+
 private struct ComposerActionLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 8) {
-            configuration.icon.frame(width: 20, alignment: .center)
+        HStack(spacing: InterfaceScale.metric(8)) {
+            configuration.icon.frame(width: InterfaceScale.metric(20), alignment: .center)
             configuration.title
         }
     }

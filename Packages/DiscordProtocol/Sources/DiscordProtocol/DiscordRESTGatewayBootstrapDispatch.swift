@@ -108,6 +108,12 @@ extension DiscordRESTProvider {
         privateCallsByChannel = [:]
         cancelPendingRoleMemberRequests(error: CancellationError())
         cachedMembers = [:]
+        cachedThreadMemberIDs = [:]
+        for (guildID, threadIDs) in threadMemberSubscriptions {
+            for threadID in threadIDs {
+                continuation?.yield(.threadMembersChanged(guildID: guildID, threadID: threadID, members: nil))
+            }
+        }
         quickSwitcherGuildMemberUserIDsByGuildID = [:]
         quickSwitcherJoinedMemberIDsByGuildID = [:]
         cachedMemberListItems = [:]
@@ -137,7 +143,7 @@ extension DiscordRESTProvider {
         forwardSearchEligibleUserOrder = []
         await loadStartupSearchCaches()
         cachedBlockedOrIgnoredUserIDs = ready.blockedOrIgnoredUserIDs
-        cachedRelationshipNicknamesByUserID = ready.relationshipNicknamesByUserID
+        adoptReadyRelationships(ready.relationships)
         profileApexAssignments = ready.apexExperiments
         resetProfileEditingState()
     }
@@ -243,10 +249,7 @@ extension DiscordRESTProvider {
         cachePrivateRecipientReferences(ready.privateChannels)
         let privateChannels = Self.orderedPrivateChannels(
             ready.privateChannels.enumerated().compactMap { offset, dto in
-                guard var channel = try? dto.domain(
-                    guildID: nil,
-                    knownUsersByID: cachedGatewayUsersByID
-                ) else { return nil }
+                guard var channel = try? privateChannel(from: dto) else { return nil }
                 // Discord's forwarding search preserves the private
                 // channel store's source order for equal-score GDMs,
                 // even though the DM sidebar is ordered by activity.
@@ -255,11 +258,11 @@ extension DiscordRESTProvider {
             }
         )
         cachedChannels = [nil: privateChannels]
-        cachedFriendUserIDs = ready.friendUserIDs
         for presence in ready.privatePresences {
             cachePrivatePresence(presence)
         }
         continuation?.yield(.privateMembersChanged(privateMembersInChannelOrder()))
+        publishRelationshipPresences(complete: true)
     }
 
     private func applyReadyGuildProjection(
@@ -574,10 +577,7 @@ extension DiscordRESTProvider {
             )
             var nextSourceOrder = (channels.lazy.map(\.position).max() ?? -1) + 1
             for var channel in supplemental.lazyPrivateChannels.compactMap({
-                try? $0.domain(
-                    guildID: nil,
-                    knownUsersByID: cachedGatewayUsersByID
-                )
+                try? privateChannel(from: $0)
             }) {
                 if let index = indexByID[channel.id] {
                     channel.position = channels[index].position
@@ -603,6 +603,8 @@ extension DiscordRESTProvider {
         {
             continuation?.yield(.privateMembersChanged(privateMembersInChannelOrder()))
         }
+        // READY_SUPPLEMENTAL's merged friend presences are the initial source.
+        publishRelationshipPresences(complete: true)
     }
 
     private func applyReadySupplementalGuildProjection(

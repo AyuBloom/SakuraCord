@@ -11,7 +11,7 @@ and the outbox; MediaPipeline owns local media transformations.
 
 | Contract | Representative checks |
 | --- | --- |
-| DM/history/send budgets | [DirectMessageProviderContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/DirectMessageProviderContractTests.swift); [ProviderRequestContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ProviderRequestContractTests.swift) |
+| DM/history/send budgets | [DirectMessageProviderContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/DirectMessageProviderContractTests.swift); [ProviderRequestContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ProviderRequestContractTests.swift); [MessageSendRateLimitContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/MessageSendRateLimitContractTests.swift) |
 | Search, forwarding and pins | [MessageSearchContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/MessageSearchContractTests.swift); [MessageForwardingContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/MessageForwardingContractTests.swift); [PinnedMessagesContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/PinnedMessagesContractTests.swift) |
 | Polls and threads | [PollContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/PollContractTests.swift); [ForumProviderContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ForumProviderContractTests.swift) |
 | Uploads | [UploadPrivacyContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/UploadPrivacyContractTests.swift); [AttachmentUploadURLValidationTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/AttachmentUploadURLValidationTests.swift); [UploadPrivacyPreparationTests.swift](../../App/Tests/SakuraCordAppTests/UploadPrivacyPreparationTests.swift) |
@@ -25,6 +25,23 @@ operations. An ordinary message POST carries content, nonce, TTS/flags and
 as a deliberate idempotency safeguard. Concurrent same-channel/same-nonce sends
 share one mutation. Preserve that nonce for explicit retries; an ambiguous result
 must not cause automatic resend. [Poll creation](#polls) has a distinct body.
+
+Like the first-party `MessageQueue` (stable web build `web.ae482d0492df0fb9.js`,
+observed 9 October 2026), the account's outbox delivers one send at a time in
+submission order. The composer clears as soon as a message is admitted, so later
+messages can be written and queued while earlier ones are in flight. Unconfirmed
+sends, including failed ones awaiting retry or discard, stay below settled messages
+in submission order, so each confirmation settles in place instead of moving by
+its server timestamp. While five
+sends wait behind the one in flight, a new submission is refused before it
+consumes the draft and the "Way too spicy" alert is shown. A non-slowmode `429`
+on the message POST is a definite rejection: the transport waits for the server
+cooldown and replays the same body and nonce within the
+[message creation budget](../PROTOCOL_BASELINE.md#attempt-budgets), without
+re-uploading attachments. The first-party queue replays without a bound;
+SakuraCord stops after the budget and leaves the message failed for explicit retry.
+Forwarding and the `/msg` and `/thread` built-ins post to another conversation
+outside this queue; forwarding keeps the single-attempt mutation budget.
 
 A reply includes reference type 0, message ID and channel ID. To disable the reply
 ping, include `allowed_mentions` with normal users/roles/everyone parsing and
@@ -99,8 +116,8 @@ omitted fields; non-personalized final `me_voted:false` values must not erase a
 known personal selection. Natural expiry and rendering send no expiry request.
 An explicit results read can repeat once if overlapping votes make its unversioned
 tally ambiguous; a second overlap reports failure rather than starting polling.
-Expected route-scoped poll errors stay local, while account restrictions retain
-the shared safety circuit.
+Poll rejections follow the shared operation-scoped error policy; they do not
+stop unrelated REST or Gateway traffic.
 
 ## Forums, threads and commands
 
@@ -115,6 +132,49 @@ thread link may first require one Get Channel; a known one does not.
 Thread lifecycle events advance the parent forum boundary before unread
 projection. Metadata, archive, lock, pin and delete are explicit, permission-gated
 mutations. Message-created thread cards use cached thread/message data.
+
+### Sidebar threads
+
+The channel list needs no request. READY and `GUILD_CREATE` `threads` contain only
+active threads the account has joined, each with an embedded `member` whose
+`join_timestamp` orders the rows. A created thread arrives as a member-less
+`THREAD_CREATE` followed by `THREAD_MEMBER_UPDATE`; joining yields
+`THREAD_MEMBERS_UPDATE` `added_members` plus a `THREAD_CREATE` with `member`;
+leaving yields `removed_member_ids`; closing yields an archived `THREAD_UPDATE`.
+
+Discord lists a joined thread under its text, announcement or forum parent only
+while it is relevant: its auto-archive window has not elapsed since the latest of
+its last message (or creation), `last_non_message_activity_timestamp`, and
+`archive_timestamp`, it is pinned, it is unread
+and not muted, or it has mentions. A collapsed category or muted parent keeps
+only unread-and-unmuted or mentioned threads unless the parent or one of its
+threads is open. Rows sort by newest join; a selected full-channel thread absent from that set is
+inserted first. A thread open only in the side pane does not receive that exception.
+`hide_muted_channels` removes muted, unmentioned threads unless their parent or
+one of its threads is selected. Relevance and timed mute expiry re-evaluate the rows.
+Sidebar selection and channel keyboard traversal open the existing thread timeline
+as the main conversation; the hidden parent is not eligible for read acknowledgements.
+Thread menus resolve permissions against their own parent and recheck eligibility
+when invoking a mutation. Private threads additionally require membership or
+Manage Threads to expose content or actions after leaving. Close requires Manage Threads or the unlocked thread's
+creator; reopening an unlocked thread uses the first-party send permissions,
+while reopening a locked thread requires Manage Threads. Lock/unlock and pin/unpin
+require Manage Threads; pinning is forum-only. Ordinary thread creators cannot
+delete a thread without Manage Threads. Forum authors may delete an empty post;
+deleting only a starter message after replies exist is a separate action, not
+permission to delete the whole thread. Notification controls require membership;
+unjoined threads must not implicitly join through a sidebar notification change.
+These gates follow first-party modules 406704, 307623, 57907, and 375500 in the
+2026-10-06 official client. Sidebar action failures use a visible application alert,
+including when the forum browser is not presented.
+
+Follow/leave uses
+`POST`/`DELETE /channels/{id}/thread-members/@me?location=Context%20Menu` and
+reconciles membership through Gateway; notification responses also publish the
+joined-thread catalogue immediately.
+See [SidebarThreadPresentation.swift](../../App/Sources/SakuraCord/Models/SidebarThreadPresentation.swift).
+Observed in official web build `b70721f9bc10ca0b` (desktop host 0.0.411) on
+2026-10-06, where it matched 5 of 51 joined forum posts exactly.
 
 Text-channel and voice-channel chats, existing threads, and existing forum posts
 support the same slash-command composer. The main conversation and supplementary
@@ -157,7 +217,7 @@ Discord's client-side built-ins last, Frequently Used as the five
 highest-scoring browse commands among the 100 most frecent, and typed search
 ranked by Discord's match tiers, then frecency score, then name, at most 20.
 [ApplicationCommandPickerEngine.swift](../../App/Sources/SakuraCord/Models/ApplicationCommandPickerEngine.swift)
-and [ApplicationCommandFrecencyStore.swift](../../App/Sources/SakuraCord/Models/ApplicationCommandFrecencyStore.swift)
+and [DiscordFrecencyStore.swift](../../App/Sources/SakuraCord/Models/DiscordFrecencyStore.swift)
 own those rules; [ApplicationCommandFrecencyTests.swift](../../App/Tests/SakuraCordAppTests/ApplicationCommandFrecencyTests.swift)
 pins them. The command list uses the emoji picker's bounded native viewport and shared
 section rail. Section headings scroll in the list, pin at the top, and are pushed
@@ -214,7 +274,8 @@ mutation with profile editing; it is never automatically replayed. Recognized
 nickname-field validation errors remain local, and an intervening Gateway
 profile update takes precedence over the REST snapshot. The official user
 client still uses this nickname-specific route despite the public API's
-recommendation to use Modify Current Member. Moderation, group-leave and
+recommendation to use Modify Current Member; other members' and friend
+nicknames are described under [nicknames](SETTINGS.md#nicknames). Moderation, group-leave and
 schedule built-ins show a local notice. Built-in notices use Discord's local
 Clyde identity (user `1`, discriminator `0000`), never a remote user-profile
 request. Official Fresh 0.0.411 on 2026-10-05 showed a compact Clyde card with
@@ -371,3 +432,68 @@ See [external-host checks](../../App/Tests/SakuraCordAppTests/ExternalAttachment
 and [metadata fixtures](../../Packages/MediaPipeline/Tests/MediaPipelineTests/UploadMetadataTests.swift)
 for failure/privacy boundaries. Detailed container algorithms belong beside that
 code, not in the transport-wide baseline.
+
+## Voice messages
+
+Discord's desktop client has no recorder. The send contract was observed on
+9 October 2026 (web build `web.ae482d0492df0fb9.js`) through Equicord's
+VoiceMessages plugin, which reuses Discord's uploader, and cross-checked against
+[Discord's message documentation](https://docs.discord.com/developers/resources/message#voice-messages).
+
+- **Recording.** Mono 48 kHz Ogg Opus. Apple frameworks encode Opus but write it
+  only into CAF, so [MediaPipeline](../../Packages/MediaPipeline/Sources/MediaPipeline/OggOpusWriter.swift)
+  muxes the packets itself: 312-sample pre-skip, with the final granule trimming
+  encoder padding. Never upload CAF renamed to `.ogg`. Recordings stop at
+  Discord's 20-minute limit. Capture applies no gain, so the recording is
+  levelled once it stops: gated speech to −16 dBFS RMS, at most +18 dB, with a
+  soft limiter. The waveform is measured after levelling.
+- **Waveform.** 32–256 bins, ten per second of audio: RMS scaled to 0–255, then
+  the plugin's eased peak normalization, base64-encoded as raw bytes. Follow
+  upstream Vencord's contiguous windows; the installed Equicord copy contains an
+  indexing bug.
+- **Upload.** The reservation names `voice-message.ogg` and adds
+  `original_content_type: "audio/ogg; codecs=opus"`. Storage receives the raw
+  bytes as `application/octet-stream`. The message POST sets `flags: 8192` and
+  empty `content`, plus one attachment with `filename`, `uploaded_filename`,
+  `duration_secs` and `waveform`. The attachment's `content_type` is omitted.
+- **Rules.** Guild channels require Send Voice Messages (`1 << 46`). A voice
+  message carries no text, stickers or poll, and Discord does not allow it to be
+  edited.
+- **Delivery.** Unlike the plugin's direct POST, SakuraCord sends through the
+  ordinary [outbox](#sends-and-history). It keeps the nonce, idempotency field,
+  send budget and reply reference.
+- **Receipt.** `MESSAGE_CREATE` and history carry `flags: 8192`, plus an
+  attachment with `content_type: audio/ogg`, `duration_secs` and `waveform`.
+  Preserve the returned metadata; Discord may adjust the duration (8 → 8.02
+  observed).
+- **Playback.** Audio is fetched from the attachment `url` through the shared
+  media cache, re-signing expiring links first. One message plays at a time. The
+  speed cycle is 1×, 1.5×, 2×, 0.75×, kept device-local. Up to 25 resume
+  positions between 0.5 s and 95% are kept in memory. Listening is not reported
+  to Discord.
+
+See [VoiceMessageSendContractTests](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/VoiceMessageSendContractTests.swift)
+and [VoiceMessageEncodingTests](../../Packages/MediaPipeline/Tests/MediaPipelineTests/VoiceMessageEncodingTests.swift).
+
+## Attachment links
+
+Attachment URLs retain their ordinary full-URL presentation. An explicit
+activation refreshes an unsigned or nearly expired HTTPS attachment URL only
+when its complete URL matches the first-party attachment-link rule: `cdn`,
+`media`, or `images` Discord CDN hosts (including subdomains and hyphen-suffixed
+variants), an `/attachments/` or `/ephemeral-attachments/` path, numeric IDs,
+and the rule's filename/query character set. Nonmatching URLs remain ordinary
+links; no URL prefix is substituted for the original destination.
+
+SakuraCord deliberately applies refresh to any activated link whose complete
+URL matches that rule, including masked links. The first-party client refreshes
+attachment-link clicks and its "Copy link" item; SakuraCord has no message link
+context menu. The refreshed destination still goes through external-link safety
+assessment with the original displayed label. This activation path does not
+refresh image embeds, attachments, or the media viewer. The first-party client
+separately detects expired attachment and embed URLs when loading a channel and
+refetches message history.
+
+| Route | Contract | Evidence |
+| --- | --- | --- |
+| `POST /attachments/refresh-urls` | One explicit activation of a Discord attachment link whose URL is unsigned or whose hexadecimal `ex` expires within one hour; `attachment_urls` contains exactly the original URL. `refreshed_urls[0].refreshed` is opened; a null or absent value opens the original URL. No retry, context header, or cache. | Stable web build `622805` (`web.d4c7976eccf337f1.js`, SHA-256 `7341aa3d5a2208664901f65bf776a48fb5cafe21a1a9e6ce504db79a4a636f7d`), 28 September 2026. Public docs define `ex`/`is`/`hm` but not this route; pinned Paicord and Swiftcord v1 have no equivalent contract. |

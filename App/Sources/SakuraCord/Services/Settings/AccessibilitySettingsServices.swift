@@ -25,6 +25,7 @@ nonisolated struct AccessibilitySettingsSnapshot: Equatable, Sendable {
         disablesProfileFrames: false,
         disablesNameStyles: false,
         disablesProfileGradients: false,
+        disablesServerTags: false,
         announcesTimestamps: true,
         announcesEditedStatus: true,
         announcesReactionCounts: true,
@@ -41,12 +42,14 @@ nonisolated struct AccessibilitySettingsSnapshot: Equatable, Sendable {
     var disablesProfileFrames: Bool
     var disablesNameStyles: Bool
     var disablesProfileGradients: Bool
+    var disablesServerTags: Bool
     var announcesTimestamps: Bool
     var announcesEditedStatus: Bool
     var announcesReactionCounts: Bool
     var announcesAttachmentTypes: Bool
     var announcesNewMessages: Bool
 
+    var disablesMessageSendingAnimations = false
     var disablesOwnCosmetics = false
 
 }
@@ -76,6 +79,8 @@ final class AccessibilitySettingsStore {
             ?? value.disablesNameStyles
         value.disablesProfileGradients = bool(.accessibilityDisableProfileGradients)
             ?? value.disablesProfileGradients
+        value.disablesServerTags = bool(.accessibilityDisableServerTags)
+            ?? value.disablesServerTags
         value.announcesTimestamps = bool(.accessibilityAnnounceTimestamp)
             ?? value.announcesTimestamps
         value.announcesEditedStatus = bool(.accessibilityAnnounceEdited)
@@ -86,11 +91,13 @@ final class AccessibilitySettingsStore {
             ?? value.announcesAttachmentTypes
         value.announcesNewMessages = bool(.accessibilityAnnounceNewMessages)
             ?? value.announcesNewMessages
+        value.disablesMessageSendingAnimations = bool(.accessibilityDisableSendAnimations) ?? false
         value.disablesOwnCosmetics = bool(.accessibilityDisableOwnCosmetics) ?? false
         return value
     }
 
     func save(_ value: AccessibilitySettingsSnapshot) {
+        preferences.set(.bool(value.disablesMessageSendingAnimations), for: .accessibilityDisableSendAnimations)
         preferences.set(.bool(value.disablesOwnCosmetics), for: .accessibilityDisableOwnCosmetics)
         preferences.set(.bool(value.underlinesLinks), for: .underlineLinks)
         preferences.set(.string(value.roleColorDisplay.rawValue), for: .roleColorDisplay)
@@ -100,6 +107,7 @@ final class AccessibilitySettingsStore {
         preferences.set(.bool(value.disablesProfileFrames), for: .accessibilityDisableProfileFrames)
         preferences.set(.bool(value.disablesNameStyles), for: .accessibilityDisableNameStyles)
         preferences.set(.bool(value.disablesProfileGradients), for: .accessibilityDisableProfileGradients)
+        preferences.set(.bool(value.disablesServerTags), for: .accessibilityDisableServerTags)
         preferences.set(.bool(value.announcesTimestamps), for: .accessibilityAnnounceTimestamp)
         preferences.set(.bool(value.announcesEditedStatus), for: .accessibilityAnnounceEdited)
         preferences.set(.bool(value.announcesReactionCounts), for: .accessibilityAnnounceReactions)
@@ -166,6 +174,11 @@ nonisolated enum AccessibilityMessageMetadataPolicy {
 
 @MainActor
 extension AppModel {
+    var animatesMessageSending: Bool {
+        !accessibilitySettings.disablesMessageSendingAnimations
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
     var cosmeticPolicy: ProfileCosmeticPolicy {
         ProfileCosmeticPolicy(settings: accessibilitySettings, currentUserID: snapshot?.currentUser.id)
     }

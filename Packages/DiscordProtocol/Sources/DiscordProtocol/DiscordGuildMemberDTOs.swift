@@ -117,6 +117,7 @@ struct GuildMemberDTO: Decodable {
     var bio: String?
     var pending: Bool?
     var flags: UInt64?
+    var communicationDisabledUntil: String?
     var joinedAt: String?
     var avatarDecorationData: UserDTO.AvatarDecorationDTO?
     var collectibles: UserCollectiblesDTO?
@@ -125,6 +126,7 @@ struct GuildMemberDTO: Decodable {
     enum CodingKeys: String, CodingKey {
         case user, nick, roles, presence, avatar, banner, bio, pending, flags, collectibles
         case joinedAt = "joined_at"
+        case communicationDisabledUntil = "communication_disabled_until"
         case avatarDecorationData = "avatar_decoration_data"
         case displayNameStyles = "display_name_styles"
     }
@@ -205,6 +207,7 @@ struct GuildMemberDTO: Decodable {
             isMobileOnly: (overridePresence ?? presence)?.clientStatus?.isMobileOnly ?? false,
             isPending: pending,
             flags: flags,
+            communicationDisabledUntil: communicationDisabledUntil.flatMap(DiscordDate.parse),
             joinedAt: joinedAt.flatMap(DiscordDate.parse)
         )
     }
@@ -227,6 +230,21 @@ struct GuildRoleColorsDTO: Decodable {
 }
 
 struct GuildRoleDTO: Decodable {
+    private struct Tags: Decodable {
+        var isPurchasableSubscription: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case subscriptionListingID = "subscription_listing_id"
+            case availableForPurchase = "available_for_purchase"
+        }
+
+        init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            isPurchasableSubscription = try values.decodeIfPresent(String.self, forKey: .subscriptionListingID) != nil
+                && values.contains(.availableForPurchase)
+        }
+    }
+
     var id: String
     var name: String
     var position: Int
@@ -237,10 +255,11 @@ struct GuildRoleDTO: Decodable {
     var unicodeEmoji: String?
     var mentionable: Bool?
     var permissions: String?
+    private var tags: Tags?
     enum CodingKeys: String, CodingKey {
         case id, name, position, hoist, color, colors, icon
         case unicodeEmoji = "unicode_emoji"
-        case mentionable, permissions
+        case mentionable, permissions, tags
     }
 
     var domain: GuildRole? {
@@ -258,7 +277,8 @@ struct GuildRoleDTO: Decodable {
             iconURL: iconURL,
             unicodeEmoji: unicodeEmoji,
             isMentionable: mentionable ?? false,
-            permissions: permissions.flatMap(UInt64.init)
+            permissions: permissions.flatMap(UInt64.init),
+            isPurchasableSubscription: tags?.isPurchasableSubscription ?? false
         )
     }
 }

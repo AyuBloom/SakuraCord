@@ -6,7 +6,8 @@ import SwiftUI
 
 struct NativeMemberListView: NSViewRepresentable {
     @Environment(\.profileCosmeticPolicy) var cosmeticPolicy
-    let sections: [MemberSection]
+    @Environment(\.serverTagCardModel) var serverTagCardModel
+    var sections: [MemberSection]
     let customEmojiURLsByID: CustomEmojiImageURLs
     let profilePresentation: ProfilePresentationState?
     let isProfilePresented: Bool
@@ -17,9 +18,12 @@ struct NativeMemberListView: NSViewRepresentable {
     var presentation = NativeMemberListPresentation()
     var onViewportRange: (ClosedRange<Int>) -> Void = { _ in }
 
-    var contextMenu: ((Member) -> NSMenu)?
     var openProfile: ((ProfilePresentationState) -> Void)?
     var sendProfileMessage: ((UserID, String, String) async -> Bool)?
+    var rowAccessory: ((Member) -> AnyView)?
+    var rowMenu: ((Member) -> NSMenu?)?
+    var rowAccessibilityActions: ((Member) -> [NSAccessibilityCustomAction])?
+    var contentIdentity: String?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)

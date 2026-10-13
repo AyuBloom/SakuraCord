@@ -18,12 +18,14 @@ public actor MockChatProvider: ChatProvider {
     var dismissedInboxMentions: Set<MessageID> = []
     var favoriteGIFValues: [GIFSearchResult] = []
     var favoriteEmojiKeys: [String]?
+    var savedEmojiFrecency: (messages: DiscordFrecencyHistory, reactions: DiscordFrecencyHistory)?
     var soundboardSoundsByGuild: [GuildID: [SoundboardSound]] = [:]
     var soundboardSettings = SoundboardUserSettings()
     var continuation: AsyncStream<ClientEvent>.Continuation?
     var nextMessageID: UInt64
     public internal(set) var typingRequests: [ChannelID] = []
     public internal(set) var pinMutationRequests: [PinMutationRequest] = []
+    public internal(set) var attachmentURLRefreshRequests: [URL] = []
     public internal(set) var voiceJoinRequests: [VoiceJoinRequest] = []
     public internal(set) var soundboardSendRequests: [SoundboardSendRequest] = []
     public internal(set) var acknowledgementRequests: [AcknowledgementRequest] = []
@@ -37,6 +39,8 @@ public actor MockChatProvider: ChatProvider {
     var categoryCollapsedUpdateWaiters: [CheckedContinuation<Void, Never>] = []
     public internal(set) var threadNotificationRequests: [ThreadNotificationRequest] = []
     var forumQueriesByChannel: [ChannelID: [ForumPostQuery]] = [:]
+    var relationshipPresences: [UserID: UserPresence]?
+    var presenceChurnTask: Task<Void, Never>?
 
     public init(
         includesLongServerList: Bool = false,
@@ -45,12 +49,15 @@ public actor MockChatProvider: ChatProvider {
         pinnedMessageCount: Int? = nil,
         pinMutationFailureStatus: Int? = nil,
         timelineIncludesAnimatedMedia: Bool = false,
-        includesIncomingPrivateCall: Bool = false
+        timelineIncludesVoiceMessages: Bool = false,
+        includesIncomingPrivateCall: Bool = false,
+        friendCount: Int? = nil
     ) {
         let fixture = MockChatFixture.make(
             includesLongServerList: includesLongServerList,
             timelineMessageCount: timelineMessageCount,
-            timelineIncludesAnimatedMedia: timelineIncludesAnimatedMedia
+            timelineIncludesAnimatedMedia: timelineIncludesAnimatedMedia,
+            timelineIncludesVoiceMessages: timelineIncludesVoiceMessages
         )
         currentUser = fixture.currentUser
         self.pinMutationFailureStatus = pinMutationFailureStatus
@@ -110,6 +117,13 @@ public actor MockChatProvider: ChatProvider {
             }
         }
         profilesByUser = fixture.profilesByUser
+        if let friendCount {
+            let fixture = Self.performanceRelationships(friendCount: friendCount)
+            snapshot.relationships += fixture.relationships
+            snapshot.friendUserIDs = snapshot.relationships.friendUserIDs
+            snapshot.relationshipNicknamesByUserID = snapshot.relationships.nicknamesByUserID
+            relationshipPresences = fixture.presences
+        }
         if includesIncomingPrivateCall {
             let channelID = ChannelID(rawValue: 400)
             let callerID = UserID(rawValue: 2)
@@ -172,6 +186,20 @@ public actor MockChatProvider: ChatProvider {
         continuation?.yield(.connectionChanged(.connecting))
         try await Task.sleep(for: .milliseconds(180))
         continuation?.yield(.connectionChanged(.ready))
+        let referenceMembers = Dictionary(
+            (membersByGuild[GuildID(rawValue: 100)] ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { _, newer in newer }
+        )
+        var presences = Dictionary(uniqueKeysWithValues: snapshot.relationships.map { relationship in
+            let member = referenceMembers[relationship.id]
+            return (relationship.id, UserPresence(
+                status: member?.status ?? .offline,
+                customStatus: member?.customStatus, activityText: member?.activityText,
+                isListeningToMusic: member?.isListeningToMusic ?? false, isMobileOnly: member?.isMobileOnly ?? false
+            ))
+        })
+        presences.merge(relationshipPresences ?? [:]) { _, fixture in fixture }
+        continuation?.yield(.relationshipPresencesChanged(presences, isComplete: true))
         return snapshot
     }
 
@@ -196,7 +224,7 @@ public actor MockChatProvider: ChatProvider {
             )
             return usersByID.values.map {
                 let reference = referenceMembersByID[$0.id]
-                return Member(
+                var member = Member(
                     user: $0,
                     roleName: $0.id == currentUser.id ? "You" : "Direct Message",
                     status: $0.id == currentUser.id ? .online : reference?.status ?? .offline,
@@ -204,6 +232,11 @@ public actor MockChatProvider: ChatProvider {
                     customStatus: reference?.customStatus,
                     isListeningToMusic: reference?.isListeningToMusic ?? false
                 )
+                if let nickname = snapshot.relationshipNicknamesByUserID[$0.id] {
+                    member.globalDisplayName = $0.displayName
+                    member.user.displayName = nickname
+                }
+                return member
             }
         }
         return membersByGuild[guildID] ?? []

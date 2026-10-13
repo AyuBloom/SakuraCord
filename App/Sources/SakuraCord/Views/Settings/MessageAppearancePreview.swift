@@ -2,6 +2,7 @@ import SakuraCordModels
 import SwiftUI
 
 struct MessageAppearancePreview: View {
+    let channelKind: ChannelKindValue
     let appearance: AppearanceSettingsSnapshot
     let interface: InterfaceSettingsSnapshot
     let accessibility: AccessibilitySettingsSnapshot
@@ -49,11 +50,11 @@ struct MessageAppearancePreview: View {
                 Color.clear
             }
         }
-        .frame(height: 280)
+        .frame(height: InterfaceScale.metric(280))
         .background { SakuraCordThemeBackground() }
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: InterfaceScale.metric(10)))
         .overlay {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: InterfaceScale.metric(10))
                 .strokeBorder(.separator.opacity(0.4), lineWidth: 1)
                 .allowsHitTesting(false)
         }
@@ -63,6 +64,7 @@ struct MessageAppearancePreview: View {
             preview = MessageAppearancePreviewContent.makeModel()
             updatePresentation()
         }
+        .onChange(of: channelKind) { updatePresentation() }
         .onChange(of: appearance) { updatePresentation() }
         .onChange(of: interface) { updatePresentation() }
         .onChange(of: accessibility) { updatePresentation() }
@@ -71,6 +73,10 @@ struct MessageAppearancePreview: View {
     private func updatePresentation() {
         guard let preview else { return }
         // Mirror rendering preferences without writing settings or starting a session.
+        if preview.selectedChannel?.kind != channelKind {
+            preview.snapshot?.channels[0].kind = channelKind
+            preview.selectedChannel?.kind = channelKind
+        }
         preview.appearanceSettings = appearance
         preview.interfaceSettings = interface
         preview.accessibilitySettings = accessibility

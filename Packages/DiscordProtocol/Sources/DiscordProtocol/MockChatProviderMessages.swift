@@ -2,6 +2,11 @@ import Foundation
 import SakuraCordModels
 
 public extension MockChatProvider {
+    func refreshAttachmentURL(_ url: URL) async throws -> URL? {
+        attachmentURLRefreshRequests.append(url)
+        return url
+    }
+
     func messages(in channelID: ChannelID, before: MessageID?, limit: Int) async throws
         -> MessagePage
     {
@@ -244,6 +249,12 @@ public extension MockChatProvider {
                 attachment.isSpoiler && !filename.hasPrefix("SPOILER_")
                     ? "SPOILER_\(filename)" : filename
             staged.description = attachment.description
+            if let voiceMessage = draft.voiceMessage {
+                staged.filename = VoiceMessageMetadata.filename
+                staged.mediaType = "audio/ogg"
+                staged.durationSeconds = voiceMessage.durationSeconds
+                staged.waveform = voiceMessage.waveform
+            }
             return staged
         }
         let replyPreview = draft.replyTo.flatMap { messageID in
@@ -251,7 +262,7 @@ public extension MockChatProvider {
                 MessageReplyPreview(message: $0)
             }
         }
-        let message = Message(
+        var message = Message(
             id: MessageID(rawValue: nextMessageID), channelID: draft.channelID, author: currentUser,
             content: draft.content, replyTo: draft.replyTo, replyPreview: replyPreview,
             attachments: attachments,
@@ -261,6 +272,7 @@ public extension MockChatProvider {
             },
             poll: draft.poll?.preview()
         )
+        if draft.voiceMessage != nil { message.flags.insert(.voiceMessage) }
         messagesByChannel[draft.channelID, default: []].append(message)
         continuation?.yield(.messageCreated(message))
         return message

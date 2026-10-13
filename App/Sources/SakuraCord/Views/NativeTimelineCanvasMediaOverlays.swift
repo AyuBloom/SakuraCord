@@ -24,6 +24,9 @@ extension NativeTimelineCanvasView {
         {
             return
         }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            reconcileSendTransitions()
+        }
         if !permitsAnimatedMediaPlayback {
             NativeTimelineMediaStore.shared.cancelAnimatedRequests(owner: visibleMediaPinOwner)
         }
@@ -91,7 +94,9 @@ extension NativeTimelineCanvasView {
               displayedRowOrigin(at: index) < visibleRect.maxY,
               videoCount < Self.maximumInlineVideoOverlayCount
         {
-            guard layouts.indices.contains(index) else {
+            guard layouts.indices.contains(index),
+                  !hidesRowForSendTransition(items[index].identifier)
+            else {
                 index += 1
                 continue
             }
@@ -392,7 +397,7 @@ extension NativeTimelineCanvasView {
                 media: NativeTimelineMediaKey.attachment(region.attachment)
                     ?? .media(region.attachment.url),
                 frame: region.frame,
-                cornerRadius: 8,
+                cornerRadius: InterfaceScale.metric(8),
                 isLooping: true,
                 opacity: CGFloat(MessageOutboxPresentation.mediaOpacity(
                     for: row.message.outboxState
@@ -451,7 +456,7 @@ extension NativeTimelineCanvasView {
                     role: .embedMedia(embed.embedID),
                     media: .media(mediaURL),
                     frame: mediaFrame,
-                    cornerRadius: 8,
+                    cornerRadius: InterfaceScale.metric(8),
                     isLooping: true
                 )
             }
@@ -510,7 +515,7 @@ extension NativeTimelineCanvasView {
                 role: .componentMedia(componentIndex, media.componentID),
                 media: .media(media.displayURL),
                 frame: media.frame,
-                cornerRadius: 8,
+                cornerRadius: InterfaceScale.metric(8),
                 isLooping: true
             )
         }
@@ -556,7 +561,7 @@ extension NativeTimelineCanvasView {
             else { continue }
             let size = DiscordComponentEmojiMetrics.buttonSize
             let box = CGRect(
-                x: button.frame.minX + 12,
+                x: button.frame.minX + NativeTimelineComponentButtonMetrics.horizontalPadding,
                 y: button.frame.midY - size / 2,
                 width: size,
                 height: size
@@ -567,7 +572,7 @@ extension NativeTimelineCanvasView {
                 role: .componentButton(componentIndex, button.componentID),
                 media: .media(url, maximumPixelDimension: 64),
                 frame: box.insetBy(dx: opticalInset, dy: opticalInset),
-                cornerRadius: 3,
+                cornerRadius: InterfaceScale.metric(3),
                 isLooping: true
             )
         }
@@ -589,7 +594,7 @@ extension NativeTimelineCanvasView {
                 role: .sticker(sticker.id),
                 media: .media(url, maximumPixelDimension: 384),
                 frame: layout.stickerFrames[stickerIndex],
-                cornerRadius: 8,
+                cornerRadius: InterfaceScale.metric(8),
                 isLooping: true,
                 opacity: CGFloat(MessageOutboxPresentation.mediaOpacity(
                     for: row.message.outboxState
@@ -774,7 +779,9 @@ extension NativeTimelineCanvasView {
               displayedRowOrigin(at: index) < visibleRect.maxY,
               desired.count < Self.maximumActivityIndicatorCount
         {
-            if layouts.indices.contains(index) {
+            if layouts.indices.contains(index),
+               !hidesRowForSendTransition(items[index].identifier)
+            {
                 let origin = displayedRowOrigin(at: index)
                 for (position, indicator) in layouts[index].activityIndicators.enumerated() {
                     desired[ActivityIndicatorKey(row: items[index].identifier, index: position)] = .init(
@@ -1081,7 +1088,8 @@ extension NativeTimelineCanvasView {
               displayedRowOrigin(at: index) < visibleRect.maxY
         {
             guard layouts.indices.contains(index),
-                  case let .message(row, _, _) = items[index]
+                  case let .message(row, _, _) = items[index],
+                  !hidesRowForSendTransition(items[index].identifier)
             else {
                 index += 1
                 continue
@@ -1117,7 +1125,7 @@ extension NativeTimelineCanvasView {
             appendDesiredSpoilerOverlay(
                 .attachment(messageID: message.id, attachmentID: region.attachment.id),
                 frame: region.frame,
-                cornerRadius: 8,
+                cornerRadius: InterfaceScale.metric(8),
                 rowOrigin: rowOrigin,
                 into: &desired
             )
@@ -1208,7 +1216,7 @@ extension NativeTimelineCanvasView {
                     componentID: region.componentID
                 ),
                 frame: region.frame,
-                cornerRadius: 8,
+                cornerRadius: InterfaceScale.metric(8),
                 rowOrigin: rowOrigin,
                 into: &desired
             )

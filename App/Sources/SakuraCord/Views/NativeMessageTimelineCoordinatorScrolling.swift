@@ -283,7 +283,8 @@ extension NativeMessageTimelineCoordinator {
                preparation.matches(parent, width: width),
                let cached = preparation.layouts[item.identifier],
                cached.item == item,
-               cached.layout.fontRevision == ProfileNameFontCache.revision {
+               cached.layout.fontRevision == ProfileNameFontCache.revision,
+               cached.layout.matchesAuthorPrimaryGuild(for: item, model: parent.model) {
                 recentLayoutCacheHits += 1
                 return cached.layout
             }
@@ -434,6 +435,7 @@ extension NativeMessageTimelineCoordinator {
                 frame: geometry.frame,
                 bounds: geometry.bounds
             )
+            canvas.prefetchVisibleVoiceMessages()
         }
 
         @discardableResult
@@ -749,6 +751,8 @@ extension NativeMessageTimelineCoordinator {
                 restore(anchor)
             }
             positionViewportCanvas()
+            // A resize can move or reflow a row whose message is in flight.
+            canvas.reconcileSendTransitions()
             if reflowsWidth || previewChanged || previewNeedsRows || restoresPreview {
                 // Restore the anchor before choosing the dirty rectangle.
                 // Invalidating the old visible rect leaves the newly restored
@@ -1018,7 +1022,7 @@ extension NativeMessageTimelineCoordinator {
                     if !group.isCollapsed {
                         result.append(contentsOf: group.events.map(NativeMessageTimelineItem.inboxEvent))
                         result.append(contentsOf: group.forumPosts.map(NativeMessageTimelineItem.inboxForumPost))
-                        result.append(contentsOf: group.messages.compactMap { rowsByID[$0.id] }.map { messageItem($0, from: parent) })
+                        result.append(contentsOf: messageItems(group.messages.compactMap { rowsByID[$0.id] }, from: parent))
                         if !group.isLoaded { break }
                     } else if let canvas {
                         result.append(contentsOf: canvas.heldInboxItems(for: group.id))
@@ -1028,9 +1032,7 @@ extension NativeMessageTimelineCoordinator {
             }
             var result = makeLeadingItems(from: parent)
             result.reserveCapacity(rows.count + 2)
-            result.append(contentsOf: rows.map {
-                messageItem($0, from: parent)
-            })
+            result.append(contentsOf: messageItems(rows, from: parent))
             return result
         }
 
@@ -1284,6 +1286,7 @@ extension NativeMessageTimelineCoordinator {
                     interval
                 )
             }
+            cancelGlide()
             canvas?.dismissHoverPresentationForScroll()
             noteScrollActivity()
             isEarlierHistoryScrollGestureActive = true
@@ -1433,18 +1436,35 @@ extension NativeMessageTimelineCoordinator {
 
         func restore(_ anchor: VisibleAnchor) {
             guard let index = items.firstIndex(where: {
-                $0.messageID == anchor.messageID
-            }), rowOrigins.indices.contains(index),
-            let scrollView
-            else { return }
+                $0.containsMessage(anchor.messageID)
+            }) else { return }
+            restoreRow(at: index, offsetFromViewportTop: anchor.offsetFromViewportTop)
+        }
+
+        func restoreRow(at index: Int, offsetFromViewportTop: CGFloat) {
+            guard rowOrigins.indices.contains(index), let scrollView else { return }
             scroll(
                 toDocumentY:
                     contentOriginY(
                         viewportHeight: scrollView.contentView.bounds.height
                     )
                     + rowOrigins[index]
-                    - anchor.offsetFromViewportTop,
+                    - offsetFromViewportTop,
                 scrollView: scrollView
+            )
+        }
+
+        /// Consumes the canvas's request, measured before rows change.
+        func resolvedDisclosureAnchor(
+            canvas: NativeTimelineCanvasView,
+            scrollView: NSScrollView
+        ) -> NativeTimelineRowDisclosure.ScrollAnchor? {
+            defer { canvas.pendingDisclosureScrollAnchor = nil }
+            guard let key = canvas.pendingDisclosureScrollAnchor,
+                  let index = canvas.disclosureHeaderIndex(for: key) else { return nil }
+            return .init(
+                key: key,
+                offsetFromViewportTop: canvas.displayedRowOrigin(at: index) - scrollView.contentView.bounds.minY
             )
         }
 
@@ -1476,7 +1496,7 @@ extension NativeMessageTimelineCoordinator {
             guard case let .message(messageID, _) = target,
                   parent.unreadMessageID == messageID,
                   let unreadIndex = items.firstIndex(where: {
-                      $0.messageID == messageID
+                      $0.containsMessage(messageID)
                   }),
                   let newestIndex = items.lastIndex(where: {
                       $0.messageID != nil
@@ -1508,9 +1528,13 @@ extension NativeMessageTimelineCoordinator {
                   request.id != lastScrollRequestID,
                   let scrollView
             else { return }
-            guard scroll(to: request.target, in: scrollView) else {
-                return
-            }
+            let glides = request.isAnimated
+                && initialPositionConversation == parent.conversation
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            let didScroll = glides
+                ? glide(to: request.target, in: scrollView)
+                : scroll(to: request.target, in: scrollView)
+            guard didScroll else { return }
             lastScrollRequestID = request.id
         }
 
@@ -1519,33 +1543,59 @@ extension NativeMessageTimelineCoordinator {
             to target: MessageTimelineScrollRequest.Target,
             in scrollView: NSScrollView
         ) -> Bool {
+            guard let targetY = documentY(for: target, in: scrollView) else {
+                return false
+            }
+            cancelGlide()
+            scroll(toDocumentY: targetY, scrollView: scrollView)
+            return true
+        }
+
+        /// Where the clip view's origin rests for `target`, or `nil` while
+        /// its row is not laid out.
+        func documentY(
+            for target: MessageTimelineScrollRequest.Target,
+            in scrollView: NSScrollView
+        ) -> CGFloat? {
             let viewportHeight = scrollView.contentView.bounds.height
+            let proposedY: CGFloat
             switch target {
             case .top:
-                scroll(toDocumentY: 0, scrollView: scrollView)
+                proposedY = 0
             case .bottom:
-                scroll(toDocumentY: .greatestFiniteMagnitude, scrollView: scrollView)
+                proposedY = .greatestFiniteMagnitude
             case let .message(messageID, anchor):
                 guard let index = items.firstIndex(where: {
-                    $0.messageID == messageID
-                }) else { return false }
+                    $0.containsMessage(messageID)
+                }), rowOrigins.indices.contains(index), layouts.indices.contains(index)
+                else { return nil }
                 let rowY =
                     contentOriginY(viewportHeight: viewportHeight)
                     + rowOrigins[index]
                 let rowHeight = layouts[index].height
-                scroll(
-                    toDocumentY:
-                        rowY - (viewportHeight - rowHeight) * anchor.y,
-                    scrollView: scrollView
-                )
+                proposedY = rowY - (viewportHeight - rowHeight) * anchor.y
             }
-            return true
+            return clampedDocumentY(proposedY, scrollView: scrollView)
         }
 
         func scroll(
             toDocumentY targetY: CGFloat,
             scrollView: NSScrollView
         ) {
+            scrollView.contentView.scroll(
+                to: NSPoint(
+                    x: 0,
+                    y: clampedDocumentY(targetY, scrollView: scrollView)
+                )
+            )
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            positionViewportCanvas()
+        }
+
+        func clampedDocumentY(
+            _ targetY: CGFloat,
+            scrollView: NSScrollView
+        ) -> CGFloat {
             let clampedY = NativeMessageTimelineLayoutPolicy.clampedDocumentY(
                 proposedY: targetY,
                 contentHeight: scrollableDocumentHeight,
@@ -1571,14 +1621,7 @@ extension NativeMessageTimelineCoordinator {
                         scrollableDocumentHeight
                             - scrollView.contentView.bounds.height
                     )
-            scrollView.contentView.scroll(
-                to: NSPoint(
-                    x: 0,
-                    y: min(maximumY, max(minimumY, clampedY))
-                )
-            )
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-            positionViewportCanvas()
+            return min(maximumY, max(minimumY, clampedY))
         }
 
         func reportScrollState(force: Bool = false) {

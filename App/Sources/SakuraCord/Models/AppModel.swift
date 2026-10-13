@@ -154,7 +154,11 @@ final class AppModel {
         ServerRailPresentationStore()
     @ObservationIgnored let onboarding = GuildOnboardingStore()
     @ObservationIgnored let serverInvites = ServerInvitePresentationStore()
+    @ObservationIgnored let friends = FriendsState()
+    @ObservationIgnored let ignoredUsers = IgnoredUsersState()
+    @ObservationIgnored let serverTagCards = ServerTagCardStore()
     @ObservationIgnored let issueReports = IssueReportStore()
+    @ObservationIgnored let nicknameEditor = NicknameEditorStore()
     @ObservationIgnored let voiceSidebarPresentation =
         VoiceSidebarPresentationStore()
     var serverRailGuildsByID: [GuildID: Guild] = [:] {
@@ -185,9 +189,11 @@ final class AppModel {
     var checkingChannelIDs: Set<ChannelID> = []
     var selectedChannel: Channel?
     var workspaceNavigationOverlay: WorkspaceNavigationOverlay?
-    let messageSearch = MessageSearchState()
+    var messageSearch = MessageSearchState()
+    @ObservationIgnored var messageSearchesByGuildID: [GuildID?: MessageSearchState] = [:]
     let pinnedMessages = PinnedMessagesState()
     let inbox = InboxState()
+    @ObservationIgnored var lastDirectMessageSelection: DirectMessageSidebarSelection?
     @ObservationIgnored var lastOpenedChannelIDsByGuild: [GuildID: ChannelID] = [:]
     @ObservationIgnored var messages: [Message] = []
     @ObservationIgnored var messageRows: [MessageRowPresentation] = []
@@ -203,6 +209,8 @@ final class AppModel {
     @ObservationIgnored let messageRowsUpdateJournal = MessageRowsUpdateJournal()
     @ObservationIgnored let timelineSpoilerRevealStore =
         NativeTimelineSpoilerRevealStore()
+    @ObservationIgnored let timelineSendTransitionStore =
+        NativeTimelineSendTransitionStore()
     @ObservationIgnored var latestMessageRowsRevision: UInt64 = 0
     @ObservationIgnored var messageRowsNonAppendRevision: UInt64 = 0
     @ObservationIgnored var selectedMessageIDs: Set<MessageID> = []
@@ -268,6 +276,7 @@ final class AppModel {
     @ObservationIgnored var memberListGroupsByGuildID: [GuildID: [GuildMemberListGroup]] = [:]
     @ObservationIgnored var defersMemberPresentationRebuild = false
     var memberSections: [MemberSection] = []
+    var threadMembersByID: [ChannelID: [Member]] = [:]
     var memberListGroups: [GuildMemberListGroup] = [] {
         didSet {
             if oldValue != memberListGroups, !defersMemberPresentationRebuild {
@@ -287,7 +296,9 @@ final class AppModel {
             }
         }
     }
-    @ObservationIgnored var guildRolesByGuildID: [GuildID: [GuildRole]] = [:]
+    @ObservationIgnored var guildRolesByGuildID: [GuildID: [GuildRole]] = [:] {
+        didSet { if oldValue != guildRolesByGuildID { emojiEligibilityRevision &+= 1 } }
+    }
     var mentionMemberResults: [Member] = []
     var mentionAutocompleteMembers: [Member] = []
     var knownMentionMembers: [UserID: Member] = [:] {
@@ -304,7 +315,14 @@ final class AppModel {
     var isLoadingRoleMembers = false
     var roleMemberErrorMessage: String?
     @ObservationIgnored var currentStatusRevision: UInt64 = 0
-    var currentStatus: PresenceStatus = .offline
+    var currentStatus: PresenceStatus = .offline {
+        didSet {
+            guard oldValue != currentStatus else { return }
+            notificationService.setSuppressed(currentStatus == .dnd)
+            reconcilePrivateCallSounds()
+            if oldValue == .dnd { resumeDNDSuppressedIncomingCalls() }
+        }
+    }
     var connectionState: ConnectionState = .disconnected
     var isAuthenticated = false
     var isSwitchingAccounts = false
@@ -316,6 +334,7 @@ final class AppModel {
     let launchMode: AppLaunchMode
     let typingState: TypingStateModel
     let commandComposer = ApplicationCommandComposerModel()
+    let translation: TranslationState
     @ObservationIgnored lazy var threadCommandComposer = ApplicationCommandComposerModel(frecencyStore: commandComposer.frecencyStore)
     let readState = AccountReadStateModel()
     let notificationPreferences: NotificationPreferences
@@ -363,6 +382,7 @@ final class AppModel {
     var interactionModalForm: InteractionModalFormState?
     var isVoiceChatOpen = false
     var openThread: MessageThreadSummary?
+    var isThreadFullWidth = false
     /// A thread being composed in the supplementary pane. It is mutually
     /// exclusive with `openThread` and becomes it once Discord creates the thread.
     var threadCreation: ThreadCreationDraft?
@@ -417,6 +437,9 @@ final class AppModel {
             || threadErrorScope == .earlierPage
     }
     @ObservationIgnored let composer = MessageComposerState()
+    @ObservationIgnored let voiceMessagePlayback = VoiceMessagePlaybackStore()
+    @ObservationIgnored let channelVoiceMessageComposer = VoiceMessageComposerState(destination: .channel)
+    @ObservationIgnored let threadVoiceMessageComposer = VoiceMessageComposerState(destination: .thread)
     var gifResults: [GIFSearchResult] = []
     var gifCategories: [GIFPickerCategory] = []
     var gifTrendingPreviewURL: URL?
@@ -485,9 +508,11 @@ final class AppModel {
         didSet {
             guard !defersVoiceSidebarPresentation, oldValue != voiceStates else { return }
             refreshVoiceSidebarPresentation()
+            reconcileIgnoredVoiceParticipants(previous: oldValue)
         }
     }
     var privateCallsByChannel: [ChannelID: PrivateCall] = [:]
+    @ObservationIgnored var dndSuppressedIncomingCallChannelIDs: Set<ChannelID> = []
     var privateCallActionChannelIDs: Set<ChannelID> = []
     var mediaDevices: MediaDeviceSnapshot = .empty
     var emojisByGuild: [GuildID: [DiscordEmoji]] = [:] {
@@ -495,8 +520,14 @@ final class AppModel {
     }
     var loadingEmojiGuildIDs: Set<GuildID> = []
     var emojiLoadErrorsByGuild: [GuildID: String] = [:]
-    var emojiUsageCounts: [String: Int]
-    var emojiRecentKeys: [String]
+    @ObservationIgnored let emojiFrecency = DiscordFrecencyStore(kind: .emoji)
+    @ObservationIgnored let reactionEmojiFrecency = DiscordFrecencyStore(kind: .reaction)
+    @ObservationIgnored var emojiFrecencySaveTask: Task<Bool, Never>?
+    @ObservationIgnored var emojiSettingsLoadTask: Task<EmojiUserSettings?, Never>?
+    @ObservationIgnored var deferredEmojiSettings: EmojiUserSettings?
+    @ObservationIgnored var emojiSettingsDataVersion: UInt32?
+    var discordFrequentlyUsedReactionKeys: [String] = []
+    var discordReactionUsageScores: [String: Int] = [:]
     var discordFavoriteEmojiKeys: [String] = []
     var discordFrequentlyUsedEmojiKeys: [String] = []
     var discordEmojiUsageScores: [String: Int] = [:]
@@ -539,6 +570,7 @@ final class AppModel {
     }
     var selectedGuildID: GuildID? {
         didSet {
+            if oldValue != selectedGuildID { switchMessageSearchScope(from: oldValue) }
             refreshServerRailSelection()
             refreshSelectedGuildPresentation()
         }
@@ -561,49 +593,6 @@ final class AppModel {
     var canAttachFilesToForumPosts: Bool {
         guard canCreateForumPosts, let permissions = selectedEffectivePermissions else { return false }
         return permissions & DiscordPermissionBits.attachFiles != 0
-    }
-
-    func canDeleteForumPost(_ post: ForumPost) -> Bool {
-        return Self.canDeleteForumPost(
-            ownerID: post.thread.ownerID ?? post.owner?.id,
-            currentUserID: currentUser?.id,
-            canManage: canManageForumPosts
-        )
-    }
-
-    func canArchiveForumPost(_ post: ForumPost) -> Bool {
-        if canManageForumPosts { return true }
-        guard !post.thread.isLocked else { return false }
-        let ownerID = post.thread.ownerID ?? post.owner?.id
-        return ownerID != nil && ownerID == currentUser?.id
-    }
-
-    func canEditForumPostTags(_ post: ForumPost) -> Bool {
-        if canManageForumPosts { return true }
-        guard !post.thread.isLocked else { return false }
-        let ownerID = post.thread.ownerID ?? post.owner?.id
-        return ownerID != nil && ownerID == currentUser?.id
-    }
-
-    func canToggleForumTag(_ tag: ForumTag, on post: ForumPost) -> Bool {
-        guard canEditForumPostTags(post), canManageForumPosts || !tag.isModerated else {
-            return false
-        }
-        if selectedChannel?.requiresForumTag == true,
-           post.thread.appliedTagIDs.count == 1,
-           post.thread.appliedTagIDs.contains(tag.id)
-        {
-            return false
-        }
-        return true
-    }
-
-    nonisolated static func canDeleteForumPost(
-        ownerID: UserID?,
-        currentUserID: UserID?,
-        canManage: Bool
-    ) -> Bool {
-        canManage || (ownerID != nil && ownerID == currentUserID)
     }
 
     func currentUserRoleIDs(for guildID: GuildID?) -> Set<RoleID> {
@@ -899,6 +888,8 @@ final class AppModel {
     var selectedChannelID: ChannelID? {
         didSet {
             guard selectedChannelID != oldValue else { return }
+            // Only a conversation in Direct Messages replaces its Friends home.
+            if selectedChannelID != nil, selectedGuildID == nil { friends.isPresented = false }
             if onboarding.previewChannelID != selectedChannelID {
                 onboarding.presentedGuildID = nil
                 onboarding.previewChannelID = nil
@@ -955,11 +946,15 @@ final class AppModel {
             {
                 lastOpenedChannelIDsByGuild[guildID] = selectedChannel.id
             }
+            if let selectedChannel, selectedChannel.kind == .directMessage || selectedChannel.kind == .groupDirectMessage {
+                lastDirectMessageSelection = .channel(selectedChannel.id)
+            }
             builtInExpressionPickerRequest = nil
             cancelApplicationCommandAutocompleteTask()
             cancelApplicationCommandMemberSearch()
             commandComposer.resetForChannelChange()
             clearComposerAttachments(for: .channel)
+            translation.resetDraft(.channel)
             isVoiceChatOpen = selectedChannel?.kind == .voice
             closeThread()
             if let selectedChannelID {
@@ -1062,7 +1057,7 @@ final class AppModel {
     @ObservationIgnored var soundboardLoadTask: Task<Void, Never>?
     @ObservationIgnored var soundboardLoadGeneration: UInt64 = 0
     @ObservationIgnored var commandFrecencySaveTask: Task<Void, Never>?
-    @ObservationIgnored var deferredCommandFrecency: ApplicationCommandFrecencyHistory?
+    @ObservationIgnored var deferredCommandFrecency: DiscordFrecencyHistory?
     @ObservationIgnored var commandFrecencyLoadTask: Task<Void, Never>?
     @ObservationIgnored var commandFrecencyFlushTask: Task<Void, Never>?
     @ObservationIgnored var mentionMemberSearchTask: Task<Void, Never>?
@@ -1168,7 +1163,10 @@ final class AppModel {
     @ObservationIgnored var mainWindowIsActive = false
     @ObservationIgnored var applicationIsActive = false
     @ObservationIgnored var clientAppStateUpdateTask: Task<Void, Never>?
-    @ObservationIgnored var currentUserRoleIDsByGuild: [GuildID: Set<RoleID>] = [:]
+    var emojiEligibilityRevision: UInt64 = 0
+    @ObservationIgnored var currentUserRoleIDsByGuild: [GuildID: Set<RoleID>] = [:] {
+        didSet { if oldValue != currentUserRoleIDsByGuild { emojiEligibilityRevision &+= 1 } }
+    }
     @ObservationIgnored let readAcknowledgementTiming: ReadAcknowledgementTiming
     @ObservationIgnored let externalAttachmentUploader: any ExternalAttachmentUploading
     @ObservationIgnored let attachmentCompactor: any AttachmentCompacting
@@ -1216,7 +1214,8 @@ final class AppModel {
         attachmentCompactor: any AttachmentCompacting = AttachmentCompactor(),
         attachmentSettingsStore: AttachmentSettingsStore? = nil,
         privacySafetySettingsStore: PrivacySafetySettingsStore? = nil,
-        uploadPrivacyPreparation: UploadPrivacyPreparation? = nil
+        uploadPrivacyPreparation: UploadPrivacyPreparation? = nil,
+        translation: TranslationState? = nil
     ) {
         self.launchMode = launchMode
         includesOfflineSignIn = launchMode == .offlineTesting && awaitsOfflineSignIn
@@ -1225,6 +1224,7 @@ final class AppModel {
         interfaceSettings = InterfaceSettingsStore.shared.load()
         generalInputSettings = GeneralInputSettingsStore.shared.load()
         featuresSettings = FeaturesSettingsStore.shared.load()
+        self.translation = translation ?? TranslationState()
         let resolvedAttachmentStore = attachmentSettingsStore ?? .shared
         self.attachmentSettingsStore = resolvedAttachmentStore
         attachmentSettings = resolvedAttachmentStore.load()
@@ -1296,10 +1296,6 @@ final class AppModel {
             try? SakuraCordDatabase(accountID: accountID)
         }
         persistsEmojiPreferences = launchMode == .normal
-        let initialEmojiUsageCounts = Self.loadEmojiUsageCounts(persisted: launchMode == .normal)
-        emojiUsageCounts = initialEmojiUsageCounts
-        emojiRecentKeys = launchMode == .normal
-            ? Self.loadEmojiRecents(usageCounts: initialEmojiUsageCounts) : []
         // A normal launch does not know the account yet. Opening the historical
         // account-1 fallback here only to replace it during credential restore
         // duplicates filesystem and SQLite work on every startup.
@@ -1309,12 +1305,14 @@ final class AppModel {
         commandComposer.configureFrecencyScope(
             launchMode == .offlineTesting ? "offline" : "signed-out"
         )
+        configureEmojiFrecency(scope: launchMode == .offlineTesting ? "offline" : "signed-out")
         readState.reset(accountID: launchMode == .offlineTesting ? "offline" : nil)
         mediaDeviceMonitor = MediaDeviceMonitor { [weak self] snapshot in
             Task { @MainActor [weak self] in
                 await self?.installMediaDeviceSnapshot(snapshot)
             }
         }
+        configureVoiceMessagePlayback()
     }
 }
 
@@ -1323,11 +1321,6 @@ extension AppModel {
         subsystem: "dev.sakuracord.SakuraCord",
         category: "MessageSend"
     )
-
-    private static func loadEmojiUsageCounts(persisted: Bool) -> [String: Int] {
-        guard persisted else { return [:] }
-        return UserDefaults.standard.dictionary(forKey: "dev.sakuracord.emoji-usage") as? [String: Int] ?? [:]
-    }
 
     private static func defaultCredentialStore(launchMode: AppLaunchMode, usesInsecureDebugCredentials: Bool) -> any CredentialStore {
         if launchMode == .offlineTesting { return OfflineCredentialStore() }
@@ -1340,6 +1333,10 @@ extension AppModel {
         currentUser = snapshot?.currentUser
         refreshServerRailDirectMessages(replacing: previous)
         refreshSelectedGuildPresentation()
+        invalidateChangedSystemMessageRecipients(replacing: previous)
+        if previous?.relationshipNicknamesByUserID != snapshot?.relationshipNicknamesByUserID {
+            invalidateTimelinePresentation()
+        }
         if previous?.currentUser != snapshot?.currentUser {
             refreshVoiceSidebarPresentation()
         }
@@ -1357,6 +1354,7 @@ extension AppModel {
             .filter {
                 !$0.isUnavailable
                     && $0.isRinging(currentUserID)
+                    && !isIncomingCallSuppressed($0)
                     && activeVoiceChannel?.id != $0.channelID
             }
             .sorted { $0.channelID.rawValue < $1.channelID.rawValue }

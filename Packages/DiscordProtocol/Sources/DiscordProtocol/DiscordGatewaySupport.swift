@@ -15,7 +15,8 @@ enum DiscordGatewayPayloadFactory {
 
     static func guildSubscriptions(
         guildID: GuildID,
-        channelRanges: [ChannelID: [ClosedRange<Int>]]
+        channelRanges: [ChannelID: [ClosedRange<Int>]],
+        threadMemberLists: [ChannelID]? = nil
     ) -> [String: Any] {
         let channels = Dictionary(
             uniqueKeysWithValues: channelRanges.map { channelID, ranges in
@@ -25,18 +26,28 @@ enum DiscordGatewayPayloadFactory {
                 )
             }
         )
+        var subscription: [String: Any] = [
+            "typing": true, "activities": true, "threads": true, "channels": channels
+        ]
+        if let threadMemberLists {
+            subscription["thread_member_lists"] = threadMemberLists.map(\.description)
+        }
         return [
             "op": 37,
             "d": [
                 "subscriptions": [
-                    guildID.description: [
-                        "typing": true,
-                        "activities": true,
-                        "threads": true,
-                        "channels": channels,
-                    ] as [String: Any]
+                    guildID.description: subscription
                 ]
             ] as [String: Any],
+        ]
+    }
+
+    static func threadMemberSubscriptions(guildID: GuildID, threadIDs: [ChannelID]) -> [String: Any] {
+        [
+            "op": 37,
+            "d": ["subscriptions": [guildID.description: [
+                "thread_member_lists": threadIDs.map(\.description)
+            ]]]
         ]
     }
 
@@ -800,6 +811,7 @@ struct GatewayReadyGuildsDTO: Decodable {
                 name: name,
                 iconURL: iconURL,
                 isOwnedByCurrentUser: isOwnedByCurrentUser,
+                ownerID: ownerID.flatMap(UserID.init),
                 currentUserPermissions: permissions.flatMap(UInt64.init),
                 rulesChannelID: rulesChannelID.flatMap(ChannelID.init),
                 features: features,
@@ -821,9 +833,8 @@ struct GatewayReadyGuildsDTO: Decodable {
     var currentUser: UserDTO?
     var apexExperiments: ProfileApexAssignmentsDTO?
     var users: [UserDTO]
-    var friendUserIDs: Set<UserID>
+    var relationships: [UserID: RelationshipRecord]
     var blockedOrIgnoredUserIDs: Set<UserID>
-    var relationshipNicknamesByUserID: [UserID: String]
     var presences: [PresenceUpdateDTO]
     var mergedPresences: GatewayMergedPresencesDTO
     var mergedMembers: [[ReadyMergedMemberDTO]]
@@ -870,41 +881,21 @@ struct GatewayReadyGuildsDTO: Decodable {
             (try? container.decode(
                 LossyList<UserDTO>.self, forKey: .users
             ))?.elements ?? []
-        struct RelationshipDTO: Decodable {
-            var id: String
-            var type: Int
-            var nickname: String?
-            var user: UserDTO?
-
-            var userIgnored: Bool?
-
-            enum CodingKeys: String, CodingKey {
-                case id, type, nickname, user
-                case userIgnored = "user_ignored"
-            }
-        }
-        let relationships =
+        let relationshipDTOs =
             (try? container.decode(
-                LossyList<RelationshipDTO>.self, forKey: .relationships
+                LossyList<GatewayRelationshipDTO>.self, forKey: .relationships
             ))?.elements ?? []
-        friendUserIDs = Set(relationships.compactMap {
-            $0.type == 1 ? UserID($0.id) : nil
-        })
-        blockedOrIgnoredUserIDs = Set(relationships.compactMap {
-            $0.type == 2 || $0.userIgnored == true ? UserID($0.id) : nil
-        })
-        relationshipNicknamesByUserID = Dictionary(
-            relationships.compactMap { relationship in
-                guard let id = UserID(relationship.id),
-                      let nickname = relationship.nickname?
-                        .trimmingCharacters(in: .whitespacesAndNewlines),
-                      !nickname.isEmpty
-                else { return nil }
-                return (id, nickname)
+        relationships = Dictionary(
+            relationshipDTOs.compactMap { dto in
+                guard let id = UserID(dto.id), let record = dto.record(merging: nil, replacing: true) else { return nil }
+                return (id, record)
             },
             uniquingKeysWith: { _, newer in newer }
         )
-        for relationship in relationships {
+        blockedOrIgnoredUserIDs = Set(relationshipDTOs.compactMap {
+            $0.type == RelationshipType.blocked.rawValue || $0.userIgnored == true ? UserID($0.id) : nil
+        })
+        for relationship in relationshipDTOs {
             guard let user = relationship.user,
                   !users.contains(where: { $0.id == user.id })
             else { continue }
@@ -1067,6 +1058,7 @@ struct GatewayUserGuildSettingsDTO: Decodable {
     var guildID: String?
     var messageNotifications: Int?
     var muted: Bool?
+    var hideMutedChannels: Bool?
     var muteConfig: MuteConfigDTO?
     var hasMuteConfig: Bool
     var suppressEveryone: Bool?
@@ -1082,6 +1074,7 @@ struct GatewayUserGuildSettingsDTO: Decodable {
         case guildID = "guild_id"
         case messageNotifications = "message_notifications"
         case muted
+        case hideMutedChannels = "hide_muted_channels"
         case muteConfig = "mute_config"
         case suppressEveryone = "suppress_everyone"
         case suppressRoles = "suppress_roles"
@@ -1097,6 +1090,7 @@ struct GatewayUserGuildSettingsDTO: Decodable {
         guildID = try? values.decode(String.self, forKey: .guildID)
         messageNotifications = try? values.decode(Int.self, forKey: .messageNotifications)
         muted = try? values.decode(Bool.self, forKey: .muted)
+        hideMutedChannels = try? values.decode(Bool.self, forKey: .hideMutedChannels)
         hasMuteConfig = values.contains(.muteConfig)
         muteConfig = try? values.decode(MuteConfigDTO.self, forKey: .muteConfig)
         suppressEveryone = try? values.decode(Bool.self, forKey: .suppressEveryone)
@@ -1127,6 +1121,7 @@ struct GatewayUserGuildSettingsDTO: Decodable {
         ) {
             value.messageNotifications = messageNotifications
         }
+        if let hideMutedChannels { value.hideMutedChannels = hideMutedChannels }
         if let muted {
             value.isMuted = muted
         }
@@ -1228,6 +1223,7 @@ struct ReadyMergedMemberDTO: Decodable {
     var bio: String?
     var pending: Bool?
     var flags: UInt64?
+    var communicationDisabledUntil: String?
     var joinedAt: String?
     var avatarDecorationData: UserDTO.AvatarDecorationDTO?
     var collectibles: UserCollectiblesDTO?
@@ -1237,6 +1233,7 @@ struct ReadyMergedMemberDTO: Decodable {
         case userID = "user_id"
         case nick, roles, presence, avatar, banner, bio, pending, flags, collectibles
         case joinedAt = "joined_at"
+        case communicationDisabledUntil = "communication_disabled_until"
         case avatarDecorationData = "avatar_decoration_data"
         case displayNameStyles = "display_name_styles"
     }
@@ -1253,6 +1250,7 @@ struct ReadyMergedMemberDTO: Decodable {
             bio: bio,
             pending: pending,
             flags: flags,
+            communicationDisabledUntil: communicationDisabledUntil,
             joinedAt: joinedAt,
             avatarDecorationData: avatarDecorationData,
             collectibles: collectibles,

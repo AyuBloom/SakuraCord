@@ -27,6 +27,10 @@ extension AppModel {
             updateForwardSnapshot { $0.quickSwitcherJoinedGuildMemberUserIDs = userIDsByGuildID }
         case .quickSwitcherGuildMemberAliasesChanged(let aliasesByGuildID):
             updateForwardSnapshot { $0.quickSwitcherGuildMemberAliases = aliasesByGuildID }
+        case .relationshipsChanged(let relationships):
+            applyRelationships(relationships)
+        case let .relationshipPresencesChanged(presences, isComplete):
+            applyRelationshipPresences(presences, isComplete: isComplete)
         default:
             return false
         }
@@ -69,11 +73,11 @@ extension AppModel {
             return
         }
         forwardDestinationHistory = Array(
-            (UserDefaults.standard.stringArray(forKey: historyKey) ?? [])
+            (PRBuildProfile.defaults.stringArray(forKey: historyKey) ?? [])
                 .compactMap(ChannelID.init)
                 .prefix(8)
         )
-        if let data = UserDefaults.standard.data(forKey: discordFrecencyUsageDeltasDefaultsKey),
+        if let data = PRBuildProfile.defaults.data(forKey: discordFrecencyUsageDeltasDefaultsKey),
            let value = try? JSONDecoder().decode(
                [String: DiscordFrecencyUsage].self,
                from: data
@@ -97,7 +101,7 @@ extension AppModel {
             visiting: channelID
         )
         guard launchMode == .normal else { return }
-        UserDefaults.standard.set(
+        PRBuildProfile.defaults.set(
             forwardDestinationHistory.map(\.description),
             forKey: forwardDestinationHistoryDefaultsKey
         )
@@ -192,7 +196,7 @@ extension AppModel {
         delta.recentUses = Array(delta.recentUses.suffix(10))
         persistedDiscordFrecencyUsageDeltas[key] = delta
         if let data = try? JSONEncoder().encode(persistedDiscordFrecencyUsageDeltas) {
-            UserDefaults.standard.set(data, forKey: discordFrecencyUsageDeltasDefaultsKey)
+            PRBuildProfile.defaults.set(data, forKey: discordFrecencyUsageDeltasDefaultsKey)
         }
     }
 
@@ -437,6 +441,7 @@ extension AppModel {
                     channelID: destinationID, content: context
                 ))
                 guard isCurrentAccountSession(session) else { return nil }
+                recordMessageEmojiUsage(context)
                 confirmSlowmodeMessage(confirmedContext)
             }
             return nil

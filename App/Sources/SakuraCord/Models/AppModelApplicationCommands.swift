@@ -328,8 +328,12 @@ extension AppModel {
                   channelID: channelID, guildID: context.channel.guildID
               )
         else { return }
-        let isNicknameChange = DiscordBuiltInCommands.isBuiltIn(invocation.command) && invocation.command.name == "nick"
+        let isBuiltIn = DiscordBuiltInCommands.isBuiltIn(invocation.command)
+        let isNicknameChange = isBuiltIn && invocation.command.name == "nick"
         guard isNicknameChange || allowSlowmodeSubmission(in: channelID) else { return }
+        if isBuiltIn, Self.builtInMessageText(command: invocation.command.name, message: "") != nil {
+            guard allowOutgoingQueueSubmission() else { return }
+        }
         cancelApplicationCommandAutocompleteTask(in: destination)
         let submittedDraft = commandComposer.draft
         stopLocalTyping(clearThrottle: true)
@@ -407,6 +411,9 @@ extension AppModel {
                     }
                 }
                 guard isCurrentAccountSession(session) else { return }
+                for value in invocation.values {
+                    if case let .string(text) = value.argument { recordMessageEmojiUsage(text) }
+                }
                 startInteractionDeadline(nonce: nonce)
             } catch is CancellationError {
                 return
@@ -478,13 +485,10 @@ extension AppModel {
         }
         let message = string("message")
         if let text = Self.builtInMessageText(command: invocation.command.name, message: message) {
-            let isTTS = invocation.command.name == "tts"
-            startAccountChildTask(account: session) { model, _ in
-                await model.sendChannelMessage(
-                    channelID: channelID, content: text, replyTo: nil, replyPreview: nil,
-                    attachments: [], clearsComposer: false, isTTS: isTTS
-                )
-            }
+            _ = enqueueChannelMessage(
+                channelID: channelID, content: text, replyTo: nil, replyPreview: nil,
+                attachments: [], clearsComposer: false, isTTS: invocation.command.name == "tts"
+            )
             return
         }
         switch invocation.command.name {
@@ -497,6 +501,7 @@ extension AppModel {
                     let channel = try await session.provider.ensurePrivateChannel(for: recipient)
                     guard let self, !Task.isCancelled, isCurrentAccountSession(session) else { return }
                     _ = try await session.provider.send(SendMessageDraft(channelID: channel.id, content: message))
+                    recordMessageEmojiUsage(message, session: session)
                 } catch {
                     guard let self, isCurrentAccountSession(session) else { return }
                     appendBuiltInNotice("Your message could not be delivered.", in: channelID)
@@ -509,6 +514,7 @@ extension AppModel {
                     let thread = try await session.provider.createThread(CreateThreadDraft(channelID: channelID, name: name))
                     guard let self, !Task.isCancelled, isCurrentAccountSession(session) else { return }
                     _ = try await session.provider.send(SendMessageDraft(channelID: thread.id, content: message))
+                    recordMessageEmojiUsage(message, session: session)
                 } catch {
                     guard let self, isCurrentAccountSession(session) else { return }
                     appendBuiltInNotice("The thread could not be created.", in: channelID)

@@ -174,7 +174,17 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
         SettingsPreferenceRegistration(
             id: .messageAppearance,
             page: .interface,
-            storage: .appWide(key: "settings.appearance.messages"),
+            storage: .appWide(key: "settings.appearance.serverMessages"),
+            defaultValue: .string(MessageAppearance.defaultStyle.rawValue)
+        ),
+        SettingsPreferenceRegistration(
+            id: .directMessageAppearance, page: .interface,
+            storage: .appWide(key: "settings.appearance.directMessages"),
+            defaultValue: .string(MessageAppearance.defaultStyle.rawValue)
+        ),
+        SettingsPreferenceRegistration(
+            id: .groupMessageAppearance, page: .interface,
+            storage: .appWide(key: "settings.appearance.groupMessages"),
             defaultValue: .string(MessageAppearance.defaultStyle.rawValue)
         ),
         SettingsPreferenceRegistration(
@@ -184,6 +194,12 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
             defaultValue: .double(
                 AppearanceSettingsSnapshot.defaults.messageSpacing
             )
+        ),
+        SettingsPreferenceRegistration(
+            id: .interfaceSize,
+            page: .interface,
+            storage: .appWide(key: "settings.interface.size"),
+            defaultValue: .double(InterfaceScale.defaultFactor)
         ),
         SettingsPreferenceRegistration(
             id: .timestampFormat,
@@ -273,6 +289,18 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
             defaultValue: .string(NativeEmojiSkinTone.standard.rawValue)
         ),
         SettingsPreferenceRegistration(
+            id: .translationEnabled, page: .features,
+            storage: .appWide(key: "settings.translation.enabled"), defaultValue: .bool(false)
+        ),
+        SettingsPreferenceRegistration(
+            id: .translationMessageLanguage, page: .features,
+            storage: .appWide(key: "settings.translation.messageLanguage"), defaultValue: .string("")
+        ),
+        SettingsPreferenceRegistration(
+            id: .translationDraftLanguage, page: .features,
+            storage: .appWide(key: "settings.translation.draftLanguage"), defaultValue: .string("en")
+        ),
+        SettingsPreferenceRegistration(
             id: .channelManagement, page: .features,
             storage: .appWide(key: "settings.features.channelManagement"), defaultValue: .bool(true)
         ),
@@ -295,6 +323,10 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
         SettingsPreferenceRegistration(
             id: .fakeNitroStreamQuality, page: .features,
             storage: .appWide(key: "settings.features.fakeNitroStreamQuality"), defaultValue: .bool(true)
+        ),
+        SettingsPreferenceRegistration(
+            id: .voiceMessageRecording, page: .features,
+            storage: .appWide(key: "settings.features.voiceMessageRecording"), defaultValue: .bool(true)
         ),
         SettingsPreferenceRegistration(
             id: .attachmentCompactionPrompt, page: .features,
@@ -516,6 +548,12 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
         ),
 
         SettingsPreferenceRegistration(
+            id: .accessibilityDisableSendAnimations,
+            page: .accessibility,
+            storage: .appWide(key: "settings.accessibility.disableMessageSendingAnimations"),
+            defaultValue: .bool(false)
+        ),
+        SettingsPreferenceRegistration(
             id: .accessibilityDisableOwnCosmetics,
             page: .accessibility,
             storage: .appWide(key: "settings.accessibility.disableOwnCosmetics"),
@@ -559,6 +597,12 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
         ),
 
         SettingsPreferenceRegistration(
+            id: .accessibilityDisableServerTags,
+            page: .accessibility,
+            storage: .appWide(key: "settings.accessibility.disableServerTags"),
+            defaultValue: .bool(false)
+        ),
+        SettingsPreferenceRegistration(
             id: .accessibilityAnnounceTimestamp,
             page: .accessibility,
             storage: .appWide(key: "settings.accessibility.announceTimestamp"),
@@ -598,7 +642,7 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
             id: .trustedDomains,
             page: .privacySafety,
             storage: .appWide(key: "settings.privacy.trustedDomains"),
-            defaultValue: .strings([]),
+            defaultValue: .strings(ExternalLinkTrustedDomain.defaults),
             exports: false
         ),
         SettingsPreferenceRegistration(
@@ -716,7 +760,7 @@ final class SettingsPreferenceStore {
 
     init(
         registry: SettingsPreferenceRegistry = .foundation,
-        defaults: any PreferenceStoring = UserDefaults.standard
+        defaults: any PreferenceStoring = PRBuildProfile.defaults
     ) {
         self.registry = registry
         self.defaults = defaults
@@ -756,6 +800,35 @@ final class SettingsPreferenceStore {
             defaults.set(enabled ? RoleColorDisplay.inNames.rawValue : RoleColorDisplay.hidden.rawValue, forKey: roleKey)
         }
         defaults.removeObject(forKey: legacyRoleKey)
+        let legacyMessagesKey = "settings.appearance.messages"
+        if let raw = defaults.object(forKey: legacyMessagesKey) as? String,
+           MessageAppearance(rawValue: raw) != nil {
+            for id: SettingsControlID in [.messageAppearance, .directMessageAppearance, .groupMessageAppearance]
+                where !containsStoredValue(for: id) {
+                set(.string(raw), for: id)
+            }
+        }
+        defaults.removeObject(forKey: legacyMessagesKey)
+        seedTrustedDomains()
+    }
+
+    /// This marker is not registered: resets restore defaults without re-running migration.
+    private func seedTrustedDomains() {
+        let key = "settings.privacy.trustedDomains.seeded.v1"
+        guard defaults.object(forKey: key) as? Bool != true,
+              registry.registration(.trustedDomains) != nil,
+              !ExternalLinkTrustedDomain.defaults.isEmpty
+        else { return }
+        let existing: [String] = if case let .strings(domains) = value(for: .trustedDomains) {
+            domains
+        } else {
+            []
+        }
+        set(
+            .strings(ExternalLinkTrustedDomain.normalizedList(existing + ExternalLinkTrustedDomain.defaults)),
+            for: .trustedDomains
+        )
+        defaults.set(true, forKey: key)
     }
 
     func value(

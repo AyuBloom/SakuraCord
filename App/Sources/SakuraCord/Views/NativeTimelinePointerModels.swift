@@ -1,6 +1,18 @@
 import Foundation
 import SakuraCordModels
 
+nonisolated struct NativeTimelineFooterActionTarget: Equatable {
+    enum Kind {
+        case ephemeralDismiss
+        case translation
+        /// Keyed by the run's first message, which a revealed header shares with its first row.
+        case suppressedToggle
+    }
+
+    let messageID: MessageID
+    let kind: Kind
+}
+
 nonisolated struct NativeTimelineMentionHover: Equatable {
     let itemIdentifier: NativeMessageTimelineItem.Identifier
     let region: NativeTimelineTextRegion
@@ -86,6 +98,7 @@ nonisolated enum TimelineButtonActivationPolicy {
 
 nonisolated enum NativeTimelinePointerActivationTarget: Hashable {
     case loader
+    case suppressedMessages(MessageID)
     case message(MessageID)
     case componentReveal(MessageID, String)
     case componentImage(MessageID, String)
@@ -110,7 +123,9 @@ nonisolated enum NativeTimelinePointerActivationTarget: Hashable {
         rangeLocation: Int
     )
     case ephemeralDismiss(MessageID)
+    case translationAction(MessageID)
     case authorProfile(MessageID)
+    case serverTag(MessageID, GuildID)
     case invocationProfile(MessageID)
     case reply(MessageID, MessageID)
     case forwardedSource(MessageID, ChannelID, GuildID?, MessageID?)
@@ -192,9 +207,9 @@ nonisolated enum NativeTimelineAvatarPresentation {
     static func replyAvatarFrame(in replyContentFrame: CGRect) -> CGRect {
         CGRect(
             x: replyContentFrame.minX,
-            y: replyContentFrame.minY + 3,
-            width: 14,
-            height: 14
+            y: replyContentFrame.minY + InterfaceScale.metric(3),
+            width: InterfaceScale.metric(14),
+            height: InterfaceScale.metric(14)
         )
     }
 

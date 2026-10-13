@@ -12,15 +12,38 @@ final class MessageComposerState {
     var draft = "" { didSet { draftRevision &+= 1 } }
     var threadDraft = "" { didSet { threadDraftRevision &+= 1 } }
     @ObservationIgnored private(set) var draftRevision: UInt64 = 0
-    @ObservationIgnored private var threadDraftRevision: UInt64 = 0
+    @ObservationIgnored private(set) var threadDraftRevision: UInt64 = 0
     var replyingTo: Message?
     var threadReplyingTo: Message?
     var replyMentionsAuthor = true
     var threadReplyMentionsAuthor = true
     var channelAttachments: [ForumPostAttachment] = []
     var threadAttachments: [ForumPostAttachment] = []
+    var isSendQueueFullAlertPresented = false
     @ObservationIgnored var outbox = OutgoingMessageState()
     @ObservationIgnored private var draftWriteTask: Task<Void, Never>?
+    /// Staged files whose privacy and size check is still running. They show
+    /// in the composer at once but cannot be sent until it finishes.
+    var checkingAttachmentIDs: Set<UUID> = []
+    @ObservationIgnored private var animatedResizeUptimes: [MessageComposerDestination: TimeInterval] = [:]
+
+    /// Records that a composer began animating to a new height, so the
+    /// timeline above it glides along instead of jumping.
+    func noteAnimatedResize(
+        of destination: MessageComposerDestination,
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        animatedResizeUptimes[destination] = now
+    }
+
+    func isAnimatingResize(
+        of destination: MessageComposerDestination,
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> Bool {
+        animatedResizeUptimes[destination].map {
+            now - $0 <= ComposerResizeMotion.signalLifetime
+        } ?? false
+    }
 
     func persistDraft(_ value: String, channelID: ChannelID, database: SakuraCordDatabase?) {
         guard let database else { return }
@@ -87,6 +110,8 @@ final class MessageComposerState {
         threadReplyMentionsAuthor = true
         channelAttachments = []
         threadAttachments = []
+        checkingAttachmentIDs = []
+        isSendQueueFullAlertPresented = false
         outbox.reset()
         slowmode.reset()
         await pendingWrite?.value
@@ -94,9 +119,115 @@ final class MessageComposerState {
 }
 
 struct OutgoingMessageState {
-    var draftsByNonce: [String: SendMessageDraft] = [:]
+    /// The first-party client refuses a new message while this many sends wait
+    /// behind the one in flight.
+    static let maximumWaitingDeliveries = 5
+
+    struct DeliveryTurn {
+        let nonce: String
+        let previous: Task<Void, Never>?
+        let generation: UInt64
+    }
+
+    var draftsByNonce: [String: SendMessageDraft] = [:] {
+        didSet {
+            statesByNonce = statesByNonce.filter { retainsState(nonce: $0.key) }
+        }
+    }
+    // History windows can evict optimistic rows while a failed draft or active
+    // send still exists. Delivery status belongs to that outbox lifetime.
+    private struct DeliveryState {
+        let channelID: ChannelID
+        let state: OutboxState
+    }
+
+    private var statesByNonce: [String: DeliveryState] = [:]
+    private var deliveryNonces: Set<String> = []
+    private var retainedReceiptNonces: Set<String> = []
     var stickerUploadSourceURLByNonce: [String: URL] = [:]
     private var nextOptimisticMessageRawValue = UInt64.max
+    private var deliveryTail: Task<Void, Never>?
+    private var waitingNonces: Set<String> = []
+    private var submissionReservations: [UUID: String] = [:]
+    private var deliveryGeneration: UInt64 = 0
+
+    var waitingDeliveryCount: Int { waitingNonces.count + submissionReservations.count }
+
+    var isDeliveryQueueFull: Bool {
+        waitingDeliveryCount >= Self.maximumWaitingDeliveries
+    }
+
+    /// Holds capacity while a submission prepares its destination.
+    mutating func reserveSubmission(nonce: String? = nil) -> UUID? {
+        guard !isDeliveryQueueFull, nonce.map({ !hasPendingDelivery(nonce: $0) }) ?? true else { return nil }
+        let reservation = UUID()
+        submissionReservations[reservation] = nonce ?? ""
+        return reservation
+    }
+
+    mutating func releaseSubmission(_ reservation: UUID) {
+        submissionReservations[reservation] = nil
+    }
+
+    func hasPendingDelivery(nonce: String) -> Bool {
+        deliveryNonces.contains(nonce) || submissionReservations.values.contains(nonce)
+    }
+
+    func state(nonce: String, channelID: ChannelID) -> OutboxState? {
+        guard let value = statesByNonce[nonce], value.channelID == channelID else { return nil }
+        return value.state
+    }
+
+    mutating func updateState(_ state: OutboxState, nonce: String, channelID: ChannelID) {
+        statesByNonce[nonce] = DeliveryState(channelID: channelID, state: state)
+    }
+
+    /// A quick-message field retains an ambiguous send's receipt until its
+    /// unchanged nonce is consumed, edited or dismissed, independently of history.
+    mutating func retainReceipt(nonce: String) {
+        retainedReceiptNonces.insert(nonce)
+    }
+
+    mutating func releaseReceipt(nonce: String) {
+        retainedReceiptNonces.remove(nonce)
+        if !retainsState(nonce: nonce) { statesByNonce[nonce] = nil }
+    }
+
+    private func retainsState(nonce: String) -> Bool {
+        draftsByNonce[nonce] != nil || deliveryNonces.contains(nonce) || retainedReceiptNonces.contains(nonce)
+    }
+
+    /// Reserves the next position in the account's single delivery order.
+    mutating func reserveDeliveryTurn(nonce: String) -> DeliveryTurn {
+        waitingNonces.insert(nonce)
+        deliveryNonces.insert(nonce)
+        return DeliveryTurn(nonce: nonce, previous: deliveryTail, generation: deliveryGeneration)
+    }
+
+    /// Remembers an authoritative receipt even when history cannot show it.
+    mutating func noteConfirmation(nonce: String, channelID: ChannelID) {
+        if retainsState(nonce: nonce) {
+            updateState(.confirmed, nonce: nonce, channelID: channelID)
+        }
+    }
+
+    mutating func setDeliveryTail(_ delivery: Task<Void, Never>, for turn: DeliveryTurn) {
+        guard turn.generation == deliveryGeneration else { return }
+        deliveryTail = delivery
+    }
+
+    /// Leaves the waiting set; returns whether the send was confirmed meanwhile.
+    mutating func beginDelivery(for turn: DeliveryTurn) -> Bool {
+        guard turn.generation == deliveryGeneration else { return false }
+        waitingNonces.remove(turn.nonce)
+        return statesByNonce[turn.nonce]?.state == .confirmed
+    }
+
+    mutating func finishDelivery(for turn: DeliveryTurn) {
+        guard turn.generation == deliveryGeneration else { return }
+        deliveryNonces.remove(turn.nonce)
+        if !retainsState(nonce: turn.nonce) { statesByNonce[turn.nonce] = nil }
+    }
 
     mutating func nextOptimisticMessageID() -> MessageID {
         defer { nextOptimisticMessageRawValue &-= 1 }
@@ -107,5 +238,12 @@ struct OutgoingMessageState {
         draftsByNonce.removeAll(keepingCapacity: false)
         stickerUploadSourceURLByNonce.removeAll(keepingCapacity: false)
         nextOptimisticMessageRawValue = UInt64.max
+        deliveryTail = nil
+        waitingNonces.removeAll()
+        submissionReservations.removeAll()
+        statesByNonce.removeAll()
+        retainedReceiptNonces.removeAll()
+        deliveryNonces.removeAll()
+        deliveryGeneration &+= 1
     }
 }

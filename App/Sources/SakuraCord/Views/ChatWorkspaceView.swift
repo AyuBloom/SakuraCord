@@ -34,6 +34,9 @@ struct ChatWorkspaceView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.isFriendsPresented {
+                FriendsView(model: model)
+                    .id("friends-\(model.currentUser?.id.description ?? "")")
             } else {
                 conversation
             }
@@ -47,7 +50,7 @@ struct ChatWorkspaceView: View {
                     }
                 }
             ),
-            cornerRadius: 32,
+            cornerRadius: InterfaceScale.metric(32),
             cornerStyle: .circular
         ) { form in
             InteractionModalView(model: model, form: form)
@@ -59,23 +62,24 @@ struct ChatWorkspaceView: View {
         let presentation = ChatWorkspacePresentation(
             isVoiceChannel: model.selectedChannel?.kind == .voice,
             isForumChannel: model.selectedChannel?.kind == .forum,
-            hasOpenThread: model.hasThreadPane,
+            hasOpenThread: model.hasThreadPane && !model.isThreadFullWidth,
             hasOpenVoiceChat: model.isVoiceChatOpen,
             showsInspector: model.showInspector,
-            showsMessageSearch: model.messageSearch.isPresented
-                && MessageSearchSurfacePolicy.showsToolbar(
-                    channelKind: model.selectedChannel?.kind,
-                    hasOpenThread: model.hasThreadPane
-                )
+            showsMessageSearch: model.isMessageSearchVisible
         )
 
         HStack(spacing: 0) {
-            ChatWorkspacePrimaryContent(
-                model: model,
-                content: presentation.primaryContent,
-                presentsForumComposer: $presentsForumComposer
-            )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if model.isThreadFullWidth {
+                ThreadConversationView(model: model)
+            } else {
+                ChatWorkspacePrimaryContent(
+                    model: model,
+                    content: presentation.primaryContent,
+                    presentsForumComposer: $presentsForumComposer
+                )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            }
 
             if let supplementaryContent = presentation.supplementaryContent {
                 HStack(spacing: 0) {
@@ -205,13 +209,19 @@ private struct ChatWorkspaceSupplementaryContent: View {
     let toolbarSearchFieldMetrics: ToolbarSearchFieldMetrics
 
     var body: some View {
+        let userContext = UserMenuContext(guildID: model.selectedGuildID, channelID: model.selectedChannelID)
         switch content {
         case .thread:
             ThreadConversationView(model: model)
         case .voiceChat:
             VoiceChannelChatView(model: model)
         case .memberInspector:
-            if let channel = model.selectedChannel,
+            if model.isThreadFullWidth, let thread = model.openThread,
+               model.openThreadParentChannel?.kind != .announcement {
+                ThreadMemberInspectorView(model: model, thread: thread)
+                    .frame(width: ChatChromeMetrics.memberListWidth)
+                    .frame(maxHeight: .infinity)
+            } else if let channel = model.selectedChannel,
                channel.kind == .directMessage,
                let recipient = channel.recipients.first
             {
@@ -233,8 +243,9 @@ private struct ChatWorkspaceSupplementaryContent: View {
                         roleColorDisplay: model.accessibilitySettings.roleColorDisplay
                     ),
                     openProfile: model.expandProfile,
-                    contextMenu: { MemberContextMenu.make(for: $0, model: model) },
                     sendProfileMessage: model.sendProfileMessage,
+                    userMenu: { UserContextMenu.make(for: $0.user, context: userContext, model: model) },
+                    userAccessibilityActions: { UserContextMenu.accessibilityActions(for: $0.user, context: userContext, model: model) },
                     updateViewport: model.updateMemberListViewport
                 )
                 .frame(width: ChatChromeMetrics.memberListWidth)
@@ -243,6 +254,7 @@ private struct ChatWorkspaceSupplementaryContent: View {
         case .messageSearch:
             if toolbarSearchFieldMetrics.isValid {
                 MessageSearchPanelView(model: model)
+                    .id(ObjectIdentifier(model.messageSearch))
                     .frame(width: ChatChromeMetrics.memberListWidth)
                     .frame(maxHeight: .infinity)
             }
@@ -262,7 +274,8 @@ private struct DirectMessageProfileInspector: View {
                 ProfilePresentationContent(
                     presentation: presentation,
                     layout: .inspector,
-                    openProfile: model.expandProfile
+                    openProfile: model.expandProfile,
+                    userMenu: { UserContextMenu.make(for: presentation.member.user, context: .init(guildID: presentation.guildID), model: model) }
                 )
             } else {
                 ProgressView("Loading profile…")

@@ -3,9 +3,9 @@ import MessageRendering
 import SakuraCordModels
 
 enum DiscordRichMessageMetrics {
-    static let maximumWidth: CGFloat = 520
-    static let cardCornerRadius: CGFloat = 8
-    static let cardPadding: CGFloat = 12
+    static var maximumWidth: CGFloat { InterfaceScale.metric(520) }
+    static var cardCornerRadius: CGFloat { InterfaceScale.metric(8) }
+    static var cardPadding: CGFloat { InterfaceScale.metric(12) }
 }
 
 nonisolated enum DiscordFittingWidthPlan {
@@ -117,9 +117,10 @@ nonisolated enum SystemMessagePresentation {
 
     static func label(
         for message: Message,
-        currentUserID: UserID? = nil
+        currentUserID: UserID? = nil,
+        recipient: User? = nil
     ) -> String {
-        textRuns(for: message, currentUserID: currentUserID)
+        textRuns(for: message, currentUserID: currentUserID, recipient: recipient)
             .map(\.text)
             .joined()
     }
@@ -127,11 +128,12 @@ nonisolated enum SystemMessagePresentation {
     static func attributedLabel(
         for message: Message,
         currentUserID: UserID? = nil,
+        recipient: User? = nil,
         baseFontSize: CGFloat,
         actorColor: NSColor? = nil
     ) -> NSAttributedString {
         let value = NSMutableAttributedString()
-        for run in textRuns(for: message, currentUserID: currentUserID) {
+        for run in textRuns(for: message, currentUserID: currentUserID, recipient: recipient) {
             var attributes: [NSAttributedString.Key: Any] = [
                         .font: NSFont.systemFont(
                             ofSize: baseFontSize,
@@ -162,13 +164,16 @@ nonisolated enum SystemMessagePresentation {
 
     static func textRuns(
         for message: Message,
-        currentUserID: UserID? = nil
+        currentUserID: UserID? = nil,
+        recipient: User? = nil
     ) -> [TextRun] {
         let author = message.author.displayName
         return switch message.type {
         case .recipientAdd, .recipientRemove, .channelNameChange, .channelIconChange,
              .channelPinnedMessage, .userJoin:
             conversationTextRuns(for: message, author: author)
+        case .friendRequestAccepted:
+            friendRequestTextRuns(for: message, currentUserID: currentUserID, recipient: recipient)
         case .pollResult:
             pollResultTextRuns(message)
         case .call:
@@ -187,6 +192,33 @@ nonisolated enum SystemMessagePresentation {
                 )
             ]
         }
+    }
+
+    private static func friendRequestTextRuns(
+        for message: Message,
+        currentUserID: UserID?,
+        recipient: User?
+    ) -> [TextRun] {
+        let acceptedByCurrentUser = message.author.id == currentUserID
+        var runs: [TextRun]
+        if acceptedByCurrentUser, let recipient {
+            runs = [
+                .secondary("You accepted "),
+                .emphasized(recipient.displayName, action: .profile(recipient.id)),
+                .secondary("’s friend request."),
+            ]
+        } else if acceptedByCurrentUser {
+            runs = [.secondary("You accepted a friend request.")]
+        } else {
+            runs = [actorRun(message), .secondary(currentUserID == nil
+                ? " accepted a friend request." : " accepted your friend request.")]
+        }
+        if !message.content.isEmpty {
+            runs.append(.secondary(acceptedByCurrentUser ? " They said: "
+                : currentUserID == nil ? " Note: " : " You said: "))
+            runs.append(.emphasized(message.content))
+        }
+        return runs
     }
 
     private static func conversationTextRuns(
@@ -368,6 +400,7 @@ nonisolated enum SystemMessagePresentation {
         currentUserID: UserID? = nil
     ) -> String {
         switch message.type {
+        case .friendRequestAccepted: "person.fill.checkmark"
         case .pollResult: "chart.bar.xaxis"
         case .recipientAdd: "arrow.right"
         case .recipientRemove: "arrow.left"
@@ -389,7 +422,8 @@ nonisolated enum SystemMessagePresentation {
         for message: Message,
         currentUserID: UserID? = nil
     ) -> Bool {
-        message.type == .recipientAdd
+        message.type == .friendRequestAccepted
+            || message.type == .recipientAdd
             || message.type == .userJoin
             || (message.type == .call
                 && !isMissedCall(message, currentUserID: currentUserID))
@@ -442,6 +476,16 @@ struct RichMediaItem: Identifiable, Hashable {
     var kind: Kind
     var isSpoiler: Bool
     var autoplaysInline: Bool
+
+    func videoPosterURL(maximumPixelDimension: Int) -> URL? {
+        guard kind == .video else { return nil }
+        return DiscordVideoPosterURL.url(
+            proxyURL: previewURL,
+            width: width,
+            height: height,
+            maximumPixelDimension: maximumPixelDimension
+        )
+    }
 
     init(_ attachment: Attachment) {
         id = attachment.id
@@ -642,7 +686,7 @@ nonisolated enum MediaGalleryPlan {
             let ratio = max(0.2, min(12, aspectRatios.first ?? 16 / 9))
             let fittedWidth = min(width, 350 * ratio)
             let fittedHeight = min(350, fittedWidth / ratio)
-            return [CGRect(x: 0, y: 0, width: fittedWidth, height: max(80, fittedHeight))]
+            return [CGRect(x: 0, y: 0, width: fittedWidth, height: max(InterfaceScale.metric(80), fittedHeight))]
         }
         if count == 3 {
             let height = min(300, max(190, width * 0.62))
@@ -693,7 +737,7 @@ nonisolated enum DiscordComponentContainerLayoutPlan {
         padding: CGFloat,
         hasAccent: Bool
     ) -> CGFloat {
-        let fixedWidth = padding * 2 + (hasAccent ? 4 : 0)
+        let fixedWidth = padding * 2 + (hasAccent ? InterfaceScale.metric(4) : 0)
         return DiscordFittingWidthPlan.width(
             ideal: idealContent + fixedWidth,
             available: available,

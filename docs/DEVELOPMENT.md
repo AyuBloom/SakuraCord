@@ -25,12 +25,26 @@ session:
 ./script/build_and_run.sh --offline
 ```
 
-To launch the existing `dist/SakuraCord.app` without rebuilding, use
+Debug builds are packaged as `dist/SakuraCord Debug.app`. To launch the
+existing debug app without rebuilding, use
 `./script/run.sh`, `./script/run.sh --offline`, or
 `./script/run.sh --offline-sign-in`. These are also available as
 the Codex environment actions **Run**, **Run Offline**, and **Run Offline Sign In**. These restart the
 checkout's app so the selected mode takes effect, and require a previously
 built bundle.
+
+In the `--offline` demo, **Settings → Updates → Browse Pull Request Builds**
+shows the production build browser with sample data. Search,
+PR selection, and build history work normally; installation is disabled and
+the build catalog is not fetched. Normal launches load the published catalog.
+
+To develop against an unpublished Sparkle fork, set
+`SAKURACORD_SPARKLE_PACKAGE_PATH` to a local Swift package named `Sparkle` that
+exports the built framework, then use the same guarded build and test scripts.
+The default dependency remains pinned to the distributed fork version; never
+commit a local-resolution lockfile in place of that pin. See
+[PR build publication](RELEASING.md#pull-request-builds) for the
+distribution contract and rollout prerequisites.
 
 Both launch scripts stop and wait for the checkout's app immediately before
 launching, including when another launcher reopened it during a build. They
@@ -46,7 +60,9 @@ contacting Discord:
 | `./script/build_and_run.sh --offline-long-server-list` | Extended server rail |
 | `./script/build_and_run.sh --offline-forum-performance` | Large forum |
 | `./script/build_and_run.sh --offline-chat-performance` | Large native timeline |
+| `./script/build_and_run.sh --offline-chat-voice-performance` | Large native timeline where every fifth message is a voice message |
 | `./script/build_and_run.sh --offline-pins-performance-autoscroll` | Paginated 5,000-message pins timeline benchmark |
+| `./script/build_and_run.sh --offline-friends-performance` | 1,000 friends plus 200 requests; 20-second scroll with 20 presence updates/second, then 80 category switches |
 | `./script/build_and_run.sh --offline-incoming-private-call` | Incoming direct-message call |
 
 The offline sign-in fixture uses the production sign-in views and state handling
@@ -158,14 +174,23 @@ proportion to its risk:
 | `./script/build_and_run.sh package` | Stage a signed debug app without launching it |
 | `./script/build_and_run.sh run-release` | Build, stage, and launch an optimized release app |
 | `./script/test.sh protocol` | Run protocol package tests |
+| `./script/test.sh dave` | Run DAVE encryption and recovery tests |
 | `./script/test.sh media` | Run media package tests |
 | `./script/test.sh app` | Run application package tests |
+| `./script/test.sh packages` | Run the seven library package tests |
 | `./script/test.sh all` | Run the configured first-party test matrix |
 | `./script/code_quality.sh check` | Run the pinned SwiftFormat and SwiftLint policy |
 | `./script/ci.sh` | Run code-quality and release checks, the full first-party test matrix, and the app build |
 
-Hosted CI caches the app and all six library test builds. Release compilation
-runs alongside any required validation, and publication waits for both. See
+Hosted CI runs four parallel jobs with separate compiler output caches:
+`./script/ci.sh packages-core` runs checks and the models, persistence, rendering,
+and plugin SDK tests; `./script/ci.sh protocol` runs protocol tests;
+`./script/ci.sh media` runs DaveKit and media tests; and `./script/ci.sh app`
+runs app tests and builds the executable. The local `packages` and `all` modes
+still run their complete suites. Branch CI runs on pushes to `main`, `nightly`, and
+release tags, and on pull requests; a newer push to a pull request cancels its
+in-progress run. Release compilation runs alongside any required validation,
+and publication waits for both. See
 [release validation and caches](RELEASING.md#validation-parallel-packaging-and-caches)
 for the exact commit reuse rules and cache boundaries.
 

@@ -13,6 +13,10 @@ extension AppModel {
     var openThreadAccess: ConversationAccess {
         guard let thread = openThread, let channel = openThreadParentChannel else { return .checking }
         guard let guildID = channel.guildID else { return .readable(canSend: true) }
+        if thread.isPrivate, thread.notificationSettings == nil {
+            guard let permissions = effectiveMessagePermissions(in: channel) else { return .checking }
+            guard permissions & DiscordPermissionBits.manageThreads != 0 else { return .hidden }
+        }
         let access = ConversationPermissionResolver.threadAccess(
             effectivePermissions: effectiveMessagePermissions(in: channel),
             isLocked: thread.isLocked
@@ -52,12 +56,14 @@ extension AppModel {
         starter: User?,
         startedAt: Date?,
         starterMessageID: MessageID? = nil,
-        initialMessages: [Message]
+        initialMessages: [Message],
+        fullWidth: Bool = false
     ) {
         closeThread()
         AppPerformanceSignposts.beginConversationNavigation(to: thread.id)
         readState.merge(thread: thread)
         openThread = thread
+        isThreadFullWidth = fullWidth
         if let selectedChannelID, !isConversationPresented(selectedChannelID) {
             suspendSelectedConversationPresentation()
         }
@@ -94,6 +100,7 @@ extension AppModel {
         threadDraft = ""
         threadReplyingTo = nil
         clearComposerAttachments(for: .thread)
+        translation.resetDraft(.thread)
         hasMoreThreadMessages = cachedBoundary ?? false
         beginInitialThreadLoad(thread)
     }
@@ -277,6 +284,7 @@ extension AppModel {
         threadLoadTask?.cancel()
         threadLoadTask = nil
         openThread = nil
+        isThreadFullWidth = false
         threadCreation = nil
         openThreadStarter = nil
         openThreadStartedAt = nil
@@ -285,6 +293,7 @@ extension AppModel {
         threadDraft = ""
         threadReplyingTo = nil
         clearComposerAttachments(for: .thread)
+        translation.resetDraft(.thread)
         isLoadingThread = false
         hasCompletedInitialThreadLoad = false
         isLoadingEarlierThread = false
@@ -385,7 +394,7 @@ extension AppModel {
 
     @discardableResult
     func sendThreadComposerMessage(attachments: [ForumPostAttachment]) async -> Bool {
-        await submitThreadComposerMessage(attachments: attachments).serverConfirmed
+        await submitThreadComposerMessage(attachments: attachments).serverConfirmation()
     }
 
     func submitThreadComposerMessage(
@@ -398,19 +407,17 @@ extension AppModel {
         guard allowSlowmodeSubmission(in: thread.id) else { return .rejected }
         let content = threadDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty || !attachments.isEmpty else { return .rejected }
-        guard validateAttachmentCount(attachments) else { return .rejected }
-        let replyTo = threadReplyingTo?.id
-        let mentionsRepliedUser = threadReplyMentionsAuthor
-        let confirmed = await sendThreadMessage(
+        guard validateAttachmentCount(attachments), allowOutgoingQueueSubmission() else { return .rejected }
+        guard let delivery = enqueueThreadMessage(
             content: content,
-            replyTo: replyTo,
-            mentionsRepliedUser: mentionsRepliedUser,
+            replyTo: threadReplyingTo?.id,
+            mentionsRepliedUser: threadReplyMentionsAuthor,
             replyPreview: threadReplyingTo.map(MessageReplyPreview.init),
             attachments: attachments,
             thread: thread,
             clearsComposer: true
-        )
-        return .enqueued(serverConfirmed: confirmed)
+        ) else { return .rejected }
+        return .enqueued(delivery: delivery)
     }
 
     @discardableResult
@@ -423,7 +430,29 @@ extension AppModel {
         thread: MessageThreadSummary,
         clearsComposer: Bool
     ) async -> Bool {
-        guard allowOnboardingSubmission(in: thread.id), allowSlowmodeSubmission(in: thread.id) else { return false }
+        await enqueueThreadMessage(
+            content: content,
+            replyTo: replyTo,
+            mentionsRepliedUser: mentionsRepliedUser,
+            replyPreview: replyPreview,
+            attachments: attachments,
+            thread: thread,
+            clearsComposer: clearsComposer
+        )?.value ?? false
+    }
+
+    /// Shows the optimistic message and admits it to the outbox without waiting
+    /// for delivery. Returns nil when the message was not admitted.
+    func enqueueThreadMessage(
+        content: String,
+        replyTo: MessageID? = nil,
+        mentionsRepliedUser: Bool = true,
+        replyPreview: MessageReplyPreview? = nil,
+        attachments: [ForumPostAttachment],
+        thread: MessageThreadSummary,
+        clearsComposer: Bool
+    ) -> Task<Bool, Never>? {
+        guard allowOnboardingSubmission(in: thread.id), allowSlowmodeSubmission(in: thread.id) else { return nil }
         let draft = SendMessageDraft(
             channelID: thread.id,
             content: content,
@@ -440,12 +469,9 @@ extension AppModel {
         if clearsComposer {
             threadDraft = ""
             threadReplyingTo = nil
+            translation.resetDraft(.thread)
         }
-        let didSend = await performOutgoingSend(draft, isRetry: false)
-        if didSend {
-            completeConversationReadingAndAdvance(channelID: thread.id)
-        }
-        return didSend
+        return enqueueOutgoingSend(draft, isRetry: false, completesReading: true)
     }
 
 }
@@ -480,6 +506,7 @@ extension AppModel {
         threadCreation = ThreadCreationDraft(parentID: channelID, permissions: permissions)
         if !isConversationPresented(channelID) { suspendSelectedConversationPresentation() }
         if !channelDraft.isEmpty {
+            translation.resetDraft(.channel)
             updateDraft("")
             threadDraft = channelDraft
         }
@@ -510,6 +537,11 @@ extension AppModel {
               validateAttachmentCount(attachments),
               allowOnboardingSubmission(in: creation.parentID)
         else { return .rejected }
+        guard let reservation = composer.outbox.reserveSubmission() else {
+            composer.isSendQueueFullAlertPresented = true
+            return .rejected
+        }
+        defer { composer.outbox.releaseSubmission(reservation) }
         let session = accountSession()
         let draft = CreateThreadDraft(
             channelID: creation.parentID,
@@ -517,6 +549,7 @@ extension AppModel {
             isPrivate: creation.isPrivate,
             autoArchiveDuration: selectedChannel?.defaultAutoArchiveDuration ?? 4_320
         )
+        translation.resetDraft(.thread)
         creation.isSubmitting = true
         defer { creation.isSubmitting = false }
         let thread: MessageThreadSummary
@@ -537,13 +570,13 @@ extension AppModel {
                 initialMessages: []
             )
         }
-        let confirmed = await sendThreadMessage(
+        guard let delivery = enqueueThreadMessage(
             content: content,
             attachments: attachments,
             thread: thread,
             clearsComposer: false
-        )
-        return .enqueued(serverConfirmed: confirmed)
+        ) else { return .rejected }
+        return .enqueued(delivery: delivery)
     }
 
     func invalidateTimelineThreadPreview(channelID: ChannelID, messageID: MessageID) {
@@ -556,6 +589,9 @@ extension AppModel {
     /// Keeps timeline thread cards current. A card's summary lives on its
     /// message; its latest-message preview mirrors the provider's catalogue.
     func refreshTimelineThreadCards(parentID: ChannelID, posts: [ForumPost], replacesAll: Bool = true) {
+        if let updated = posts.first(where: { $0.id == openThread?.id }) {
+            openThread = updated.thread
+        }
         var changedPreviewThreadIDs = Set<ChannelID>()
         if replacesAll {
             let retained = Set(posts.map(\.id))

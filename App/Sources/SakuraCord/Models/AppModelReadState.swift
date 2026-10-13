@@ -154,7 +154,7 @@ extension AppModel {
         let count: Int? = switch notificationPreferences.dockBadgeStyle {
         case .mentions: readState.totalMentions
         case .unreadConversations:
-            readState.unreadPresentationProjection().unreadByChannelID.values.count { $0 }
+            readState.unreadPresentationProjection().unreadConversationCount
         case .off: nil
         }
         notificationService.setDockBadge(

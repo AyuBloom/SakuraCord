@@ -376,7 +376,8 @@ extension AppModel {
                     readStates: value.readStates,
                     notificationSettings: value.notificationSettings,
                     usesNewNotifications: value.usesNewNotifications,
-                    currentUserID: value.currentUser.id
+                    currentUserID: value.currentUser.id,
+                    activeJoinedThreads: value.activeJoinedThreads
                 ))
             }.value
         }

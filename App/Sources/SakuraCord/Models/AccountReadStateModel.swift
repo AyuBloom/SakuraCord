@@ -8,6 +8,7 @@ import SakuraCordModels
 final class AccountReadStateModel {
     nonisolated struct InitialState: Sendable {
         var accountID: String?
+        var activeJoinedThreadIDs: Set<ChannelID>
         var entries: [ChannelID: Entry]
         var settingsByGuild: [GuildID?: GuildNotificationSettings]
         var overridesByGuildAndChannelID: [GuildID?: [ChannelID: ChannelNotificationOverride]]
@@ -30,6 +31,7 @@ final class AccountReadStateModel {
         let notificationSettings: [GuildNotificationSettings]
         let usesNewNotifications: Bool
         let currentUserID: UserID
+        var activeJoinedThreads: [MessageThreadSummary] = []
     }
 
     private struct PendingRollback: Sendable {
@@ -77,6 +79,7 @@ final class AccountReadStateModel {
     private var currentUserRoleIDsByGuild: [GuildID: Set<RoleID>] = [:]
     private var pendingRollbacks: [ChannelID: [MessageID: PendingRollback]] = [:]
     private var forumSelectionAcknowledgementBoundary: [ChannelID: MessageID] = [:]
+    private var activeJoinedThreadIDs: Set<ChannelID> = []
     private var forumPostArchivedByID: [ChannelID: Bool] = [:]
     private var usesNewNotifications = true
     private var currentUserID: UserID?
@@ -109,6 +112,7 @@ extension AccountReadStateModel {
         pendingRollbacks.removeAll()
         forumSelectionAcknowledgementBoundary.removeAll()
         forumPostArchivedByID.removeAll()
+        activeJoinedThreadIDs.removeAll()
         usesNewNotifications = true
     }
 
@@ -158,13 +162,14 @@ extension AccountReadStateModel {
         // The versioned snapshot reconciler overlays pending intent on READY.
         replaceReadStates(snapshot.readStates)
         for thread in threads { merge(thread: thread) }
+        replaceActiveJoinedThreads(snapshot.activeJoinedThreads)
     }
 
     nonisolated static func makeInitialState(_ input: InitialStateInput) -> InitialState {
         let accountID = input.accountID
         let guilds = input.guilds
         let channels = input.channels
-        let threads = input.threads
+        let threads = input.threads + input.activeJoinedThreads
         let readStates = input.readStates
         let notificationSettings = input.notificationSettings
         let usesNewNotifications = input.usesNewNotifications
@@ -193,6 +198,7 @@ extension AccountReadStateModel {
         let notificationIndex = initialNotificationSettingsIndex(notificationSettings)
         return InitialState(
             accountID: accountID,
+            activeJoinedThreadIDs: Set(input.activeJoinedThreads.filter { !$0.isArchived }.map(\.id)),
             entries: assembly.entries,
             settingsByGuild: notificationIndex.settingsByGuild,
             overridesByGuildAndChannelID: notificationIndex.overridesByGuildAndChannelID,
@@ -316,6 +322,7 @@ extension AccountReadStateModel {
             var entry = assembly.entries[thread.id]
                 ?? initialBaseEntry(for: thread.id, channels: assembly.channelByID)
             entry.guildID = thread.guildID
+                ?? thread.parentID.flatMap { assembly.channelByID[$0]?.guildID }
             entry.parentID = thread.parentID
             entry.kind = .text
             if let settings = thread.notificationSettings {
@@ -409,6 +416,7 @@ extension AccountReadStateModel {
     }
 
     func applyInitialState(_ state: InitialState) {
+        activeJoinedThreadIDs = state.activeJoinedThreadIDs
         accountID = state.accountID
         entries = state.entries
         settingsByGuild = state.settingsByGuild
@@ -1039,9 +1047,15 @@ extension AccountReadStateModel {
         )
     }
 
+    func replaceActiveJoinedThreads(_ threads: [MessageThreadSummary]) {
+        activeJoinedThreadIDs = Set(threads.filter { !$0.isArchived }.map(\.id))
+        for thread in threads { merge(thread: thread) }
+    }
+
     func merge(thread: MessageThreadSummary) {
         var entry = entry(for: thread.id)
         entry.guildID = thread.guildID
+            ?? thread.parentID.flatMap { channelByID[$0]?.guildID }
         entry.parentID = thread.parentID
         entry.kind = .text
         if let settings = thread.notificationSettings {
@@ -1426,6 +1440,7 @@ extension AccountReadStateModel {
         // projection in a detached preparation task.
         unreadPresentationSource().projection(now: now)
             ?? UnreadPresentationProjection(
+                unreadConversationCount: 0,
                 unreadByChannelID: [:],
                 mentionsByChannelID: [:],
                 newForumPostsByChannelID: [:],
@@ -1441,6 +1456,7 @@ extension AccountReadStateModel {
     func unreadPresentationSource() -> UnreadPresentationSource {
         UnreadPresentationSource(
             entries: entries,
+            activeJoinedThreadIDs: activeJoinedThreadIDs,
             policy: unreadPolicySource,
             forumPostArchivedByID: forumPostArchivedByID
         )

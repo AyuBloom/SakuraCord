@@ -13,6 +13,7 @@ extension AccountReadStateModel {
     }
 
     struct UnreadPresentationProjection: Equatable, Sendable {
+        var unreadConversationCount: Int
         var unreadByChannelID: [ChannelID: Bool]
         var mentionsByChannelID: [ChannelID: Int]
         var newForumPostsByChannelID: [ChannelID: Int]
@@ -26,22 +27,28 @@ extension AccountReadStateModel {
 
     nonisolated struct UnreadPresentationSource: Sendable {
         let entries: [ChannelID: Entry]
+        let activeJoinedThreadIDs: Set<ChannelID>
         let policy: UnreadPolicySource
         let forumPostArchivedByID: [ChannelID: Bool]
 
-        /// The server an entry's own unread lights. Joined threads are not in
-        /// the channel list, so a forum thread with its own read state lights
-        /// its forum's server.
-        func unreadGuildID(for entry: Entry) -> GuildID? {
-            if let guildID = policy.channelByID[entry.channelID]?.guildID {
-                return guildID
-            }
-            guard entry.hasAuthoritativeReadState,
+        /// Aggregate indicators must point to a current channel or a thread
+        /// the sidebar can surface. Retained read history is not membership.
+        func isAggregateConversation(_ entry: Entry) -> Bool {
+            if policy.channelByID[entry.channelID] != nil { return true }
+            guard activeJoinedThreadIDs.contains(entry.channelID),
+                  forumPostArchivedByID[entry.channelID] != true,
                   let parentID = entry.parentID,
                   let parent = policy.channelByID[parentID],
-                  parent.kind == .forum
-            else { return nil }
-            return parent.guildID
+                  [.text, .announcement, .forum].contains(parent.kind),
+                  entries[parentID]?.isAccessible == true,
+                  let guildID = parent.guildID,
+                  entry.guildID == guildID
+            else { return false }
+            return true
+        }
+
+        func unreadGuildID(for entry: Entry) -> GuildID? {
+            isAggregateConversation(entry) ? entry.guildID : nil
         }
 
         /// The forum an unseen post counts toward, if the post is newer than
@@ -107,6 +114,7 @@ extension AccountReadStateModel {
             cancelsCooperatively: Bool = false,
             cancellationCheck: @Sendable () -> Bool = { Task.isCancelled }
         ) -> UnreadPresentationProjection? {
+            var unreadConversationIDs: Set<ChannelID> = []
             var unreadByChannelID: [ChannelID: Bool] = [:]
             var mentionsByChannelID: [ChannelID: Int] = [:]
             var newForumPostsByChannelID: [ChannelID: Int] = [:]
@@ -153,6 +161,12 @@ extension AccountReadStateModel {
                 }
                 mentionsByChannelID[channelID] = channelMentions
                 unreadByChannelID[channelID] = channelUnread
+                if channelUnread,
+                   entry.kind != .forum || channelMentions > 0,
+                   isAggregateConversation(entry)
+                {
+                    unreadConversationIDs.insert(channelID)
+                }
                 totalMentions += channelMentions
                 if entry.kind == .directMessage
                     || entry.kind == .groupDirectMessage
@@ -190,10 +204,12 @@ extension AccountReadStateModel {
             for forumID in newForumPostsByChannelID.keys {
                 if let guildID = guildLitByNewPosts(inForum: forumID, now: now) {
                     unreadByGuildID[guildID] = true
+                    unreadConversationIDs.insert(forumID)
                 }
             }
 
             return UnreadPresentationProjection(
+                unreadConversationCount: unreadConversationIDs.count,
                 unreadByChannelID: unreadByChannelID,
                 mentionsByChannelID: mentionsByChannelID,
                 newForumPostsByChannelID: newForumPostsByChannelID,

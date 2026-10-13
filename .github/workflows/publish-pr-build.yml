@@ -4,6 +4,9 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+  pull_request_target:
+    # Refresh discovery from default-branch code; never check out the PR.
+    types: [closed, reopened]
   workflow_dispatch:
     inputs:
       run_id:
@@ -14,14 +17,11 @@ on:
         description: Exact successful run attempt
         type: string
         default: '1'
-      approved_head_sha:
-        description: Full reviewed PR head SHA (required for fork builds; approval applies only to this commit)
-        type: string
-        required: false
 
 permissions:
   contents: read
   actions: read
+  pull-requests: read
 
 # Every writer, including recovery, takes this lock. Never cancel a publication.
 concurrency:
@@ -55,7 +55,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_BUILD_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.run_id }}
           PR_BUILD_RUN_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || inputs.run_attempt }}
-          PR_BUILD_APPROVED_HEAD_SHA: ${{ inputs.approved_head_sha }}
           SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
         run: node script/pr_builds.mjs prepare
       - name: Retain inspected publication input
@@ -97,7 +96,8 @@ jobs:
     if: >-
       always() && !cancelled() &&
       ((needs.inspect.outputs.ready == 'true' && needs.verify-signatures.result == 'success') ||
-       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.run_id == ''))
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.run_id == '') ||
+       github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -124,6 +124,7 @@ jobs:
       - name: Sign and publish inspected build
         if: needs.inspect.outputs.ready == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           PR_BUILDS_TOKEN: ${{ steps.distribution-token.outputs.token }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           SPARKLE_ED_PUBLIC_KEY: ${{ vars.SPARKLE_ED_PUBLIC_KEY }}
@@ -131,5 +132,6 @@ jobs:
       - name: Recover catalog from retained immutable manifests
         if: needs.inspect.outputs.ready != 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           PR_BUILDS_TOKEN: ${{ steps.distribution-token.outputs.token }}
         run: node script/pr_builds.mjs rebuild-catalog

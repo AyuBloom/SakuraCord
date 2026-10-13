@@ -35,7 +35,8 @@ built bundle.
 
 In the `--offline` demo, **Settings → Updates → Browse Pull Request Builds**
 shows the production build browser with sample data. Search,
-PR selection, and build history work normally; installation is disabled and
+PR selection, build history, and the installation warning work normally;
+Install and Restart stays disabled and
 the build catalog is not fetched. Normal launches load the published catalog.
 
 To develop against an unpublished Sparkle fork, set

@@ -82,6 +82,55 @@ export async function resolvePullRequest(run, metadata, request = api) {
   return pr;
 }
 
+export async function validateBuiltCommit(context, pr, request = api) {
+  const commit = await request(SOURCE, `commits/${context.builtSHA}`);
+  check(commit?.sha === context.builtSHA, 'Built commit is unavailable');
+  if (context.builtSHA === context.headSHA) return commit;
+  check(commit.parents?.length === 2 && commit.parents[1].sha === context.headSHA,
+    'Built commit is not a merge of the recorded PR head');
+  const mergeBase = commit.parents[0].sha;
+  if (mergeBase !== context.baseSHA) {
+    // GitHub can refresh refs/pull/N/merge after constructing the PR event.
+    // Accept only a forward base update that is still on the canonical target.
+    check(pr.base?.repo?.full_name === SOURCE && typeof pr.base.ref === 'string' && pr.base.ref.length > 0,
+      'Invalid PR base repository');
+    const target = await request(SOURCE, `branches/${encodeURIComponent(pr.base.ref)}`);
+    check(sha(target?.commit?.sha), 'PR target branch is unavailable');
+    for (const [base, head] of [[context.baseSHA, mergeBase], [mergeBase, target.commit.sha]]) {
+      const comparison = await request(SOURCE, `compare/${base}...${head}`);
+      check(comparison && ['ahead', 'identical'].includes(comparison.status)
+        && comparison.merge_base_commit?.sha === base,
+      'Built merge base is not a forward update on the PR target branch');
+    }
+  }
+  return commit;
+}
+
+export async function verifyCIJobs(runID, attempt, request = api,
+  pause = ms => new Promise(resolve => setTimeout(resolve, ms))) {
+  for (let poll = 0; poll < 20; poll++) {
+    const jobs = await pages(SOURCE, `actions/runs/${runID}/attempts/${attempt}/jobs`, 'jobs', {}, request);
+    const builds = jobs.filter(job => /^build \(.+\)$/.test(job.name));
+    let incomplete = !['build (packages)', 'build (app)'].every(name => builds.some(job => job.name === name));
+    for (const job of builds) {
+      check(job.run_id === runID && job.run_attempt === attempt, 'CI job run/attempt mismatch');
+      check(job.conclusion == null || job.conclusion === 'success', `CI job did not pass: ${job.name}`);
+      incomplete ||= job.conclusion !== 'success';
+      const required = ['Build and test', ...(job.name === 'build (app)' ?
+        ['Package downloadable pull request app and matching symbols', 'Upload pull request build'] : [])];
+      for (const name of required) {
+        const step = job.steps?.find(step => step.name === name);
+        check(step?.conclusion == null || step.conclusion === 'success', `CI step did not pass: ${job.name}: ${name}`);
+        incomplete ||= step?.conclusion !== 'success';
+      }
+    }
+    if (!incomplete) return;
+    check(poll < 19, 'GitHub CI step records are still incomplete; retry publication when they are available');
+    console.log('Waiting for GitHub to finish reporting CI job steps (30 seconds)...');
+    await pause(30_000);
+  }
+}
+
 async function prepare(directory) {
   const runID = Number(process.env.PR_BUILD_RUN_ID);
   const attempt = Number(process.env.PR_BUILD_RUN_ATTEMPT);
@@ -107,26 +156,13 @@ async function prepare(directory) {
   const metadata = JSON.parse(await readFile(path.join(directory, 'build.json'), 'utf8'));
   const pr = await resolvePullRequest(run, metadata);
   const context = validateOrigin({ ...run, pull_requests: [pr] }, artifact, metadata, workflow.id);
-  const commit = await api(SOURCE, `commits/${context.builtSHA}`);
-  check(commit && (context.builtSHA === context.headSHA ||
-    (commit.parents.length === 2 && commit.parents[0].sha === context.baseSHA && commit.parents[1].sha === context.headSHA)),
-  'Built commit is not the recorded PR head or merge of the recorded base and head');
+  const commit = await validateBuiltCommit(context, pr);
   const headCommit = context.builtSHA === context.headSHA ? commit : await api(SOURCE, `commits/${context.headSHA}`);
   check(headCommit?.sha === context.headSHA && typeof headCommit.commit?.message === 'string',
     'PR head commit message is unavailable');
   context.commitSubject = [...headCommit.commit.message.split(/\r?\n/, 1)[0].trim()].slice(0, 500).join('');
   check(context.commitSubject.length > 0, 'PR head commit subject is empty');
-  const jobs = await pages(SOURCE, `actions/runs/${runID}/attempts/${attempt}/jobs`, 'jobs');
-  for (const name of ['build (packages)', 'build (app)']) {
-    const job = jobs.find(job => job.name === name);
-    check(job?.conclusion === 'success' && job.steps.some(step => step.name === 'Build and test' && step.conclusion === 'success'),
-      'Both CI test suites must pass in this attempt');
-  }
-  const appJob = jobs.find(job => job.name === 'build (app)');
-  for (const name of ['Package downloadable pull request app and matching symbols', 'Upload pull request build']) {
-    check(appJob.steps.some(step => step.name === name && step.conclusion === 'success'),
-      'Packaging and upload must succeed in the exact attempt');
-  }
+  await verifyCIJobs(runID, attempt);
   context.title = pr.title;
   context.createdAt = artifact.created_at;
   context.artifactID = artifact.id;

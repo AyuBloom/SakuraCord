@@ -82,32 +82,31 @@ extension DiscordRESTProvider {
         _ update: GuildMemberListUpdateDTO,
         guildID: GuildID
     ) async {
-        guard let subscription = memberListSubscriptions[guildID]?[update.id],
-              isMemberListAccessible(guildID: guildID, memberListID: update.id)
-        else { return }
+        let subscriptions = memberListSubscriptionsForRefresh(guildID: guildID, memberListID: update.id)
+        guard !subscriptions.isEmpty else { return }
         let invalidatedOverlapsSubscription = update.ops.contains { operation in
             guard operation.op == "INVALIDATE",
                   let range = operation.range, range.count == 2,
                   range[0] <= range[1]
             else { return false }
             let invalidated = range[0] ... range[1]
-            return subscription.ranges.contains { $0.overlaps(invalidated) }
+            return subscriptions.contains { subscription in
+                subscription.ranges.contains { $0.overlaps(invalidated) }
+            }
         }
         guard invalidatedOverlapsSubscription else { return }
-        memberListsNeedingRefresh[guildID, default: []].insert(update.id)
+        markMemberListForRefresh(guildID: guildID, memberListID: update.id)
         guard guildID == pendingMemberGuildID,
               update.id == selectedMemberListID[guildID]
         else { return }
         do {
-            // subscribeToMemberList clears the marker only after a successful
-            // send, so a rate-limited send is retried by the next viewport
-            // report or reconnect.
-            try await subscribeToMemberList(
-                guildID: guildID,
-                channelID: subscription.channelID,
-                ranges: subscription.ranges
+            // The serialized send satisfies only the refresh generation it
+            // captured. A known cooldown permits one deferred attempt.
+            try await enqueueGuildSubscription(
+                guildID: guildID, request: .refresh(memberListID: update.id, isDeferred: false)
             )
         } catch {
+            scheduleMemberListRefreshRetry(guildID: guildID)
             gatewayLogger.error(
                 "Member-list resubscribe after INVALIDATE failed: \(error.localizedDescription, privacy: .public)"
             )
@@ -288,6 +287,9 @@ extension DiscordRESTProvider {
         if update.guildID == nil {
             cachePrivatePresence(update)
             continuation?.yield(.privateMembersChanged(privateMembersInChannelOrder()))
+            if let userID = UserID(update.user.id) {
+                publishRelationshipPresences(complete: false, userIDs: [userID])
+            }
             return
         }
         guard let guildID = update.guildID.flatMap(GuildID.init),

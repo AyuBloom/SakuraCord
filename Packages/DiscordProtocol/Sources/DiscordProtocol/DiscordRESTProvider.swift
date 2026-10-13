@@ -156,7 +156,6 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
         [String: [UUID: CheckedContinuation<Void, Never>]] = [:]
     var requestSafetyCircuitIsOpen = false
     var requestSafetyStopReason = "Discord networking is stopped for this session."
-    var unexpectedNotFoundCounts: [String: Int] = [:]
     var gatewaySession: GatewaySession?
     var gatewayEventTask: Task<Void, Never>?
     var gatewayGuildIDs: [GuildID] = []
@@ -193,9 +192,25 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var memberListSubscriptions:
         [GuildID: [String: DiscordMemberListSubscription]] = [:]
     var memberListSubscriptionOrder: [GuildID: [String]] = [:]
+    /// The selected viewport can move while a cooldown prevents committing it.
+    var memberListViewportRequests:
+        [GuildID: (memberListID: String, subscription: DiscordMemberListSubscription)] = [:]
+    /// Selection can replace the desired viewport while an older send is suspended.
+    var memberListInFlightRequests:
+        [GuildID: DiscordMemberListInFlightRequest] = [:]
     /// Retained member lists whose subscribed ranges were invalidated and
     /// still need a subscription send to get a fresh SYNC.
-    var memberListsNeedingRefresh: [GuildID: Set<String>] = [:]
+    var memberListsNeedingRefresh: [GuildID: [String: UUID]] = [:]
+    var guildSubscriptionTasks: [GuildID: Task<Void, any Error>] = [:]
+    #if DEBUG
+        var guildSubscriptionQueueWaitersForTesting:
+            [GuildID: [CheckedContinuation<Void, Never>]] = [:]
+    #endif
+    var guildSubscriptionGenerations: [GuildID: UUID] = [:]
+    var guildSubscriptionTaskIDs: [GuildID: UUID] = [:]
+    var memberListRefreshRetryTasks: [GuildID: Task<Void, Never>] = [:]
+    var memberListViewportRestoreTasks: [GuildID: Task<Void, Never>] = [:]
+    var memberListRefreshRetryAttempts: [GuildID: Set<String>] = [:]
     var cachedGatewayUsersByID: [String: UserDTO] = [:]
     var cachedGatewayUserOrder: [String] = []
     var cachedGatewayUserIDs: Set<String> = []
@@ -220,8 +235,16 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var cachedFriendUserIDs: Set<UserID> = []
     var cachedBlockedOrIgnoredUserIDs: Set<UserID> = []
     var cachedRelationshipNicknamesByUserID: [UserID: String] = [:]
+    /// Authoritative relationship records; the friend and nickname caches derive from them.
+    var cachedRelationships: [UserID: RelationshipRecord] = [:]
+    /// Advances with each READY; a full relationship read is scoped to one.
+    var relationshipGeneration: UInt64 = 0
+    /// The generation whose full relationship read has started or finished.
+    var relationshipLoadGeneration: UInt64?
     /// Per-user revisions keep unrelated relationship events from suppressing saves.
     var relationshipRevisions: [UserID: UInt64] = [:]
+    var cachedUserRevisions: [String: UInt64] = [:]
+    var relationshipUserPublicationTask: Task<Void, Never>?
     var cachedGuildRoles: [GuildID: [GuildRoleDTO]] = [:]
     var guildRoleTasks: [GuildID: Task<[GuildRoleDTO], Error>] = [:]
     var pendingMemberSearchRequests: [String: PendingMemberSearchRequest] = [:]

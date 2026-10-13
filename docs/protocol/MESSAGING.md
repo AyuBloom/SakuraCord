@@ -11,7 +11,7 @@ and the outbox; MediaPipeline owns local media transformations.
 
 | Contract | Representative checks |
 | --- | --- |
-| DM/history/send budgets | [DirectMessageProviderContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/DirectMessageProviderContractTests.swift); [ProviderRequestContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ProviderRequestContractTests.swift) |
+| DM/history/send budgets | [DirectMessageProviderContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/DirectMessageProviderContractTests.swift); [ProviderRequestContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ProviderRequestContractTests.swift); [MessageSendRateLimitContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/MessageSendRateLimitContractTests.swift) |
 | Search, forwarding and pins | [MessageSearchContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/MessageSearchContractTests.swift); [MessageForwardingContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/MessageForwardingContractTests.swift); [PinnedMessagesContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/PinnedMessagesContractTests.swift) |
 | Polls and threads | [PollContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/PollContractTests.swift); [ForumProviderContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ForumProviderContractTests.swift) |
 | Uploads | [UploadPrivacyContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/UploadPrivacyContractTests.swift); [AttachmentUploadURLValidationTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/AttachmentUploadURLValidationTests.swift); [UploadPrivacyPreparationTests.swift](../../App/Tests/SakuraCordAppTests/UploadPrivacyPreparationTests.swift) |
@@ -25,6 +25,23 @@ operations. An ordinary message POST carries content, nonce, TTS/flags and
 as a deliberate idempotency safeguard. Concurrent same-channel/same-nonce sends
 share one mutation. Preserve that nonce for explicit retries; an ambiguous result
 must not cause automatic resend. [Poll creation](#polls) has a distinct body.
+
+Like the first-party `MessageQueue` (stable web build `web.ae482d0492df0fb9.js`,
+observed 9 October 2026), the account's outbox delivers one send at a time in
+submission order. The composer clears as soon as a message is admitted, so later
+messages can be written and queued while earlier ones are in flight. Unconfirmed
+sends, including failed ones awaiting retry or discard, stay below settled messages
+in submission order, so each confirmation settles in place instead of moving by
+its server timestamp. While five
+sends wait behind the one in flight, a new submission is refused before it
+consumes the draft and the "Way too spicy" alert is shown. A non-slowmode `429`
+on the message POST is a definite rejection: the transport waits for the server
+cooldown and replays the same body and nonce within the
+[message creation budget](../PROTOCOL_BASELINE.md#attempt-budgets), without
+re-uploading attachments. The first-party queue replays without a bound;
+SakuraCord stops after the budget and leaves the message failed for explicit retry.
+Forwarding and the `/msg` and `/thread` built-ins post to another conversation
+outside this queue; forwarding keeps the single-attempt mutation budget.
 
 A reply includes reference type 0, message ID and channel ID. To disable the reply
 ping, include `allowed_mentions` with normal users/roles/everyone parsing and
@@ -99,8 +116,8 @@ omitted fields; non-personalized final `me_voted:false` values must not erase a
 known personal selection. Natural expiry and rendering send no expiry request.
 An explicit results read can repeat once if overlapping votes make its unversioned
 tally ambiguous; a second overlap reports failure rather than starting polling.
-Expected route-scoped poll errors stay local, while account restrictions retain
-the shared safety circuit.
+Poll rejections follow the shared operation-scoped error policy; they do not
+stop unrelated REST or Gateway traffic.
 
 ## Forums, threads and commands
 
@@ -415,6 +432,48 @@ See [external-host checks](../../App/Tests/SakuraCordAppTests/ExternalAttachment
 and [metadata fixtures](../../Packages/MediaPipeline/Tests/MediaPipelineTests/UploadMetadataTests.swift)
 for failure/privacy boundaries. Detailed container algorithms belong beside that
 code, not in the transport-wide baseline.
+
+## Voice messages
+
+Discord's desktop client has no recorder. The send contract was observed on
+9 October 2026 (web build `web.ae482d0492df0fb9.js`) through Equicord's
+VoiceMessages plugin, which reuses Discord's uploader, and cross-checked against
+[Discord's message documentation](https://docs.discord.com/developers/resources/message#voice-messages).
+
+- **Recording.** Mono 48 kHz Ogg Opus. Apple frameworks encode Opus but write it
+  only into CAF, so [MediaPipeline](../../Packages/MediaPipeline/Sources/MediaPipeline/OggOpusWriter.swift)
+  muxes the packets itself: 312-sample pre-skip, with the final granule trimming
+  encoder padding. Never upload CAF renamed to `.ogg`. Recordings stop at
+  Discord's 20-minute limit. Capture applies no gain, so the recording is
+  levelled once it stops: gated speech to −16 dBFS RMS, at most +18 dB, with a
+  soft limiter. The waveform is measured after levelling.
+- **Waveform.** 32–256 bins, ten per second of audio: RMS scaled to 0–255, then
+  the plugin's eased peak normalization, base64-encoded as raw bytes. Follow
+  upstream Vencord's contiguous windows; the installed Equicord copy contains an
+  indexing bug.
+- **Upload.** The reservation names `voice-message.ogg` and adds
+  `original_content_type: "audio/ogg; codecs=opus"`. Storage receives the raw
+  bytes as `application/octet-stream`. The message POST sets `flags: 8192` and
+  empty `content`, plus one attachment with `filename`, `uploaded_filename`,
+  `duration_secs` and `waveform`. The attachment's `content_type` is omitted.
+- **Rules.** Guild channels require Send Voice Messages (`1 << 46`). A voice
+  message carries no text, stickers or poll, and Discord does not allow it to be
+  edited.
+- **Delivery.** Unlike the plugin's direct POST, SakuraCord sends through the
+  ordinary [outbox](#sends-and-history). It keeps the nonce, idempotency field,
+  send budget and reply reference.
+- **Receipt.** `MESSAGE_CREATE` and history carry `flags: 8192`, plus an
+  attachment with `content_type: audio/ogg`, `duration_secs` and `waveform`.
+  Preserve the returned metadata; Discord may adjust the duration (8 → 8.02
+  observed).
+- **Playback.** Audio is fetched from the attachment `url` through the shared
+  media cache, re-signing expiring links first. One message plays at a time. The
+  speed cycle is 1×, 1.5×, 2×, 0.75×, kept device-local. Up to 25 resume
+  positions between 0.5 s and 95% are kept in memory. Listening is not reported
+  to Discord.
+
+See [VoiceMessageSendContractTests](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/VoiceMessageSendContractTests.swift)
+and [VoiceMessageEncodingTests](../../Packages/MediaPipeline/Tests/MediaPipelineTests/VoiceMessageEncodingTests.swift).
 
 ## Attachment links
 

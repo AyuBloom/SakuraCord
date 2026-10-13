@@ -38,7 +38,6 @@ extension NativeTimelineCanvasView {
         invalidateVisibleMediaProjection(keepingCapacity: true)
         self.storage = storage
         self.model = model
-        refreshInboxDisclosureGeometry()
         reconcilePollPresentations()
         installSpoilerRevealStore(model.timelineSpoilerRevealStore)
         self.actions = actions
@@ -53,6 +52,9 @@ extension NativeTimelineCanvasView {
         // transient geometry reads it.
         reconcileEditingRow()
         self.contentOriginY = transientContentOriginY
+        // After the content origin settles: an expansion measures where its
+        // rows landed the header.
+        refreshDisclosureGeometry()
         reconcileServerTagCardPresentation()
         contentOriginMoved =
             abs(previousContentOriginY - self.contentOriginY) >= 0.5
@@ -109,9 +111,11 @@ extension NativeTimelineCanvasView {
         )
         scheduleInitialReactionCountCapture()
         reconcileVisibleReactionPreviewLoads()
+        prefetchVisibleVoiceMessages()
         startVisibleInlineVideosImmediately()
         scheduleAnimatedMediaReconciliation()
         positionAnimatedMediaOverlays()
+        reconcileVoiceMessageOverlay()
         reconcileBeginningSelectionOverlay()
         reconcileActivityIndicators()
         reconcileSpoilerOverlays()
@@ -205,6 +209,7 @@ extension NativeTimelineCanvasView {
         positionAnimatedMediaOverlays()
         reconcileBeginningSelectionOverlay()
         positionInlineVideoOverlays()
+        reconcileVoiceMessageOverlay()
         positionLottieStickerOverlays()
         reconcileActivityIndicators()
         positionSpoilerOverlays()
@@ -515,6 +520,7 @@ extension NativeTimelineCanvasView {
         positionActionCapsule()
         positionAnimatedMediaOverlays()
         positionInlineVideoOverlays()
+        reconcileVoiceMessageOverlay()
         positionLottieStickerOverlays()
         reconcileActivityIndicators()
         positionSpoilerOverlays()
@@ -530,6 +536,7 @@ extension NativeTimelineCanvasView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil {
+            clearDisclosure(redraws: false)
             finishSendTransitions()
             cancelTranscriptGlide()
             cancelReactionPreviewLoads()
@@ -563,6 +570,7 @@ extension NativeTimelineCanvasView {
             inlineVideoRows.removeAll()
             lottieStickerRows.removeAll()
             removeInlineVideoOverlays()
+            removeVoiceMessageOverlay()
             removeLottieStickerOverlays()
             removeAnimatedMediaOverlays()
             removeActivityIndicators()
@@ -620,9 +628,7 @@ extension NativeTimelineCanvasView {
         var upper = rowOrigins.count
         while lower < upper {
             let middle = (lower + upper) / 2
-            if displayedRowOrigin(at: middle) + displayedRowHeight(at: middle)
-                <= documentY
-            {
+            if visibleRowSpan(at: middle).upperBound <= documentY {
                 lower = middle + 1
             } else {
                 upper = middle
@@ -761,20 +767,41 @@ extension NativeTimelineCanvasView {
         // composite newly positioned rows over their former positions.
         NSGraphicsContext.current?.cgContext.clear(dirtyRect)
         drawHistorySkeleton(in: dirtyRect)
-        forEachDisplayedRow(in: dirtyRect) { index in
+        var displayedRows: [Int] = []
+        forEachDisplayedRow(in: dirtyRect) { displayedRows.append($0) }
+        drawSuppressedHighlights(for: displayedRows)
+        for index in displayedRows {
             let rowFrame = rowFrame(at: index)
-            guard rowFrame.intersects(dirtyRect) else { return }
-            guard inboxDisclosureRange.contains(index) else {
+            guard rowFrame.intersects(dirtyRect) else { continue }
+            guard disclosureRange.contains(index) else {
                 drawTimelineRow(at: index, rowFrame: rowFrame, dirtyRect: dirtyRect, visibleMediaKeys: visibleMediaKeys)
-                return
+                continue
             }
-            // An animating Inbox group is clipped to its revealed height.
-            guard rowFrame.minY < inboxDisclosureClipMaxY, let context = NSGraphicsContext.current?.cgContext else { return }
+            // An animating group is clipped to its revealed height.
+            let minY = max(rowFrame.minY, disclosureClipMinY)
+            let maxY = min(rowFrame.maxY, disclosureClipMaxY)
+            guard minY < maxY, let context = NSGraphicsContext.current?.cgContext else { continue }
             context.saveGState()
-            context.clip(to: CGRect(x: rowFrame.minX, y: rowFrame.minY, width: rowFrame.width,
-                                    height: inboxDisclosureClipMaxY - rowFrame.minY))
+            context.clip(to: CGRect(x: rowFrame.minX, y: minY, width: rowFrame.width, height: maxY - minY))
             drawTimelineRow(at: index, rowFrame: rowFrame, dirtyRect: dirtyRect, visibleMediaKeys: visibleMediaKeys)
             context.restoreGState()
+        }
+    }
+
+    /// Blocked and ignored areas span several rows, so they are drawn beneath
+    /// all rows rather than into any one row's cached bitmap.
+    private func drawSuppressedHighlights(for displayedRows: [Int]) {
+        guard let first = displayedRows.first else { return }
+        var headers: [Int] = []
+        if let header = suppressedHeaderIndex(containing: first) { headers.append(header) }
+        for index in displayedRows {
+            guard case .suppressedMessages = items[index], headers.last != index else { continue }
+            headers.append(index)
+        }
+        for header in headers {
+            if let frame = suppressedHighlightFrame(headerIndex: header) {
+                NativeTimelineRowPainter.drawSuppressedHighlight(frame)
+            }
         }
     }
 
@@ -789,7 +816,7 @@ extension NativeTimelineCanvasView {
             ?? mediaKeys(for: item, at: index)
         drawMessageJumpHighlight(at: index)
         let revealState = textSpoilerRevealState(at: index)
-        if item.messageID == editingMessageID {
+        if let editingMessageID, item.messageID == editingMessageID {
             drawEditingTimelineRow(
                 item, at: index, rowFrame: rowFrame, dirtyRect: dirtyRect,
                 preparedMediaKeys: preparedMediaKeys
@@ -825,7 +852,7 @@ extension NativeTimelineCanvasView {
         enqueueVisibleMediaRequests(identifier: item.identifier, keys: preparedMediaKeys)
         NativeTimelineRowPainter.draw(
             item: item, layout: layouts[index], in: rowFrame, model: model,
-            isHovered: false, hidesMessageContent: true,
+            isHovered: false, drawsBubbleBackground: false, hidesMessageContent: true,
             spoilerRevealStore: spoilerRevealStore
         )
         editingRowScrollSnapshot?.draw(
@@ -856,9 +883,15 @@ extension NativeTimelineCanvasView {
             || visualPressedComponentButton?.messageID == item.messageID
             || hoveredForwardedSourceMessageID == item.messageID
             || hoveredFooterAction?.messageID == item.messageID
+            || isSuppressedToggleHovered(item)
             || !reactionCountTransitions(inMessageAt: index).isEmpty
             || textSelection?.itemIdentifier == item.identifier
             || !revealState.isEmpty
+    }
+
+    private func isSuppressedToggleHovered(_ item: NativeMessageTimelineItem) -> Bool {
+        guard case let .suppressedMessages(group) = item else { return false }
+        return hoveredFooterAction == .init(messageID: group.id, kind: .suppressedToggle)
     }
 
     private func drawInteractiveTimelineRow(
@@ -889,6 +922,7 @@ extension NativeTimelineCanvasView {
             isForwardedSourceHovered: hoveredForwardedSourceMessageID == item.messageID,
             isEphemeralDismissHovered: hoveredFooterAction?.messageID == item.messageID && hoveredFooterAction?.kind == .ephemeralDismiss,
             isTranslationActionHovered: hoveredFooterAction?.messageID == item.messageID && hoveredFooterAction?.kind == .translation,
+            isSuppressedToggleHovered: isSuppressedToggleHovered(item),
             hoveredReactionID: hoveredReactionID(inMessageAt: index),
             isAddReactionHovered: isAddReactionHovered(inMessageAt: index),
             textSelection: textSelection,

@@ -6,7 +6,7 @@
 
 | Contract | Source | Representative checks |
 | --- | --- | --- |
-| Invite preview/join/leave | [DiscordRESTServerInvites.swift](../../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTServerInvites.swift) | [ServerInviteContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ServerInviteContractTests.swift); [ServerInviteCaptchaTests.swift](../../App/Tests/SakuraCordAppTests/ServerInviteCaptchaTests.swift) |
+| Invite preview/join/leave | [DiscordRESTServerInvites.swift](../../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTServerInvites.swift) | [ServerInviteContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ServerInviteContractTests.swift); [HumanCaptchaTests.swift](../../App/Tests/SakuraCordAppTests/HumanCaptchaTests.swift) |
 | Onboarding/customization | [DiscordRESTOnboarding.swift](../../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTOnboarding.swift); [AppModelGuildCustomization.swift](../../App/Sources/SakuraCord/Models/AppModelGuildCustomization.swift) | [OnboardingContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/OnboardingContractTests.swift); [GuildCustomizationTests.swift](../../App/Tests/SakuraCordAppTests/GuildCustomizationTests.swift) |
 | Guide | [DiscordRESTGuildGuide.swift](../../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordRESTGuildGuide.swift); [AppModelGuildGuide.swift](../../App/Sources/SakuraCord/Models/AppModelGuildGuide.swift) | [OnboardingContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/OnboardingContractTests.swift) |
 | Catalogues and members | [Gateway request builders](../../Packages/DiscordProtocol/Sources/DiscordProtocol/DiscordGatewaySupport.swift) | [ServerProviderContractTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/ServerProviderContractTests.swift); [GatewayLifecycleEventTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/GatewayLifecycleEventTests.swift) |
@@ -26,7 +26,8 @@ Supported invite and discoverable-server join hCaptcha retains the original
 body/context and permits one replay after human completion on the same provider and Gateway session. Empty
 solutions, cancellation, account replacement, another challenge or ambiguous
 failure terminate that attempt. Unsupported/malformed challenges and account
-restrictions retain the session safety circuit. Widget test-token verification does not establish successful handling of a live
+restrictions report a join error without stopping unrelated account traffic.
+Widget test-token verification does not establish successful handling of a live
 join CAPTCHA.
 
 Onboarding invites can enter the native membership flow. Member screening and
@@ -135,9 +136,45 @@ and are not a substitute for guild member state. Check current access before
 publishing a cached channel or member result after asynchronous work.
 A member-list `INVALIDATE` keeps the last known rows only while the list's channel
 is still accessible and resolves to the same list; otherwise the rows are cleared.
-An overlapping `INVALIDATE` marks the retained list for refresh: the selected list
-is re-sent at once, others on their next viewport report, and a failed send keeps
-the marker for the next viewport report or reconnect.
+Each `SYNC` replaces its declared range, clearing unfilled positions when fewer
+items arrive while preserving cached rows outside that range.
+SakuraCord marks each retained or requested list with an overlapping `INVALIDATE` for refresh:
+the selected list is re-sent at once, others on their next viewport report. Member
+and thread subscription sends are serialized per guild. A completed send satisfies
+only the refresh generation captured before that send and cannot erase a newer
+invalidation. Refreshes read the latest requested viewport when their send begins,
+including a viewport that could not be committed during a cooldown. Invalidation
+overlap and opcode-37 rejection recovery include requested ranges whose send has
+not committed yet, including an active send after selection moves to another
+list; those sends cannot satisfy a newer refresh marker.
+Access-driven queue resets restore the current accessible requested viewport,
+adopting a viewable channel's changed member-list identity;
+selection changes and session/guild teardown prevent delayed restoration.
+That restoration waits out an already-known opcode-37 cooldown before its one
+attempt, including when the requested list has not yet committed a subscription.
+
+For a known opcode-37 cooldown, SakuraCord makes at most one deferred attempt
+for the selected refresh, including a requested list whose first send has not
+committed, canceled on selection, access loss or session/guild teardown.
+Waiting timers and queued refreshes canceled before their send begins do not
+consume that attempt budget. An asynchronous `RATE_LIMITED` restores the refresh
+marker; a rejected deferred attempt does not start a retry loop. Further failure
+keeps the marker for a later viewport action or reconnect. These bounds are
+SakuraCord's recovery policy.
+
+The public [Gateway rate-limit contract](https://docs.discord.com/developers/events/gateway-events#rate-limited)
+defines `opcode` and `retry_after` in seconds, with guild metadata documented
+for opcode 8 only. Opcode-37 recovery therefore accepts absent guild metadata
+and conservatively marks accessible subscribed or requested lists. This is not
+evidence that Discord supplies guild metadata for opcode 37.
+Official client host 0.0.411, web build 634304, inspected on 2026-10-13,
+uses opcode 37 for channel-range and partial thread subscriptions. A captured
+`SYNC` declared `[0,99]` with four members and two group rows, confirming that
+the returned items can be shorter than the declared range. No `INVALIDATE` or
+opcode-37 `RATE_LIMITED` was observed in that verification. Its static member
+store clears invalidated rows; retaining accessible rows and explicitly renewing
+them is SakuraCord's deliberate presentation and recovery policy, covered by
+Gateway-backed regression tests rather than a claimed live rejection capture.
 
 ### Thread member inspector
 

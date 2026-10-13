@@ -32,9 +32,7 @@ extension DiscordRESTProvider {
     func sendThreadMemberSubscription(guildID: GuildID) async throws {
         // Subscription updates are partial. Do not replace channel ranges while
         // adding a thread to the same guild subscription.
-        try await sendGateway(DiscordGatewayPayloadFactory.threadMemberSubscriptions(
-            guildID: guildID, threadIDs: threadMemberSubscriptions[guildID] ?? []
-        ))
+        try await enqueueGuildSubscription(guildID: guildID, request: .threads)
         gatewayLogger.info("Thread member subscription sent; retained=\(self.threadMemberSubscriptions[guildID]?.count ?? 0)")
     }
 

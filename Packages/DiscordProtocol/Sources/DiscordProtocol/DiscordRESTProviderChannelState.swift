@@ -2,6 +2,14 @@ import Foundation
 import SakuraCordModels
 
 extension DiscordRESTProvider {
+    public func dismissIgnoredGroupWarning(in channelID: ChannelID) async throws {
+        guard let account = currentUser?.id else { throw ChatProviderError.unauthenticated }
+        try await requestEmpty("/channels/\(channelID)/blocked-user-warning-dismissal", method: "POST")
+        guard currentUser?.id == account, var channel = privateChannel(id: channelID) else { return }
+        channel.blockedUserWarningDismissed = true
+        upsertPrivateChannel(channel)
+    }
+
     public func channels(in guildID: GuildID?) async throws -> [Channel] {
         if let cached = cachedChannels[guildID] {
             return cached
@@ -47,6 +55,11 @@ extension DiscordRESTProvider {
             var channel = channel
             channel.position = (channels.lazy.map(\.position).max() ?? -1) + 1
             channels.append(channel)
+            // A newly created or reopened DM joins the activity ordering. A
+            // message-less group DM ranks by its own snowflake, so it leads.
+            // Search discoveries may leave an unsorted tail, so re-sort as
+            // READY_SUPPLEMENTAL does rather than assuming sorted input.
+            channels = Self.orderedPrivateChannels(channels)
         }
         cachedChannels[nil] = channels
         continuation?.yield(.channelsChanged(guildID: nil, channels: channels))
@@ -198,11 +211,11 @@ extension DiscordRESTProvider {
     }
 
     static func orderedPrivateChannels(_ channels: [Channel]) -> [Channel] {
-        channels.sorted { lhs, rhs in
-            let lhsActivity = lhs.lastMessageID?.rawValue ?? lhs.id.rawValue
-            let rhsActivity = rhs.lastMessageID?.rawValue ?? rhs.id.rawValue
-            return lhsActivity > rhsActivity
-        }
+        channels.sorted { privateChannelActivity($0) > privateChannelActivity($1) }
+    }
+
+    private static func privateChannelActivity(_ channel: Channel) -> UInt64 {
+        channel.lastMessageID?.rawValue ?? channel.id.rawValue
     }
 
     static func coalescingChannelSnapshots(_ previous: ClientEvent, _ next: ClientEvent) -> ClientEvent? {
@@ -248,6 +261,9 @@ extension DiscordRESTProvider {
         }
         cachedChannels[guildID] = channels
         continuation?.yield(.channelsChanged(guildID: guildID, channels: channels))
+        if discardInaccessibleMemberLists(guildID: guildID) {
+            publishMembers(guildID: guildID, members: [], groups: [])
+        }
     }
 
     static func domainChannels(_ values: [ChannelDTO], guildID: GuildID) throws -> [Channel] {

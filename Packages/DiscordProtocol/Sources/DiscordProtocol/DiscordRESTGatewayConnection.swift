@@ -189,6 +189,7 @@ extension DiscordRESTProvider {
     }
 
     public func disconnect() async {
+        resetMemberListSubscriptionWork()
         await finishGuildFoldersEdits()
         currentAccountDetails = nil
         currentAuthSessionIDHash = nil
@@ -323,11 +324,13 @@ extension DiscordRESTProvider {
         case .stateChanged(let connectionState):
             let wasReady = gatewayReady
             gatewayReady = connectionState == .ready
-            if wasReady, !gatewayReady { pendingStatusEditConnectionClosed() }
+            if wasReady, !gatewayReady {
+                pendingStatusEditConnectionClosed()
+                resetMemberListSubscriptionWork()
+            }
             if connectionState == .authenticationFailed {
                 failInitialGatewaySnapshot(ChatProviderError.unauthenticated)
-                await openSafetyCircuit(
-                    status: 401, discordCode: nil, route: "GATEWAY IDENTIFY/RESUME")
+                await stopAfterAuthenticationFailure(route: "GATEWAY IDENTIFY/RESUME")
                 return
             }
             failInitialGatewaySnapshotOnTerminalDisconnect(connectionState)
@@ -375,52 +378,33 @@ extension DiscordRESTProvider {
         channelID requestedChannelID: ChannelID? = nil,
         ranges: [ClosedRange<Int>] = [0 ... 99]
     ) async throws {
-        let channel = cachedChannels[guildID]?.first(where: { $0.kind != .voice })
-        let selectedChannel = requestedChannelID.flatMap { requestedID in
-            cachedChannels[guildID]?.first(where: { $0.id == requestedID })
-        } ?? channel
-        let previousSubscriptions = memberListSubscriptions[guildID]
-        let previousOrder = memberListSubscriptionOrder[guildID]
-        var selectedListID: String?
-        let subscriptionState = selectedChannel.map { channel in
-            let memberListID = DiscordMemberListIdentity.id(
-                for: channel,
-                guildID: guildID,
-                roles: cachedGuildRoles[guildID] ?? []
-            )
-            selectedMemberListID[guildID] = memberListID
-            selectedListID = memberListID
-            return DiscordMemberListRangePolicy.subscriptionState(
-                selecting: memberListID,
-                channelID: channel.id,
-                ranges: ranges,
-                currentSubscriptions: memberListSubscriptions[guildID] ?? [:],
-                currentOrder: memberListSubscriptionOrder[guildID] ?? []
-            )
+        let selectedChannel: Channel?
+        if let requestedChannelID {
+            selectedChannel = cachedChannels[guildID]?.first { $0.id == requestedChannelID }
+        } else {
+            selectedChannel = cachedChannels[guildID]?.first {
+                $0.kind != .voice
+                    && canViewMemberListChannel($0, guildID: guildID)
+            }
         }
-        try await sendGateway(
-            DiscordGatewayPayloadFactory.guildSubscriptions(
-                guildID: guildID,
-                channelRanges: subscriptionState?.rangesByChannel ?? [:],
-                threadMemberLists: threadMemberSubscriptions[guildID]
-            )
+        guard let selectedChannel,
+              canViewMemberListChannel(selectedChannel, guildID: guildID)
+        else { return }
+        let memberListID = DiscordMemberListIdentity.id(
+            for: selectedChannel, guildID: guildID,
+            roles: cachedGuildRoles[guildID] ?? []
         )
-        if let selectedListID {
-            memberListsNeedingRefresh[guildID]?.remove(selectedListID)
+        if selectedMemberListID[guildID] != memberListID {
+            memberListRefreshRetryTasks.removeValue(forKey: guildID)?.cancel()
+            memberListViewportRestoreTasks.removeValue(forKey: guildID)?.cancel()
         }
-        // Another subscription send may have committed newer state while this
-        // one awaited; that state already reflects the later request, so a
-        // value computed before the await must not overwrite it.
-        if let subscriptionState,
-           memberListSubscriptions[guildID] == previousSubscriptions,
-           memberListSubscriptionOrder[guildID] == previousOrder
-        {
-            memberListSubscriptionOrder[guildID] = subscriptionState.memberListOrder
-            memberListSubscriptions[guildID] =
-                subscriptionState.subscriptionsByMemberListID
-        }
-        gatewayLogger.info(
-            "Sent current bulk guild subscription; member-list ranges=\(ranges.count)"
+        selectedMemberListID[guildID] = memberListID
+        memberListViewportRequests[guildID] = (
+            memberListID, DiscordMemberListSubscription(channelID: selectedChannel.id, ranges: ranges)
+        )
+        try await enqueueGuildSubscription(
+            guildID: guildID,
+            request: .members(channelID: selectedChannel.id, ranges: ranges)
         )
     }
 
@@ -441,6 +425,11 @@ extension DiscordRESTProvider {
         let ranges = DiscordMemberListRangePolicy.ranges(around: visibleRange)
         guard let channel = cachedChannels[guildID]?.first(where: { $0.id == channelID })
         else { return }
+        guard canViewMemberListChannel(channel, guildID: guildID) else {
+            discardInaccessibleMemberLists(guildID: guildID)
+            publishMembers(guildID: guildID, members: [], groups: [])
+            return
+        }
         let memberListID = DiscordMemberListIdentity.id(
             for: channel,
             guildID: guildID,
@@ -448,7 +437,12 @@ extension DiscordRESTProvider {
         )
         let changedSelection = selectedMemberListID[guildID] != memberListID
         selectedMemberListID[guildID] = memberListID
+        memberListViewportRequests[guildID] = (
+            memberListID, DiscordMemberListSubscription(channelID: channelID, ranges: ranges)
+        )
         if changedSelection {
+            memberListRefreshRetryTasks.removeValue(forKey: guildID)?.cancel()
+            memberListViewportRestoreTasks.removeValue(forKey: guildID)?.cancel()
             publishMembers(
                 guildID: guildID,
                 members: orderedMemberListMembers(
@@ -457,7 +451,7 @@ extension DiscordRESTProvider {
                 groups: cachedMemberListGroups[guildID]?[memberListID] ?? []
             )
         }
-        let needsRefresh = memberListsNeedingRefresh[guildID]?.contains(memberListID) == true
+        let needsRefresh = memberListsNeedingRefresh[guildID]?[memberListID] != nil
         if !needsRefresh,
            !DiscordMemberListRangePolicy.requiresSubscriptionUpdate(
                memberListID: memberListID,
@@ -770,6 +764,9 @@ extension DiscordRESTProvider {
         else { return }
         cachedChannels[guildID] = channels
         continuation?.yield(.channelsChanged(guildID: guildID, channels: channels))
+        if discardInaccessibleMemberLists(guildID: guildID) {
+            publishMembers(guildID: guildID, members: [], groups: [])
+        }
     }
 
     func publishGuildRoles(_ guildID: GuildID) {

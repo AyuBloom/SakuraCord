@@ -227,11 +227,13 @@ extension AppModel {
         case .forumPostPreviewsChanged(let channelID, let posts):
             consumeForumPostPreviewsChanged(channelID: channelID, posts: posts)
         case .activeJoinedThreadsChanged(let threads):
+            readState.replaceActiveJoinedThreads(threads)
             if var value = snapshot {
                 value.activeJoinedThreads = threads
                 snapshot = value
                 forwardSearchSourceRevision &+= 1
             }
+            refreshUnreadPresentation()
             reconcileInboxEligibility()
         case .forumPageLoaded(let channelID, let query, let page):
             consumeForumPageLoaded(channelID: channelID, query: query, page: page)

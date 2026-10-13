@@ -109,6 +109,7 @@ struct AccountReadStateModelTests {
         for thread in threads {
             incremental.merge(thread: thread)
         }
+        incremental.replaceActiveJoinedThreads(threads)
         incremental.setCurrentUserID(currentUser.id)
 
         let batched = AccountReadStateModel()
@@ -120,7 +121,8 @@ struct AccountReadStateModelTests {
             readStates: readStates,
             notificationSettings: settings,
             usesNewNotifications: true,
-            currentUserID: currentUser.id
+            currentUserID: currentUser.id,
+            activeJoinedThreads: threads
         )))
 
         #expect(batched.entries == incremental.entries)
@@ -2299,6 +2301,7 @@ struct AccountReadStateModelTests {
         )
         #expect(model.unreadPresentationProjection().unreadByGuildID[guildID] != true)
         #expect(!model.guildUnread(guildID))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 0)
         #expect(model.unreadCategoryIDs(in: guildID).isEmpty)
         #expect(model.unreadPresentationProjection().unreadCategoryIDsByGuild[guildID, default: []].isEmpty)
 
@@ -2315,6 +2318,7 @@ struct AccountReadStateModelTests {
         )
         #expect(model.unreadPresentationProjection().unreadByGuildID[guildID] == true)
         #expect(model.guildUnread(guildID))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 1)
         #expect(model.unreadCategoryIDs(in: guildID) == [categoryID])
         #expect(model.unreadPresentationProjection().unreadCategoryIDsByGuild[guildID] == [categoryID])
         #expect(model.bulkAcknowledgements(for: categoryID, guildID: guildID).map(\.channelID) == [forumID])
@@ -2325,6 +2329,7 @@ struct AccountReadStateModelTests {
             channelOverrides: [ChannelNotificationOverride(channelID: forumID, isMuted: true)]
         ))
         #expect(!model.guildUnread(guildID))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 0)
         #expect(model.unreadPresentationProjection().unreadByGuildID[guildID] != true)
         // Muting hides the server dot but still permits marking the category read.
         #expect(model.unreadCategoryIDs(in: guildID) == [categoryID])
@@ -2337,15 +2342,15 @@ struct AccountReadStateModelTests {
         // A joined thread keeps lighting the server after its forum's
         // boundary has moved past it.
         let joinedThreadID = ChannelID(rawValue: 260)
-        model.merge(
-            thread: MessageThreadSummary(
+        model.replaceActiveJoinedThreads([
+            MessageThreadSummary(
                 id: joinedThreadID,
                 guildID: guildID,
                 parentID: forumID,
                 name: "Joined thread",
                 lastMessageID: MessageID(rawValue: 290)
             )
-        )
+        ])
         model.applyRemote(
             ChannelReadState(
                 channelID: postID,
@@ -2363,6 +2368,7 @@ struct AccountReadStateModelTests {
         #expect(threadProjection.unreadByChannelID[joinedThreadID] == true)
         #expect(threadProjection.unreadByGuildID[guildID] == true)
         #expect(model.guildUnread(guildID))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 1)
 
         model.apply(
             GuildNotificationSettings(
@@ -2375,6 +2381,80 @@ struct AccountReadStateModelTests {
         )
         #expect(model.unreadPresentationProjection().unreadByGuildID[guildID] != true)
         #expect(!model.guildUnread(guildID))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 0)
+    }
+
+    @Test(arguments: ["archived", "left", "missing parent", "inaccessible parent", "reconnect"])
+    func `unpresentable threads retain local unread without lighting aggregate indicators`(change: String) {
+        let model = makeModel(latest: 10, acknowledged: 10)
+        let parent = Channel(id: channelID, guildID: guildID, name: "Forum", kind: .forum)
+        model.merge(channels: [parent])
+        let threadID = ChannelID(rawValue: 260)
+        var thread = MessageThreadSummary(
+            id: threadID,
+            parentID: channelID,
+            name: "Joined thread",
+            lastMessageID: MessageID(rawValue: 290)
+        )
+        model.replaceActiveJoinedThreads([thread])
+        model.applyRemote(ChannelReadState(
+            channelID: threadID,
+            lastAcknowledgedMessageID: MessageID(rawValue: 280)
+        ))
+        #expect(model.guildUnread(guildID))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 1)
+        #expect(model.bulkAcknowledgements(for: guildID).contains { $0.channelID == threadID })
+
+        switch change {
+        case "archived":
+            thread.isArchived = true
+            model.merge(thread: thread)
+        case "left":
+            model.replaceActiveJoinedThreads([])
+        case "missing parent":
+            model.replaceChannels(in: guildID, with: [])
+        case "inaccessible parent":
+            model.applyAccessibility([channelID: false])
+        default:
+            model.replaceSnapshot(BootstrapSnapshot(
+                currentUser: currentUser,
+                guilds: [Guild(id: guildID, name: "Guild", defaultMessageNotifications: .allMessages)],
+                channels: [parent],
+                threads: [thread],
+                members: [],
+                readStates: [ChannelReadState(channelID: threadID, lastAcknowledgedMessageID: MessageID(rawValue: 280))]
+            ))
+        }
+        #expect(model.entries[threadID]?.isUnread == true)
+        #expect(!model.guildUnread(guildID))
+        let projection = model.unreadPresentationProjection()
+        #expect(projection.unreadByGuildID[guildID] != true)
+        #expect(projection.unreadConversationCount == 0)
+    }
+
+    @Test func `Dock count excludes unbacked read history and preserves current conversations`() {
+        let model = makeModel(latest: 11, acknowledged: 10)
+        let orphanID = ChannelID(rawValue: 260)
+        model.applyRemote(ChannelReadState(
+            channelID: orphanID,
+            lastAcknowledgedMessageID: MessageID(rawValue: 280),
+            mentionCount: 1
+        ))
+        model.observeLoadedMessages(channelID: orphanID, messages: [
+            Message(id: MessageID(rawValue: 290), channelID: orphanID, author: sender, content: "Retained history")
+        ])
+        #expect(model.unread(channelID: orphanID))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 1)
+        let dmID = ChannelID(rawValue: 270)
+        model.merge(channels: [Channel(id: dmID, guildID: nil, name: "DM", kind: .directMessage, lastMessageID: MessageID(rawValue: 300))])
+        model.applyRemote(ChannelReadState(channelID: dmID, lastAcknowledgedMessageID: MessageID(rawValue: 299)))
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 2)
+        for target in model.bulkAcknowledgements(for: guildID) {
+            model.markAcknowledgementPending(channelID: target.channelID, messageID: target.messageID)
+        }
+        #expect(model.unreadPresentationProjection().unreadConversationCount == 1)
+        #expect(model.unread(channelID: dmID))
+        #expect(model.unread(channelID: orphanID))
     }
 
     @Test func `one pass category unread projection matches acknowledgement eligibility`() {
@@ -2472,6 +2552,54 @@ struct AccountReadStateModelTests {
             mentionsEveryone: mentionsEveryone
         )
     }
+}
+
+@MainActor
+@Test func `thread membership updates both Dock refresh paths`() async {
+    let guildID = GuildID(rawValue: 100)
+    let parentID = ChannelID(rawValue: 200)
+    let threadID = ChannelID(rawValue: 260)
+    var guild = Guild(id: guildID, name: "Guild", defaultMessageNotifications: .allMessages)
+    guild.isOwnedByCurrentUser = true
+    let thread = MessageThreadSummary(
+        id: threadID, guildID: guildID, parentID: parentID,
+        name: "Joined post", lastMessageID: MessageID(rawValue: 290)
+    )
+    let snapshot = BootstrapSnapshot(
+        currentUser: User(id: UserID(rawValue: 1), username: "current", displayName: "Current"),
+        guilds: [guild],
+        channels: [Channel(id: parentID, guildID: guildID, name: "Forum", kind: .forum)],
+        activeJoinedThreads: [thread],
+        members: [],
+        readStates: [ChannelReadState(channelID: threadID, lastAcknowledgedMessageID: MessageID(rawValue: 280))]
+    )
+    let provider = MockChatProvider(snapshot: snapshot, messages: [])
+    let service = RecordingNotificationService()
+    let preferences = NotificationPreferences(defaults: InMemoryPreferences())
+    preferences.dockBadgeStyle = .unreadConversations
+    let model = AppModel(
+        launchMode: .offlineTesting, provider: provider,
+        notificationService: service, notificationPreferences: preferences
+    )
+    await model.start()
+    #expect(service.badgeCounts.last == 1)
+    #expect(model.readState.guildUnread(guildID))
+    model.consumeImmediately(.activeJoinedThreadsChanged([]))
+    #expect(service.badgeCounts.last == 0)
+    #expect(!model.readState.guildUnread(guildID))
+    #expect(model.readState.entries[threadID]?.isUnread == true)
+    model.refreshDockBadge()
+    #expect(service.badgeCounts.last == 0)
+    model.consumeImmediately(.activeJoinedThreadsChanged([thread]))
+    #expect(service.badgeCounts.last == 1)
+    model.refreshDockBadge()
+    #expect(service.badgeCounts.last == 1)
+
+    await provider.disconnect()
+    model.eventTask?.cancel()
+    await model.eventTask?.value
+    model.eventTask = nil
+    await model.drainAccountChildTasks()
 }
 
 @MainActor

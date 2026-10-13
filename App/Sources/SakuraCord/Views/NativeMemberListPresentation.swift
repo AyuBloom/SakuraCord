@@ -28,7 +28,7 @@ extension Member {
 nonisolated enum NativeMemberListMetrics {
     static var horizontalInset: CGFloat { InterfaceScale.metric(8) }
     static var verticalInset: CGFloat { InterfaceScale.metric(10) }
-    static var sectionHeaderHeight: CGFloat { InterfaceScale.metric(34) }
+    static var sectionHeaderHeight: CGFloat { InterfaceScale.metric(38) }
     static var memberRowHeight: CGFloat { InterfaceScale.metric(46) }
     static var paintedRowHeight: CGFloat { InterfaceScale.metric(44) }
     static var avatarSize: CGFloat { InterfaceScale.metric(34) }
@@ -77,7 +77,7 @@ nonisolated enum MemberListSkeletonLayout {
     static func itemsFitting(height: CGFloat, memberCounts: [Int]) -> [Item] {
         let availableHeight = max(
             0,
-            height - NativeMemberListMetrics.verticalInset * 2
+            height - NativeMemberListMetrics.verticalInset
         )
         var result: [Item] = []
         var usedHeight: CGFloat = 0

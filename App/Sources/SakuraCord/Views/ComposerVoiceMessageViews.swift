@@ -47,7 +47,7 @@ struct ComposerSendSlot: View {
 
     private var symbolView: some View {
         Image(systemName: symbol)
-            .font(.interfaceSystem(size: 21, weight: .medium))
+            .font(.interfaceSystem(size: 19, weight: .medium))
             .foregroundStyle(foreground)
             .contentTransition(.symbolEffect(.replace.magic(fallback: .downUp.byLayer)))
             .frame(width: ChatChromeMetrics.composerControlHeight, height: ChatChromeMetrics.composerControlHeight)
@@ -99,9 +99,9 @@ struct ComposerSendSlot: View {
 
     private var symbol: String {
         switch mode {
-        case .send, .sendVoice: "paperplane.circle.fill"
-        case .voice: "waveform.circle.fill"
-        case .stop: "stop.circle.fill"
+        case .send, .sendVoice: "paperplane"
+        case .voice: "waveform"
+        case .stop: "stop.circle"
         }
     }
 

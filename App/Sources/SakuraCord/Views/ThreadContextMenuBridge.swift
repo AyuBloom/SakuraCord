@@ -6,6 +6,7 @@ import SwiftUI
 struct ThreadContextMenuBridge: NSViewRepresentable {
     let model: AppModel
     let row: SidebarThreadRow
+    let isSelected: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -17,7 +18,7 @@ struct ThreadContextMenuBridge: NSViewRepresentable {
 
     func updateNSView(_ view: ChannelContextMenuHitView, context: Context) {
         context.coordinator.bridge = self
-        view.isSelected = model.isThreadFullWidth && model.openThread?.id == row.id
+        view.isSelected = isSelected
         view.menuProvider = { [weak coordinator = context.coordinator] in coordinator?.makeMenu() }
     }
 

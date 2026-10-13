@@ -382,6 +382,7 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
     let anchorSnapshot: StablePopoverAnchorSnapshot?
     let configuration: StablePopoverConfiguration
     let onDismiss: () -> Void
+    let onWillDismiss: (() -> Void)?
     @ViewBuilder var content: () -> Content
 
     init(
@@ -390,6 +391,7 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
         anchorSnapshot: StablePopoverAnchorSnapshot? = nil,
         configuration: StablePopoverConfiguration,
         onDismiss: @escaping () -> Void = {},
+        onWillDismiss: (() -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.isPresented = isPresented
@@ -397,6 +399,7 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
         self.anchorSnapshot = anchorSnapshot
         self.configuration = configuration
         self.onDismiss = onDismiss
+        self.onWillDismiss = onWillDismiss
         self.content = content
     }
 
@@ -419,6 +422,7 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
             isPresented: isPresented,
             configuration: configuration,
             onDismiss: onDismiss,
+            onWillDismiss: onWillDismiss,
             content: content()
         )
     }
@@ -440,6 +444,7 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
         private var presentedAnchorFrame: CGRect?
         private var configuration = StablePopoverConfiguration.hover
         private var onDismiss: () -> Void = {}
+        private var onWillDismiss: (() -> Void)?
         private var showIsScheduled = false
         private var presentationIsScheduled = false
         private var refreshIsScheduled = false
@@ -469,6 +474,7 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
             isPresented: Bool,
             configuration: StablePopoverConfiguration,
             onDismiss: @escaping () -> Void,
+            onWillDismiss: (() -> Void)? = nil,
             presentationIdentity: AnyHashable? = nil,
             outsideClickHandler: ((NSEvent) -> Bool)? = nil,
             content: Content
@@ -483,6 +489,7 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
             self.anchorSnapshot = anchorSnapshot
             self.configuration = configuration
             self.onDismiss = onDismiss
+            self.onWillDismiss = onWillDismiss
             self.outsideClickHandler = outsideClickHandler
             shouldPresent = isPresented
             latestContent = content
@@ -891,6 +898,10 @@ struct StableAnchoredPopoverPresenter<Content: View>: NSViewRepresentable {
         func popoverWillClose(_ notification: Notification) {
             guard let closingPopover = notification.object as? NSPopover else { return }
             PopoverSheetLifecycle.cancelSheets(in: closingPopover.contentViewController?.view.window)
+            if popover === closingPopover, shouldPresent,
+               programmaticallyClosingPopovers[ObjectIdentifier(closingPopover)] == nil {
+                onWillDismiss?()
+            }
         }
 
         func popoverDidClose(_ notification: Notification) {

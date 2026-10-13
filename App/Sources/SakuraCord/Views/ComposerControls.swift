@@ -78,7 +78,7 @@ struct UploadProgressView: View {
                 Image(systemName: "clock")
                 Text("Waiting for confirmation — do not resend")
             case .completed:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: "checkmark.circle").foregroundStyle(.green)
                 Text("Sent")
             }
         }
@@ -141,6 +141,8 @@ struct ComposerActionButton: View {
 
     private var buttonLabel: some View {
         icon
+            // The grinning face otherwise substitutes filled artwork in dark mode.
+            .environment(\.colorScheme, icon == SakuraCordSystemSymbol.emojiFaceGrinningImage ? .light : colorScheme)
             .symbolVariant(.none)
             .font(.interfaceSystem(size: iconSize, weight: iconWeight))
             .foregroundStyle(iconColor)
@@ -176,61 +178,5 @@ struct ComposerActionButton: View {
     private var hoverColor: Color {
         guard showsHoverBackground, isHovering, isEnabled else { return .clear }
         return role == .destructive ? .red.opacity(0.18) : .primary.opacity(0.14)
-    }
-}
-
-struct ComposerSendButton: View {
-    let action: (() -> Void)?
-    var appearance: ComposerBarAppearance = .defaultStyle
-
-    var isSlowmodeBlocked = false
-
-    @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var isHovering = false
-
-    var body: some View {
-        Group {
-            if let action {
-                Button(action: action) { buttonLabel }
-            } else {
-                buttonLabel
-            }
-        }
-        .buttonStyle(.plain)
-        .background(hoverColor, in: buttonShape)
-        .contentShape(buttonShape)
-        .onModalHover { isHovering = appearance == .legacy && $0 }
-        .help("Send message")
-    }
-
-    private var buttonLabel: some View {
-        Image(systemName: "paperplane.circle.fill")
-            .font(.interfaceSystem(size: 21, weight: .medium))
-            .foregroundStyle(
-                isEnabled && !isSlowmodeBlocked
-                    ? (colorScheme == .dark ? Color.white : Color.black)
-                    : Color.gray.opacity(0.62)
-            )
-            .frame(
-                width: ChatChromeMetrics.composerControlHeight,
-                height: ChatChromeMetrics.composerControlHeight
-            )
-            .contentShape(buttonShape)
-    }
-
-    private var buttonShape: AnyShape {
-        switch appearance {
-        case .defaultStyle:
-            AnyShape(Circle())
-        case .legacy:
-            AnyShape(RoundedRectangle(cornerRadius: InterfaceScale.metric(9), style: .continuous))
-        }
-    }
-
-    private var hoverColor: Color {
-        appearance == .legacy && isHovering && isEnabled && !isSlowmodeBlocked
-            ? .primary.opacity(0.14)
-            : .clear
     }
 }

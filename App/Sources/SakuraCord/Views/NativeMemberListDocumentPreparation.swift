@@ -207,7 +207,7 @@ extension NativeMemberListCanvasView {
         itemIndexesByID.reserveCapacity(items.count)
         var origins: [CGFloat] = []
         origins.reserveCapacity(items.count)
-        var cursorY = NativeMemberListMetrics.verticalInset
+        var cursorY: CGFloat = 0
         for index in items.indices {
             if cancelsCooperatively,
                index.isMultiple(of: 128),

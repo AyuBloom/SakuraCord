@@ -117,15 +117,12 @@ enum ChannelPinMenuAction {
 /// Page destinations share the channel row's native hover and selection tracking.
 struct ChannelRowHoverBridge: NSViewRepresentable {
     let isSelected: Bool
-    var usesCustomSelectionBackground = false
     func makeNSView(context: Context) -> ChannelContextMenuHitView {
         let view = ChannelContextMenuHitView()
-        view.usesCustomSelectionBackground = usesCustomSelectionBackground
         view.isSelected = isSelected
         return view
     }
     func updateNSView(_ view: ChannelContextMenuHitView, context: Context) {
-        view.usesCustomSelectionBackground = usesCustomSelectionBackground
         view.isSelected = isSelected
     }
     static func dismantleNSView(_ view: ChannelContextMenuHitView, coordinator: ()) {
@@ -160,7 +157,6 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
     var userMenu: () -> NSMenu? = { nil }
     /// Edit Group and Leave Group for a group DM.
     var groupActions: GroupDirectMessageMenuActions?
-    var usesCustomSelectionBackground = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(from: self)
@@ -168,7 +164,6 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ChannelContextMenuHitView {
         let view = ChannelContextMenuHitView()
-        view.usesCustomSelectionBackground = usesCustomSelectionBackground
         view.menuProvider = { [weak coordinator = context.coordinator] in
             coordinator?.makeMenu()
         }
@@ -178,7 +173,6 @@ struct ChannelContextMenuBridge: NSViewRepresentable {
 
     func updateNSView(_ nsView: ChannelContextMenuHitView, context: Context) {
         context.coordinator.update(from: self)
-        nsView.usesCustomSelectionBackground = usesCustomSelectionBackground
         nsView.menuProvider = { [weak coordinator = context.coordinator] in
             coordinator?.makeMenu()
         }
@@ -504,7 +498,6 @@ extension MessageNotificationLevel {
 }
 
 final class ChannelContextMenuHitView: NSView {
-    var usesCustomSelectionBackground = false
     var menuProvider: (() -> NSMenu?)?
     var isSelected = false {
         didSet {
@@ -617,8 +610,7 @@ final class ChannelContextMenuHitView: NSView {
     }
 
     private func updateNativeHoverPresentation() {
-        if usesCustomSelectionBackground,
-           let nativeRowView,
+        if let nativeRowView,
            let tableView = enclosingNativeTableView(near: nativeRowView),
            tableView.selectionHighlightStyle != .none
         {
@@ -626,7 +618,7 @@ final class ChannelContextMenuHitView: NSView {
             // using exactly the same geometry as the hover highlight.
             tableView.selectionHighlightStyle = .none
         }
-        neutralSelectionView.isHidden = !(usesCustomSelectionBackground && isSelected)
+        neutralSelectionView.isHidden = !isSelected
         nativeHoverView.showsHover = isHovering && !isSelected
         guard nativeHoverView.showsHover || !neutralSelectionView.isHidden else { return }
         synchronizeNativeHoverGeometry()
@@ -656,10 +648,8 @@ final class ChannelContextMenuHitView: NSView {
         }
 
         template.apply(to: nativeHoverView, in: nativeRowView.bounds)
-        if usesCustomSelectionBackground {
-            // A reused sidebar table may carry a template from a shorter guild row.
-            nativeHoverView.frame.size.height = max(0, nativeRowView.bounds.height - 2 * template.verticalInset)
-        }
+        // A reused sidebar table may carry a template from a shorter guild row.
+        nativeHoverView.frame.size.height = max(0, nativeRowView.bounds.height - 2 * template.verticalInset)
         neutralSelectionView.frame = nativeHoverView.frame
         neutralSelectionView.layer?.cornerRadius = template.cornerRadius
         neutralSelectionView.layer?.cornerCurve = template.cornerCurve

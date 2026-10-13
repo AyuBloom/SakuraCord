@@ -24,7 +24,7 @@ struct DirectMessageInboxView: View {
             )
             .tag(DirectMessageSidebarSelection.friends)
             .pointerStyle(.link)
-            .overlay { ChannelRowHoverBridge(isSelected: selection == .friends, usesCustomSelectionBackground: true) }
+            .overlay { ChannelRowHoverBridge(isSelected: selection == .friends) }
 
             Section {
                 ForEach(directMessages) { channel in
@@ -286,8 +286,7 @@ private struct DirectMessageInboxRow: View {
                         edit: { model.presentGroupDirectMessageEditor(for: channel.id) },
                         leave: { model.presentLeaveGroupDirectMessage(for: channel.id) }
                     )
-                    : nil,
-                usesCustomSelectionBackground: true
+                    : nil
             )
         }
     }

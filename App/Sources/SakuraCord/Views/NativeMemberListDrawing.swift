@@ -61,48 +61,9 @@ extension NativeMemberListCanvasView {
             ofSize: InterfaceTypographyMetrics.interfaceTextSize,
             weight: .semibold
         )
-        let isRoleSection = if case .role = section.id { true } else { false }
-        let showsRoleIndicator = presentation.roleColorDisplay != .hidden && isRoleSection
-        let color: NSColor = if showsRoleIndicator {
-            SakuraCordAccentColor.nsColor(forRoleColorHex: section.colorHex)
-        } else {
-            .secondaryLabelColor
-        }
-        let line = cachedSectionHeaderLine(label, font: font, color: color)
-        let labelY = origins[index] + 12
-        let labelX: CGFloat
-        if showsRoleIndicator {
-            let indicatorSize: CGFloat = InterfaceScale.metric(8)
-            var lineAscent: CGFloat = 0
-            CTLineGetTypographicBounds(line, &lineAscent, nil, nil)
-            let glyphBounds = CTLineGetBoundsWithOptions(
-                line,
-                [.useGlyphPathBounds]
-            )
-            let labelMidY = labelY + lineAscent - glyphBounds.midY
-            let indicatorRect = CGRect(
-                x: NativeMemberListMetrics.horizontalInset + InterfaceScale.metric(10),
-                y: labelMidY - indicatorSize / 2,
-                width: indicatorSize,
-                height: indicatorSize
-            )
-            let indicator = NSBezierPath(ovalIn: indicatorRect)
-            if SakuraCordAccentColor.usesAccentFallback(
-                forRoleColorHex: section.colorHex
-            ) {
-                color.withAlphaComponent(0.14).setFill()
-                indicator.fill()
-                color.setStroke()
-                indicator.lineWidth = 1.25
-                indicator.stroke()
-            } else {
-                color.setFill()
-                indicator.fill()
-            }
-            labelX = indicatorRect.maxX + 6
-        } else {
-            labelX = NativeMemberListMetrics.horizontalInset + 10
-        }
+        let line = cachedSectionHeaderLine(label, font: font, color: NSColor.secondaryLabelColor.withAlphaComponent(NSColor.secondaryLabelColor.alphaComponent * 0.7))
+        let labelY = origins[index] + InterfaceScale.metric(16)
+        let labelX = InterfaceScale.metric(14)
         Self.draw(
             line: line,
             at: CGPoint(

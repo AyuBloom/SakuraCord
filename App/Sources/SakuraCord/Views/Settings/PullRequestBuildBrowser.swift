@@ -23,8 +23,12 @@ struct PullRequestBuildBrowser: View {
         self.onInstall = onInstall
     }
 
+    private var canConfirmInstallation: Bool {
+        (store.isPreview || updateController.canSwitchBuilds) && store.selectedBuild != nil && !store.isLoading && store.error == nil
+    }
+
     private var canInstall: Bool {
-        updateController.canSwitchBuilds && !store.isPreview && store.selectedBuild != nil && !store.isLoading && store.error == nil
+        canConfirmInstallation && !store.isPreview
     }
 
     var body: some View {
@@ -45,16 +49,25 @@ struct PullRequestBuildBrowser: View {
             confirmingBuild = nil
         }
         .onChange(of: store.selectedBuild?.id) { _, _ in confirmingBuild = nil }
-        .onChange(of: confirmingBuild?.id) { _, buildID in
-            dismiss?.escapeAction = buildID != nil ? { confirmingBuild = nil } : nil
+        .alert("Install PR Build?", isPresented: Binding(
+            get: { confirmingBuild != nil },
+            set: { if !$0 { confirmingBuild = nil } }
+        ), presenting: confirmingBuild) { build in
+            Button("Cancel", role: .cancel) { confirmingBuild = nil }
+            Button("Install and Restart") {
+                guard canInstall, store.selectedBuild?.id == build.id else { return }
+                onInstall(build)
+                dismiss?()
+            }
+            .disabled(!canInstall || store.selectedBuild?.id != build.id)
+        } message: { _ in
+            Text("PR builds can be made by anyone and may contain bugs, issues, or malicious code. Please make sure that you understand the risks and have reviewed the code of this PR")
         }
-        .onDisappear { dismiss?.escapeAction = nil }
         .onChange(of: store.search) { _, _ in
             if !store.pullRequests.contains(where: { $0.pullRequest == store.selectedPullRequest }) {
                 store.selectedPullRequest = store.pullRequests.first?.pullRequest
             }
         }
-        .animation(.snappy(duration: 0.22), value: confirmingBuild?.id)
         .animation(.snappy(duration: 0.22), value: store.selectedBuild?.id)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Pull Request Builds")
@@ -228,40 +241,18 @@ struct PullRequestBuildBrowser: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: InterfaceScale.metric(12)) {
-            if let build = confirmingBuild {
-                VStack(alignment: .leading, spacing: InterfaceScale.metric(2)) {
-                    Text("Install PR #\(build.pullRequest) · \(build.shortCommit)?")
-                        .font(.interface(.callout).weight(.semibold))
-                    Text("A recovery copy is saved first. You’ll receive updates from this PR, with its own settings and drafts.")
-                        .font(.interface(.caption)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.leading, InterfaceScale.metric(8))
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                Spacer(minLength: InterfaceScale.metric(12))
-                ModalGlassButton(symbol: "xmark", label: "Cancel") { confirmingBuild = nil }
-                    .keyboardShortcut(.cancelAction)
-                ModalGlassButton(symbol: "arrow.down.circle", label: "Install and Restart", primary: true) {
-                    guard canInstall, store.selectedBuild?.id == build.id else { return }
-                    onInstall(build)
-                    dismiss?()
-                }
-                .disabled(!canInstall || store.selectedBuild?.id != build.id)
-                .keyboardShortcut(.defaultAction)
-            } else {
-                Spacer(minLength: InterfaceScale.metric(12))
-                ModalGlassButton(symbol: "arrow.down.circle", label: "Install…", primary: canInstall) { confirmingBuild = store.selectedBuild }
-                    .disabled(!canInstall)
-                    .help(installHelp)
-            }
+        HStack {
+            Spacer(minLength: InterfaceScale.metric(12))
+            ModalGlassButton(symbol: "arrow.down.circle", label: "Install…", primary: canConfirmInstallation) { confirmingBuild = store.selectedBuild }
+                .disabled(!canConfirmInstallation)
+                .help(installHelp)
         }
         .padding(InterfaceScale.metric(12))
     }
 
     private var installHelp: LocalizedStringResource {
         if store.isPreview {
-            "Sample builds can’t be installed."
+            "Preview the installation warning. Sample builds can’t be installed."
         } else if !updateController.canSwitchBuilds {
             "Updates are disabled or busy."
         } else {

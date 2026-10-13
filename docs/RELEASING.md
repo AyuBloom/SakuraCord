@@ -361,12 +361,13 @@ and exact one-item Sparkle feed with the existing Ed25519 key. The signed feed
 uses Sparkle's standard feed-signature format; no contributor signing tool is
 executed.
 
-First-party PRs publish automatically after successful CI. Fork builds remain
-available in Actions, but require an explicit maintainer dispatch supplying the
-exact reviewed head SHA. Approval of GitHub's initial fork workflow run alone
-does **not** approve signing or distribution. A label or earlier revision's
-approval does not authorize a later commit. Review both the contributor head and
-the recorded base/merge before approving publication.
+All PRs, including forks, publish automatically after successful CI and artifact
+verification. GitHub's approval requirements for running fork CI still apply;
+publication does not require a separate approval. Signing authenticates the
+published bytes, not the safety of contributor code. Before installation, the
+app displays a native system alert warning that anyone can make PR builds and
+that they may contain bugs, issues, or malicious code, with Cancel and Install
+and Restart actions. The build browser links to the PR for code review.
 
 Published builds live in the dedicated public
 [SakuraCordApp/Builds](https://github.com/SakuraCordApp/Builds) repository. Keeping
@@ -381,8 +382,13 @@ normal manual and automatic update checks, so new successful pushes appear as
 updates. Selecting an older build uses its immutable feed for that installation,
 then continues following the PR track. Retry and catalog recovery rebuild the
 track feeds from already signed artifacts, without a signing key.
-Every retained published build stays searchable; closing a PR does not remove
-its builds. The catalog is discovery metadata, while Sparkle authenticates the
+Only builds from currently open PRs appear in the catalog. Closing or merging
+a PR refreshes the catalog to hide its builds; reopening it restores its retained
+build history. These events use trusted default-branch code and never execute
+contributor code. Immutable downloads and installed PR update feeds remain
+available after closure. Every publication and manual catalog recovery also
+refreshes PR state; a failed GitHub lookup leaves the existing catalog untouched.
+The catalog is discovery metadata, while Sparkle authenticates the
 selected feed and archive before installation. Its schema and validation live
 in `script/pr_builds.mjs` and `script/pr_build_archive.py`.
 
@@ -413,22 +419,22 @@ switching protocol cannot be published into the catalog.
    publisher's GitHub App credentials.
 3. Land the trusted publication workflow on `main` before relying on its
    `workflow_run` trigger. PR CI must contain the packaging changes and the
-   current app/Sparkle switching protocol. Validate a fresh successful PR run,
+   current app/Sparkle switching protocol. Ship the app's installation warning
+   before enabling automatic fork publication; a catalog refresh cannot add the
+   warning to older app versions. Validate a fresh successful PR run,
    inspect its public catalog entry and signed downloads, and exercise an
    actual app switch and return before claiming live distribution verification.
 
-### Approval and recovery
+### Retry and recovery
 
-Dispatch from **main**, supplying the actual immutable CI run and attempt. For
-a fork, `reviewed_head_sha` must be the full reviewed 40-character head commit:
+Dispatch from **main**, supplying the actual immutable successful CI run and
+attempt. The same retry procedure applies to first-party and fork builds:
 
 ```sh
 : "${pr_ci_run_id:?Set the successful PR CI run ID}"
 : "${pr_ci_attempt:?Set its successful attempt}"
-: "${reviewed_head_sha:?Set the reviewed full PR head SHA}"
 gh workflow run publish-pr-build.yml --ref main \
-  -f run_id="$pr_ci_run_id" -f run_attempt="$pr_ci_attempt" \
-  -f approved_head_sha="$reviewed_head_sha"
+  -f run_id="$pr_ci_run_id" -f run_attempt="$pr_ci_attempt"
 ```
 
 Publication queues up to 100 pending workflow runs; manually retry any run

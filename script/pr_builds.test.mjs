@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, createPublicKey, verify } from 'node:crypto';
 import { validateOrigin, signingKey, signedAppcast, mergeCatalog, distributionRelease, latestBuildsByPullRequest,
-  discardFailedDraftUploads, SOURCE, DISTRIBUTION } from './pr_builds.mjs';
+  discardFailedDraftUploads, openPullRequestCatalog, SOURCE, DISTRIBUTION } from './pr_builds.mjs';
 
 const head = 'a'.repeat(40), base = 'b'.repeat(40), merge = 'c'.repeat(40);
 function fixture(fork = false) {
@@ -37,17 +37,16 @@ test('publication binds repository, successful CI workflow, run attempt, artifac
   }
 });
 
-test('fork approval is tied to the full exact head SHA, never a sticky PR label', () => {
-  assert.throws(() => validateOrigin(...fixture(true)), /exact head SHA/);
-  assert.throws(() => validateOrigin(...fixture(true), base), /exact head SHA/);
-  assert.equal(validateOrigin(...fixture(true), head).fork, true);
+test('fork builds publish automatically while retaining immutable commit provenance', () => {
+  assert.equal(validateOrigin(...fixture(true)).fork, true);
   const moved = fixture(true); moved[0].head_sha = base; moved[1].workflow_run.head_sha = base;
+  assert.throws(() => validateOrigin(...moved), /PR commit provenance mismatch/);
   moved[2].headSHA = base;
-  assert.throws(() => validateOrigin(...moved, head), /exact head SHA/);
+  assert.equal(validateOrigin(...moved).headSHA, base);
   // GitHub updates the associated PR summary after a new push. The run's
-  // immutable head_sha still authorizes recovery of the earlier reviewed build.
+  // immutable head_sha still identifies the earlier build during recovery.
   const historical = fixture(true); historical[0].pull_requests[0].head.sha = base;
-  assert.equal(validateOrigin(...historical, head).headSHA, head);
+  assert.equal(validateOrigin(...historical).headSHA, head);
 });
 
 test('Sparkle archive and feed signatures bind bytes and XML escapes untrusted PR titles', () => {
@@ -78,6 +77,30 @@ test('catalog retries preserve immutable identity and retain earlier builds', ()
   assert.throws(() => mergeCatalog(catalog, { ...first, sha256: 'changed' }), /Conflicting/);
   catalog = mergeCatalog(catalog, { id: 'second', runID: 2, runAttempt: 1 });
   assert.deepEqual(catalog.builds.map(x => x.id), ['second', 'first']);
+});
+
+test('discovery follows open PRs across pages and close/reopen without discarding build history', async () => {
+  const catalog = { schemaVersion: 1, builds: [
+    { id: 'open-latest', pullRequest: 101 }, { id: 'closed', pullRequest: 102 },
+    { id: 'merged', pullRequest: 103 }, { id: 'open-old', pullRequest: 101 },
+  ] };
+  const original = structuredClone(catalog);
+  let open = [{ number: 101 }];
+  const request = async (repo, endpoint) => {
+    assert.equal(repo, SOURCE);
+    if (endpoint === 'pulls?state=open&per_page=100&page=1') {
+      return Array.from({ length: 100 }, (_, index) => ({ number: index + 1 }));
+    }
+    assert.equal(endpoint, 'pulls?state=open&per_page=100&page=2');
+    return open;
+  };
+  assert.deepEqual((await openPullRequestCatalog(catalog, request)).builds.map(x => x.id), ['open-latest', 'open-old']);
+  open = [];
+  assert.deepEqual((await openPullRequestCatalog(catalog, request)).builds, []);
+  open = [{ number: 102 }];
+  assert.deepEqual((await openPullRequestCatalog(catalog, request)).builds.map(x => x.id), ['closed']);
+  assert.deepEqual(catalog, original);
+  await assert.rejects(openPullRequestCatalog(catalog, async () => { throw new Error('GitHub unavailable'); }), /GitHub unavailable/);
 });
 
 test('publication retries resume the unique draft without changing its manifest or assets', async () => {

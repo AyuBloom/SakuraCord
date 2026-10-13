@@ -116,6 +116,7 @@ struct MemberInspectorView: View {
             rowMenu: userMenu,
             rowAccessibilityActions: userAccessibilityActions
         )
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 

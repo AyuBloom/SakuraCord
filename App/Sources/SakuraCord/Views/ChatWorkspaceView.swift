@@ -87,6 +87,7 @@ struct ChatWorkspaceView: View {
                         || model.selectedChannel?.kind != .directMessage
                     {
                         Divider()
+                            .ignoresSafeArea(.container, edges: .top)
                     }
                     ChatWorkspaceSupplementaryContent(
                         model: model,

@@ -78,4 +78,14 @@ extension AppModel {
         }
         composer.outbox.releaseReceipt(nonce: nonce)
     }
+
+    /// Opens the DM after a profile-card send, unless the account that sent
+    /// it is no longer active.
+    func profileMessageConversationOpener(for user: User) -> () -> Void {
+        let session = accountSession()
+        return { [weak self] in
+            guard let self, isCurrentAccountSession(session) else { return }
+            openDirectMessage(with: user)
+        }
+    }
 }

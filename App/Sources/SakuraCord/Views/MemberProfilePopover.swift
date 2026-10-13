@@ -40,6 +40,10 @@ struct ProfilePresentationContent<Footer: View>: View {
         self.sendMessage = sendMessage
     }
 
+    private var showsQuickMessage: Bool {
+        layout == .popover && !presentation.isLoading && !presentation.isCurrentUser && sendMessage != nil
+    }
+
     var body: some View {
         if presentation.isLocalIdentity {
             CompactIdentityProfilePopover(user: presentation.member.user, isClyde: presentation.isClyde)
@@ -58,15 +62,17 @@ struct ProfilePresentationContent<Footer: View>: View {
                     layout: layout,
                     maximumPopoverHeight: maximumPopoverHeight,
                     showsRoles: showsRoles,
+                    bottomPadding: showsQuickMessage ? ProfileQuickMessageMetrics.cardInset : InterfaceScale.metric(14),
                     footer: VStack(alignment: .leading, spacing: InterfaceScale.metric(12)) {
                         footer
-                        if layout == .popover, !presentation.isCurrentUser, let sendMessage {
+                        if showsQuickMessage, let sendMessage {
                             ProfileQuickMessageView(
                                 displayName: presentation.member.user.displayName,
                                 send: { content, nonce in await sendMessage(presentation.member.id, content, nonce) },
-                                releaseNonce: { model?.releaseProfileMessage(nonce: $0) }
+                                releaseNonce: { model?.releaseProfileMessage(nonce: $0) },
+                                conversationOpener: model.map { model in { model.profileMessageConversationOpener(for: presentation.member.user) } }
                             )
-                            .padding(.horizontal, InterfaceScale.metric(16))
+                            .padding(.horizontal, ProfileQuickMessageMetrics.cardInset)
                         }
                     },
                     openProfile: openProfile.map { action in { action(presentation) } },
@@ -159,6 +165,7 @@ struct MemberProfilePopover<Footer: View>: View {
     var layout: ProfilePresentationLayout = .popover
     var maximumPopoverHeight: CGFloat = InterfaceScale.metric(560)
     var showsRoles = true
+    var bottomPadding: CGFloat = InterfaceScale.metric(14)
     let footer: Footer
     var openProfile: (() -> Void)?
     var userMenu: (() -> NSMenu?)?
@@ -262,9 +269,6 @@ struct MemberProfilePopover<Footer: View>: View {
     private func profileScrollContent(width contentWidth: CGFloat) -> some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: InterfaceScale.metric(11)) {
-                if profile?.isPrivate == true {
-                    privateProfileHeader
-                }
                 ProfileHeroSection(
                     member: member,
                     profile: profile,
@@ -287,6 +291,9 @@ struct MemberProfilePopover<Footer: View>: View {
                 }
                 .overlay(alignment: .topTrailing) {
                     profileExpansionButton
+                }
+                .overlay(alignment: .topLeading) {
+                    if profile?.isPrivate == true { privateProfileBadge }
                 }
                 .zIndex(10)
 
@@ -348,7 +355,7 @@ struct MemberProfilePopover<Footer: View>: View {
             // Use the card's minimum, not its previous viewport height, so a
             // loading or expanded card can shrink when its content changes.
             .frame(minHeight: layout == .popover ? InterfaceScale.metric(236) : 0, alignment: .top)
-            .padding(.bottom, InterfaceScale.metric(14))
+            .padding(.bottom, bottomPadding)
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(key: ProfileContentHeightKey.self, value: proxy.size.height)
@@ -374,22 +381,35 @@ struct MemberProfilePopover<Footer: View>: View {
         }
     }
 
-    private var privateProfileHeader: some View {
-        Label("Private Profile", systemImage: "lock.fill")
-            .font(.interface(.subheadline).weight(.semibold))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, InterfaceScale.metric(10))
-            .background(.quaternary)
+    /// Mirrors the expansion button in the banner's opposite corner, so the
+    /// badge shares its inset and stays concentric with the card.
+    private var privateProfileBadge: some View {
+        Label("Private", systemImage: "lock.fill")
+            .font(.interfaceSystem(size: 12, weight: .semibold))
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, InterfaceScale.metric(10))
+            .frame(height: InterfaceScale.metric(28))
+            .background(.regularMaterial, in: Capsule())
+            .padding(InterfaceScale.metric(10))
+            .help("This profile is private")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Private profile")
     }
 
     private func privateProfileNotice(_ profile: UserProfile) -> some View {
-        Text("\(profile.displayName)'s profile is private, so some info is hidden. Add them as a friend to see more.")
-            .font(.interface(.subheadline))
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(InterfaceScale.metric(14))
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, InterfaceScale.metric(16))
+        Label {
+            Text("\(profile.displayName)'s profile is private, so some info is hidden. Add them as a friend to see more.")
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "lock.fill").foregroundStyle(.secondary)
+        }
+        .font(.interface(.callout))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, InterfaceScale.metric(12))
+        .padding(.vertical, InterfaceScale.metric(10))
+        .background(.quaternary.opacity(0.5), in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(12)))
+        .padding(.horizontal, InterfaceScale.metric(16))
     }
 
     @ViewBuilder
@@ -444,8 +464,10 @@ struct MemberProfilePopover<Footer: View>: View {
         }
     }
 
+    static var surfaceCornerRadius: CGFloat { 16 }
+
     private var innerCornerRadius: CGFloat {
-        layout == .inspector ? 0 : 16
+        layout == .inspector ? 0 : Self.surfaceCornerRadius
     }
 
     private var profileShape: ConcentricRectangle {

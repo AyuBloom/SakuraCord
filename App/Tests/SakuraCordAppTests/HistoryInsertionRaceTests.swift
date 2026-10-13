@@ -4,9 +4,10 @@ import Testing
 @testable import SakuraCord
 
 @MainActor
-@Test(arguments: [false, true])
+@Test(arguments: [false, true], [false, true])
 func `history insertion reconciles an overlapping timeline before publishing rows`(
-    loadsEarlier: Bool
+    loadsEarlier: Bool,
+    includesExistingID: Bool
 ) async throws {
     let model = AppModel(launchMode: .offlineTesting)
     let channelID = ChannelID(rawValue: 900)
@@ -28,14 +29,17 @@ func `history insertion reconciles an overlapping timeline before publishing row
     // Pagination filtered this page against the old timeline. A concurrent
     // history refresh/Gateway event has now published an overlapping message.
     model.replaceSelectedMessages(with: [current])
+    // Without the shared ID, only the ordering guard prevents the page from
+    // being inserted wholly before or after the message already in its middle.
+    let incoming = includesExistingID ? page : page.filter { $0.id != current.id }
 
     let committed = if loadsEarlier {
-        await model.prependSelectedMessages(page, channelID: channelID)
+        await model.prependSelectedMessages(incoming, channelID: channelID)
     } else {
-        await model.appendSelectedHistoryMessages(page, channelID: channelID)
+        await model.appendSelectedHistoryMessages(incoming, channelID: channelID)
     }
     #expect(committed)
-    #expect(model.messages.map(\.id) == page.map(\.id))
+    try #require(model.messages.map(\.id) == page.map(\.id))
     try #require(Set(model.messages.map(\.id)).count == model.messages.count)
     #expect(model.messages[1] == current)
     #expect(model.messageRows == MessageGrouping.rows(for: model.messages))

@@ -29,7 +29,6 @@ struct GuildIconView: View {
     }
 
     var body: some View {
-        let displayedCornerRadius = iconURL == nil ? size * 0.25 : cornerRadius
         ZStack {
             if let iconURL {
                 if loadsImage {
@@ -50,7 +49,7 @@ struct GuildIconView: View {
                     }
                 }
             } else {
-                ConcentricRectangle(cornerRadius: displayedCornerRadius, style: .continuous)
+                ConcentricRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(fallbackBackground)
                 Text(initials)
                     .font(.system(size: size * 0.43, weight: .medium))
@@ -60,7 +59,7 @@ struct GuildIconView: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(ConcentricRectangle(cornerRadius: displayedCornerRadius, style: .continuous))
+        .clipShape(ConcentricRectangle(cornerRadius: cornerRadius, style: .continuous))
         .accessibilityLabel(name.isEmpty ? "Unnamed Server" : name)
     }
 

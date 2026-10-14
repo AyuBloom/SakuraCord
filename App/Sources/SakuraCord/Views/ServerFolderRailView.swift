@@ -56,12 +56,13 @@ struct ServerFolderRailView: View {
                 .transition(.offset(y: -InterfaceScale.metric(10)).combined(with: .opacity))
             }
         }
-        .padding(.vertical, isExpanded ? InterfaceScale.metric(5) : 0)
+        .padding(.top, isExpanded ? InterfaceScale.metric(4) : 0)
+        .padding(.bottom, isExpanded ? InterfaceScale.metric(3) : 0)
         .background {
             if isExpanded {
-                ConcentricRectangle(cornerRadius: InterfaceScale.metric(18), style: .continuous)
+                ConcentricRectangle(cornerRadius: InterfaceScale.metric(17), style: .continuous)
                     .fill(Color(hex: entry.folder.colorHex ?? ServerFolderSettingsView.defaultColor).opacity(0.12))
-                    .padding(.horizontal, InterfaceScale.metric(7))
+                    .padding(.horizontal, InterfaceScale.metric(8))
                     .transition(.opacity)
             }
         }
@@ -79,7 +80,7 @@ struct ServerFolderRailHeader: View {
     @State private var iconIsVisible = false
 
     var body: some View {
-        HStack(spacing: InterfaceScale.metric(5)) {
+        HStack(spacing: InterfaceScale.metric(4)) {
             ServerRailSelectionIndicator(
                 isSelected: entry.containsSelectedGuild,
                 isHovering: isHovering,
@@ -92,18 +93,24 @@ struct ServerFolderRailHeader: View {
                     Group {
                         if isExpanded {
                             Image(systemName: "folder.fill")
-                                .font(.interfaceSystem(size: 21, weight: .semibold))
-                                .foregroundStyle(folderColor)
+                                .font(.interfaceSystem(size: 19, weight: .semibold))
+                                .foregroundStyle(folderColor.opacity(0.8))
                                 .frame(width: InterfaceScale.metric(44), height: InterfaceScale.metric(44))
                         } else {
                             collapsedPreview
+                                .mask {
+                                    ConcentricRectangle(cornerRadius: InterfaceScale.metric(13), style: .continuous)
+                                        .padding(InterfaceScale.metric(4))
+                                }
                         }
                     }
                     .background(folderColor.opacity(isExpanded ? 0.18 : 0.12))
-                    .clipShape(ConcentricRectangle(cornerRadius: InterfaceScale.metric(14), style: .continuous))
+                    .clipShape(ConcentricRectangle(cornerRadius: InterfaceScale.metric(isExpanded ? 13 : 17), style: .continuous))
+                    .frame(width: InterfaceScale.metric(isExpanded ? 46 : 52), height: InterfaceScale.metric(isExpanded ? 46 : 52))
                 }
             }
             .buttonStyle(.plain)
+            .offset(x: isExpanded ? 0 : InterfaceScale.metric(-3))
             .overlay {
                 ServerFolderContextMenuBridge(
                     isUnread: entry.hasUnreadGuild || entry.mentionCount > 0,
@@ -122,7 +129,7 @@ struct ServerFolderRailHeader: View {
             .accessibilityHint("Toggles the server folder")
             .help(displayName)
         }
-        .frame(width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(46), alignment: .leading)
+        .frame(width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(isExpanded ? 46 : 54), alignment: .leading)
         .contentShape(Rectangle())
         .anchorPreference(key: ServerRailHoverPreferenceKey.self, value: .bounds) { bounds in
             isHovering ? ServerRailHoverItem(name: displayName, bounds: bounds) : nil
@@ -144,7 +151,7 @@ struct ServerFolderRailHeader: View {
                 previewIcon(preview[safe: 3])
             }
         }
-        .frame(width: InterfaceScale.metric(44), height: InterfaceScale.metric(44))
+        .frame(width: InterfaceScale.metric(52), height: InterfaceScale.metric(52))
     }
 
     @ViewBuilder
@@ -153,13 +160,13 @@ struct ServerFolderRailHeader: View {
             GuildIconView(
                 name: guild.name,
                 iconURL: guild.iconURL,
-                size: InterfaceScale.metric(18),
-                cornerRadius: InterfaceScale.metric(5),
+                size: InterfaceScale.metric(21),
+                cornerRadius: InterfaceScale.metric(6),
                 animates: false,
                 loadsImage: loadsImageWhenOffscreen || iconIsVisible
             )
         } else {
-            Color.clear.frame(width: InterfaceScale.metric(18), height: InterfaceScale.metric(18))
+            Color.clear.frame(width: InterfaceScale.metric(21), height: InterfaceScale.metric(21))
         }
     }
 

@@ -140,7 +140,8 @@ struct ServerRailView: View {
                     Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
                         .frame(width: InterfaceScale.metric(44), height: InterfaceScale.metric(44))
                         .foregroundStyle(.green)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(16)))
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(13)))
+                        .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
                 }
                 .buttonStyle(.plain)
                 .help("Add a Server")
@@ -262,7 +263,7 @@ private struct DirectMessageRailButton: View {
         let channel = entry.channel
         let displayName = channel.name.isEmpty ? "Group Direct Message" : channel.name
 
-        HStack(spacing: InterfaceScale.metric(5)) {
+        HStack(spacing: InterfaceScale.metric(4)) {
             ServerRailSelectionIndicator(
                 isSelected: entry.isSelected,
                 isHovering: isHovering,
@@ -277,6 +278,7 @@ private struct DirectMessageRailButton: View {
                         animates: true,
                         isHovered: isHovering
                     )
+                    .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
                 }
             }
             .buttonStyle(.plain)
@@ -418,7 +420,7 @@ struct GuildRailButton: View {
         let guild = presentation.guild
         let displayName = guild.name.isEmpty ? "Unnamed Server" : guild.name
 
-        HStack(spacing: InterfaceScale.metric(5)) {
+        HStack(spacing: InterfaceScale.metric(4)) {
             ServerRailSelectionIndicator(
                 isSelected: isSelected,
                 isHovering: isHovering,
@@ -430,11 +432,12 @@ struct GuildRailButton: View {
                         name: displayName,
                         iconURL: guild.iconURL,
                         size: InterfaceScale.metric(44),
-                        cornerRadius: InterfaceScale.metric(14),
+                        cornerRadius: InterfaceScale.metric(13),
                         animates: isHovering,
                         isSelected: isSelected,
                         loadsImage: loadsImageWhenOffscreen || iconIsVisible
                     )
+                    .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
                 }
             }
             .buttonStyle(.plain)
@@ -526,7 +529,7 @@ private struct HomeRailButton: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: InterfaceScale.metric(5)) {
+        HStack(spacing: InterfaceScale.metric(4)) {
             ServerRailSelectionIndicator(
                 isSelected: home.isSelected,
                 isHovering: isHovering,
@@ -540,8 +543,9 @@ private struct HomeRailButton: View {
                         home.isSelected
                             ? SakuraCordAccentColor.color
                             : Color.secondary.opacity(0.16),
-                        in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(14), style: .continuous)
+                        in: ConcentricRectangle(cornerRadius: InterfaceScale.metric(13), style: .continuous)
                     )
+                    .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Direct Messages")

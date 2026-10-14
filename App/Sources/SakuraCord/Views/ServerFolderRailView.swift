@@ -76,16 +76,21 @@ struct ServerFolderRailHeader: View {
     let contextMenuActions: ServerRailContextMenuActions
     let toggle: () -> Void
     var loadsImageWhenOffscreen = false
+    @Environment(ServerRailDragController.self) private var drag
+    @Environment(\.serverRailIsDragPreview) private var isDragPreview
     @State private var isHovering = false
     @State private var iconIsVisible = false
 
     var body: some View {
+        let hidesIndicator = isDragPreview || drag.draggedID == entry.id || drag.flight?.id == entry.id
         HStack(spacing: InterfaceScale.metric(4)) {
             ServerRailSelectionIndicator(
-                isSelected: entry.containsSelectedGuild,
-                isHovering: isHovering,
+                isSelected: false,
+                isHovering: isHovering && !isExpanded,
                 hasNotification: showsUnreadIndicators && entry.hasUnreadGuild
             )
+            .opacity(hidesIndicator ? 0 : 1)
+            .animation(.easeOut(duration: 0.12), value: hidesIndicator)
             Button(action: toggle) {
                 ServerRailBadgedIcon(
                     mentionCount: showsUnreadIndicators ? entry.mentionCount : 0
@@ -109,7 +114,7 @@ struct ServerFolderRailHeader: View {
                     .frame(width: InterfaceScale.metric(isExpanded ? 46 : 52), height: InterfaceScale.metric(isExpanded ? 46 : 52))
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ServerRailButtonStyle())
             .offset(x: isExpanded ? 0 : InterfaceScale.metric(-3))
             .overlay {
                 ServerFolderContextMenuBridge(

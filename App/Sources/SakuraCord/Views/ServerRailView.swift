@@ -143,7 +143,7 @@ struct ServerRailView: View {
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(13)))
                         .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ServerRailButtonStyle())
                 .help("Add a Server")
                 .accessibilityLabel("Add a Server")
                 .accessibilityIdentifier("add-server")
@@ -191,7 +191,9 @@ struct ServerRailView: View {
                     rootIDs: items.map(\.id),
                     enclosingFolder: enclosingFolder,
                     drag: drag,
-                    preview: dragPreview
+                    preview: { id in
+                        dragPreview(id).environment(\.serverRailIsDragPreview, true)
+                    }
                 )
             }
             .allowsHitTesting(false)
@@ -281,7 +283,7 @@ private struct DirectMessageRailButton: View {
                     .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ServerRailButtonStyle())
             .accessibilityLabel(displayName)
             .accessibilityValue(
                 channel.mentionCount > 0
@@ -413,12 +415,15 @@ struct GuildRailButton: View {
     let contextMenuActions: ServerRailContextMenuActions
     var loadsImageWhenOffscreen = false
     let action: () -> Void
+    @Environment(ServerRailDragController.self) private var drag
+    @Environment(\.serverRailIsDragPreview) private var isDragPreview
     @State private var isHovering = false
     @State private var iconIsVisible = false
 
     var body: some View {
         let guild = presentation.guild
         let displayName = guild.name.isEmpty ? "Unnamed Server" : guild.name
+        let hidesIndicator = isDragPreview || drag.draggedID == .guild(guild.id) || drag.flight?.id == .guild(guild.id)
 
         HStack(spacing: InterfaceScale.metric(4)) {
             ServerRailSelectionIndicator(
@@ -426,6 +431,8 @@ struct GuildRailButton: View {
                 isHovering: isHovering,
                 hasNotification: guild.unreadCount > 0
             )
+            .opacity(hidesIndicator ? 0 : 1)
+            .animation(.easeOut(duration: 0.12), value: hidesIndicator)
             Button(action: action) {
                 ServerRailBadgedIcon(mentionCount: guild.mentionCount) {
                     GuildIconView(
@@ -440,7 +447,7 @@ struct GuildRailButton: View {
                     .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ServerRailButtonStyle())
             .overlay {
                 ServerContextMenuBridge(
                     isUnread: guild.unreadCount > 0,
@@ -547,7 +554,7 @@ private struct HomeRailButton: View {
                     )
                     .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ServerRailButtonStyle())
             .accessibilityLabel("Direct Messages")
         }
         .frame(width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(46), alignment: .leading)
@@ -561,20 +568,31 @@ struct ServerRailSelectionIndicator: View {
     let isSelected: Bool
     let isHovering: Bool
     let hasNotification: Bool
+    var isVisible = true
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Capsule()
+        ServerRailIndicatorShape(
+            width: indicatorWidth,
+            height: indicatorHeight,
+            cornerRadius: InterfaceScale.metric(4)
+        )
             .fill(colorScheme == .dark ? Color.white : Color.black)
-            .frame(width: InterfaceScale.metric(4), height: indicatorHeight)
+            .frame(width: InterfaceScale.metric(7), height: InterfaceScale.metric(46))
             .opacity(indicatorHeight == 0 ? 0 : 1)
-            .frame(width: InterfaceScale.metric(7), height: InterfaceScale.metric(40))
-            .animation(.snappy(duration: 0.2), value: indicatorHeight)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: CGSize(width: indicatorWidth, height: indicatorHeight))
+            .transaction { $0.animation = nil }
+    }
+
+    private var indicatorWidth: CGFloat {
+        indicatorHeight == 0 ? 0 : InterfaceScale.metric(4)
     }
 
     private var indicatorHeight: CGFloat {
+        guard isVisible else { return 0 }
         if isSelected {
-            return InterfaceScale.metric(36)
+            return InterfaceScale.metric(42)
         }
         if isHovering {
             return InterfaceScale.metric(20)
@@ -583,5 +601,38 @@ struct ServerRailSelectionIndicator: View {
             return InterfaceScale.metric(8)
         }
         return 0
+    }
+}
+
+nonisolated private struct ServerRailIndicatorShape: Shape {
+    var width: CGFloat
+    var height: CGFloat
+    let cornerRadius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(width, height) }
+        set {
+            width = newValue.first
+            height = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        guard width > 0, height > 0 else { return Path() }
+        return UnevenRoundedRectangle(
+            bottomTrailingRadius: cornerRadius,
+            topTrailingRadius: cornerRadius
+        ).path(in: CGRect(x: rect.minX, y: rect.midY - height / 2, width: width, height: height))
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var serverRailIsDragPreview = false
+}
+
+/// Rail selection is drawn by the indicator; pressing must not tint the icon.
+struct ServerRailButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }

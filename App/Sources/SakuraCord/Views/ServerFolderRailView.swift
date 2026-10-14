@@ -295,7 +295,7 @@ struct ServerFolderRailHeader: View {
         let hidesIndicator = isDragPreview || drag.draggedID == entry.id || drag.flight?.id == entry.id
         HStack(spacing: InterfaceScale.metric(4)) {
             ServerRailSelectionIndicator(
-                isSelected: false,
+                isSelected: !isExpanded && entry.containsSelectedGuild,
                 isHovering: isHovering && !isExpanded,
                 hasNotification: showsUnreadIndicators && entry.hasUnreadGuild
             )
@@ -464,6 +464,10 @@ private struct ExpandedFolderGuilds: View {
             }
             .allowsHitTesting(isExpanded)
             .accessibilityHidden(!isExpanded)
+        }
+        .transformPreference(ServerRailRowsPreferenceKey.self) { rows in
+            // Collapsed rows retain layout for the morph, but are not drop targets.
+            if !isExpanded { rows.removeAll() }
         }
     }
 

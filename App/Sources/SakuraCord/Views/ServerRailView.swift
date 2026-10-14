@@ -135,6 +135,9 @@ struct ServerRailView: View {
                             folderLayoutRevision &+= 1
                         }
                     )
+                    // Keep native images and their clipping shapes together as
+                    // a preceding folder changes the row's position.
+                    .geometryGroup()
                 }
                 Button(action: joinServer) {
                     Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
@@ -170,6 +173,7 @@ struct ServerRailView: View {
                             x: ChatChromeMetrics.serverRailWidth + 7,
                             y: proxy[hoverItem.bounds].midY - 16
                         )
+                        .transaction { $0.animation = nil }
                 }
             }
             .allowsHitTesting(false)
@@ -304,10 +308,13 @@ private struct DirectMessageRailButton: View {
 
 struct ServerRailBadgedIcon<Icon: View>: View {
     let mentionCount: Int
+    let badgeOffset: CGFloat
     let icon: Icon
+    @Environment(\.serverRailMentionBadgesInOverlay) private var drawsBadgeInOverlay
 
-    init(mentionCount: Int, @ViewBuilder icon: () -> Icon) {
+    init(mentionCount: Int, badgeOffset: CGFloat = 4, @ViewBuilder icon: () -> Icon) {
         self.mentionCount = mentionCount
+        self.badgeOffset = badgeOffset
         self.icon = icon()
     }
 
@@ -318,21 +325,29 @@ struct ServerRailBadgedIcon<Icon: View>: View {
                     badge
                         .padding(InterfaceScale.metric(2))
                         .background(.black, in: Capsule())
-                        .offset(x: InterfaceScale.metric(6), y: InterfaceScale.metric(6))
+                        .offset(x: InterfaceScale.metric(badgeOffset + 2), y: InterfaceScale.metric(badgeOffset + 2))
                         .blendMode(.destinationOut)
                         .accessibilityHidden(true)
                 }
                 .compositingGroup()
                 .overlay(alignment: .bottomTrailing) {
-                    badge.offset(x: InterfaceScale.metric(4), y: InterfaceScale.metric(4))
+                    badge
+                        .opacity(drawsBadgeInOverlay ? 0 : 1)
+                        .offset(x: InterfaceScale.metric(badgeOffset), y: InterfaceScale.metric(badgeOffset))
                 }
         } else {
             icon
         }
     }
 
-    private var badge: some View {
-        Text(mentionCount, format: .number)
+    private var badge: some View { ServerRailMentionBadge(count: mentionCount) }
+}
+
+struct ServerRailMentionBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text(count, format: .number)
             .font(.interfaceSystem(size: 10, weight: .bold))
             .foregroundStyle(.white)
             .padding(.horizontal, InterfaceScale.metric(5))
@@ -389,6 +404,7 @@ struct ServerRailGuildItemView: View {
     let selectGuild: (GuildID?) -> Void
     let contextMenuActions: ServerRailContextMenuActions
     var loadsImageWhenOffscreen = false
+    var morphsInFolder = false
 
     var body: some View {
         if let presentation = entry.presentation {
@@ -396,7 +412,8 @@ struct ServerRailGuildItemView: View {
                 presentation: presentation,
                 isSelected: entry.isSelected,
                 contextMenuActions: contextMenuActions,
-                loadsImageWhenOffscreen: loadsImageWhenOffscreen
+                loadsImageWhenOffscreen: loadsImageWhenOffscreen,
+                morphsInFolder: morphsInFolder
             ) {
                 selectGuild(entry.id)
             }
@@ -405,7 +422,7 @@ struct ServerRailGuildItemView: View {
 }
 
 enum ServerRailAnimations {
-    static let folderExpansion = Animation.spring(duration: 0.38, bounce: 0.08)
+    static let folderExpansion = Animation.spring(duration: 0.38, bounce: 0)
     static let reorder = Animation.snappy(duration: 0.28)
 }
 
@@ -414,9 +431,12 @@ struct GuildRailButton: View {
     let isSelected: Bool
     let contextMenuActions: ServerRailContextMenuActions
     var loadsImageWhenOffscreen = false
+    var morphsInFolder = false
     let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ServerRailDragController.self) private var drag
     @Environment(\.serverRailIsDragPreview) private var isDragPreview
+    @Environment(\.serverRailFolderIndicatorsInOverlay) private var folderIndicatorsInOverlay
     @State private var isHovering = false
     @State private var iconIsVisible = false
 
@@ -431,7 +451,7 @@ struct GuildRailButton: View {
                 isHovering: isHovering,
                 hasNotification: guild.unreadCount > 0
             )
-            .opacity(hidesIndicator ? 0 : 1)
+            .opacity(hidesIndicator || folderIndicatorsInOverlay ? 0 : 1)
             .animation(.easeOut(duration: 0.12), value: hidesIndicator)
             Button(action: action) {
                 ServerRailBadgedIcon(mentionCount: guild.mentionCount) {
@@ -442,10 +462,18 @@ struct GuildRailButton: View {
                         cornerRadius: InterfaceScale.metric(13),
                         animates: isHovering,
                         isSelected: isSelected,
-                        loadsImage: loadsImageWhenOffscreen || iconIsVisible
+                        loadsImage: !(morphsInFolder && !reduceMotion) && (loadsImageWhenOffscreen || iconIsVisible),
+                        morphsInFolder: morphsInFolder && !reduceMotion,
+                        morphID: guild.id
                     )
+                    .transformAnchorPreference(key: ServerFolderIconBounds.self, value: .bounds) { anchors, anchor in
+                        if folderIndicatorsInOverlay, !morphsInFolder {
+                            anchors[guild.id] = anchor
+                        }
+                    }
                     .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(ServerRailButtonStyle())
             .overlay {
@@ -627,6 +655,8 @@ nonisolated private struct ServerRailIndicatorShape: Shape {
 }
 
 extension EnvironmentValues {
+    @Entry var serverRailMentionBadgesInOverlay = false
+    @Entry var serverRailFolderIndicatorsInOverlay = false
     @Entry var serverRailIsDragPreview = false
 }
 

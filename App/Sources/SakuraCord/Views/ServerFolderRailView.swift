@@ -140,13 +140,17 @@ struct ServerFolderRailView: View {
 
     private var folderIndicators: some View {
         let guildEntries = renderableGuildEntries
+        let rowHeight = InterfaceScale.metric(ServerFolderRailMetrics.guildRowHeight)
+        let rowSpacing = InterfaceScale.metric(ServerFolderRailMetrics.guildSpacing)
+        // Match the layout's individually rounded dimensions at fractional interface scales.
+        let firstRowTop = InterfaceScale.metric(ServerFolderRailMetrics.expandedPadding) + rowHeight + rowSpacing
         let hoverCarrierID = guildEntries.first(where: \.isSelected)?.id
             ?? guildEntries.first(where: { ($0.presentation?.guild.unreadCount ?? 0) > 0 })?.id
             ?? guildEntries.first?.id
         return GeometryReader { _ in
             ForEach(Array(guildEntries.enumerated()), id: \.element.id) { index, guildEntry in
-                let rowTop = InterfaceScale.metric(ServerFolderRailMetrics.firstGuildTop + CGFloat(index) * ServerFolderRailMetrics.guildStride)
-                let rowBounds = CGRect(x: 0, y: rowTop, width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(ServerFolderRailMetrics.guildRowHeight))
+                let rowTop = firstRowTop + CGFloat(index) * (rowHeight + rowSpacing)
+                let rowBounds = CGRect(x: 0, y: rowTop, width: ChatChromeMetrics.serverRailWidth, height: rowHeight)
                 let hidesIndicator = drag.draggedID == entry.id || drag.flight?.id == entry.id
                     || drag.draggedID == .guild(guildEntry.id) || drag.flight?.id == .guild(guildEntry.id)
                 ServerRailSelectionIndicator(
@@ -159,7 +163,7 @@ struct ServerFolderRailView: View {
                     animatesStateChanges: !isAnimatingFolder || guildEntry.id == hoverCarrierID
                 )
                 .modifier(ServerFolderIndicatorMotion(
-                    centerY: isExpanded ? rowTop + InterfaceScale.metric(ServerFolderRailMetrics.guildRowHeight / 2) : InterfaceScale.metric(ServerFolderRailMetrics.collapsedRowHeight / 2)
+                    centerY: isExpanded ? rowBounds.midY : InterfaceScale.metric(ServerFolderRailMetrics.collapsedRowHeight) / 2
                 ))
                 .animation(reduceMotion ? nil : ServerRailAnimations.folderExpansion, value: isExpanded)
             }

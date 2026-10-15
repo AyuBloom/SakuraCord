@@ -63,7 +63,11 @@ extension AppModel {
     /// True while a long backlog's first unread row is not loaded, so the
     /// timeline can show only its loaded tail.
     func hasUnresolvedUnreadBoundary(channelID: ChannelID) -> Bool {
-        guard let summary = presentedUnreadSummary(channelID: channelID),
+        // Without a usable acknowledged boundary (READY can carry a
+        // non-snowflake such as -11) no scroll reaches the unread start.
+        // Holding it would keep every visit unread, so nothing would ever ACK.
+        guard readState.entries[channelID]?.lastAcknowledgedMessageID != nil,
+              let summary = presentedUnreadSummary(channelID: channelID),
               summary.isLowerBound
         else { return false }
         guard let divider = unreadDividerMessageIDs[channelID] else { return true }

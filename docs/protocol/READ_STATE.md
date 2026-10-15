@@ -27,8 +27,11 @@ lower-bound `N+` count). Opening such a backlog directly at its newest message
 shows only its tail, so, as in Discord, that visit stays unread until the reader
 scrolls toward the newest message again or chooses Mark as Read. Opening above
 the newest message needs no extra gesture, and a fully visible unread run with
-a loaded divider acknowledges on open. Wheel or scrollbar movement toward newer
-messages releases the hold; resizing and app-owned positioning do not. A remote
+a loaded divider acknowledges on open. A conversation without a usable
+acknowledged boundary, including a READY `last_message_id` that is not a
+snowflake (such as the number `-11`), is not held: no scroll can reach its
+unread start. Wheel or scrollbar movement toward newer messages releases the
+hold; resizing and app-owned positioning do not. A remote
 ACK or failed Mark Unread rollback that releases the hold resumes ordinary
 viewing acknowledgements without requiring another geometry callback.
 

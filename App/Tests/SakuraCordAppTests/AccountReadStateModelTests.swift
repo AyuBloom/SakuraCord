@@ -3020,6 +3020,37 @@ private func makeLowerBoundBacklog(in model: AppModel, channelID: ChannelID) {
 }
 
 @MainActor
+@Test func `a never acknowledged conversation opened at its newest message acknowledges`() async throws {
+    let provider = MockChatProvider()
+    let model = AppModel(
+        launchMode: .offlineTesting,
+        provider: provider,
+        readAcknowledgementTiming: .init(debounce: .milliseconds(10))
+    )
+    await model.start()
+    let channelID = ChannelID(rawValue: 210)
+    model.selectedChannelID = channelID
+    #expect(await until { !model.isLoadingMessages && model.selectedChannelID == channelID })
+    model.reportMainWindowActive(true)
+    model.hasMoreMessages = true
+    model.unreadDividerMessageIDs[channelID] = nil
+    // READY can carry a non-snowflake boundary, which decodes as none.
+    #expect(model.readState.applyRemote(ChannelReadState(
+        channelID: channelID,
+        lastAcknowledgedMessageID: nil,
+        isManual: true
+    )))
+    #expect(model.readState.entries[channelID]?.isUnread == true)
+    #expect(!model.hasUnresolvedUnreadBoundary(channelID: channelID))
+
+    model.reportTimelineInitialPosition(channelID: channelID, hasReachedReadBoundary: true)
+    #expect(await until { !model.isChannelUnread(channelID) })
+    #expect(await eventually { await provider.acknowledgementRequests.count == 1 })
+    let request = try #require(await provider.acknowledgementRequests.first)
+    #expect(request.messageID == model.readState.entries[channelID]?.latestKnownMessageID)
+}
+
+@MainActor
 @Test(arguments: [false, true])
 func `read state completion releases a held backlog without another geometry callback`(
     manualUnreadFailed: Bool

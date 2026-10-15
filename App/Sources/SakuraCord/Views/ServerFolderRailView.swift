@@ -44,7 +44,7 @@ struct ServerFolderRailView: View {
                 isExpanded: isExpanded,
                 contextMenuActions: contextMenuActions,
                 drawsCollapsedBackground: false,
-                morphsInFolder: !reduceMotion,
+                morphsInFolder: !reduceMotion && !renderableGuildEntries.isEmpty,
                 isPointerOverHeader: pointerIsOverHeader
             ) {
                 guard !drag.swallowsClick else { return }
@@ -62,7 +62,7 @@ struct ServerFolderRailView: View {
 
             ExpandedFolderGuilds(
                 folderID: entry.folder.id,
-                guildEntries: entry.guildEntries,
+                guildEntries: renderableGuildEntries,
                 selectGuild: selectGuild,
                 contextMenuActions: contextMenuActions,
                 morphsInFolder: !reduceMotion,
@@ -75,8 +75,7 @@ struct ServerFolderRailView: View {
             }
 
         }
-        .padding(.top, isExpanded ? InterfaceScale.metric(5) : 0)
-        .padding(.bottom, isExpanded ? InterfaceScale.metric(5) : 0)
+        .padding(.vertical, isExpanded ? InterfaceScale.metric(ServerFolderRailMetrics.expandedPadding) : 0)
         .background {
             GeometryReader { geometry in
                 let verticalInset = 3 / displayScale
@@ -112,9 +111,9 @@ struct ServerFolderRailView: View {
             }
             .allowsHitTesting(false)
         }
+        .overlay { folderIndicators }
         .overlayPreferenceValue(ServerFolderIconBounds.self) { anchors in
             ZStack {
-                folderIndicators(anchors)
                 if !reduceMotion { morphingIcons(anchors) }
                 folderMentionBadges(anchors)
             }
@@ -135,24 +134,34 @@ struct ServerFolderRailView: View {
 
     }
 
-    private func folderIndicators(_ anchors: [GuildID: Anchor<CGRect>]) -> some View {
-        GeometryReader { geometry in
-            ForEach(Array(entry.guildEntries.enumerated()), id: \.element.id) { index, guildEntry in
+    private var renderableGuildEntries: [ServerRailGuildEntry] {
+        entry.guildEntries.filter { $0.presentation != nil }
+    }
+
+    private var folderIndicators: some View {
+        let guildEntries = renderableGuildEntries
+        let hoverCarrierID = guildEntries.first(where: \.isSelected)?.id
+            ?? guildEntries.first(where: { ($0.presentation?.guild.unreadCount ?? 0) > 0 })?.id
+            ?? guildEntries.first?.id
+        return GeometryReader { _ in
+            ForEach(Array(guildEntries.enumerated()), id: \.element.id) { index, guildEntry in
                 let rowTop = InterfaceScale.metric(ServerFolderRailMetrics.firstGuildTop + CGFloat(index) * ServerFolderRailMetrics.guildStride)
-                let rowBounds = CGRect(x: 0, y: rowTop, width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(46))
+                let rowBounds = CGRect(x: 0, y: rowTop, width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(ServerFolderRailMetrics.guildRowHeight))
                 let hidesIndicator = drag.draggedID == entry.id || drag.flight?.id == entry.id
                     || drag.draggedID == .guild(guildEntry.id) || drag.flight?.id == .guild(guildEntry.id)
                 ServerRailSelectionIndicator(
                     isSelected: guildEntry.isSelected,
-                    isHovering: !isAnimatingFolder && pointerLocation.map { rowBounds.contains($0) } == true,
+                    isHovering: isExpanded
+                        ? !isAnimatingFolder && pointerLocation.map { rowBounds.contains($0) } == true
+                        : guildEntry.id == hoverCarrierID && pointerIsOverHeader,
                     hasNotification: (guildEntry.presentation?.guild.unreadCount ?? 0) > 0,
-                    isVisible: isExpanded && !hidesIndicator
+                    isVisible: !hidesIndicator && (isExpanded || !reduceMotion),
+                    animatesStateChanges: !isAnimatingFolder || guildEntry.id == hoverCarrierID
                 )
-                .position(
-                    x: InterfaceScale.metric(3.5),
-                    y: anchors[guildEntry.id].map { geometry[$0].midY }
-                        ?? (rowTop + InterfaceScale.metric(23))
-                )
+                .modifier(ServerFolderIndicatorMotion(
+                    centerY: isExpanded ? rowTop + InterfaceScale.metric(ServerFolderRailMetrics.guildRowHeight / 2) : InterfaceScale.metric(ServerFolderRailMetrics.collapsedRowHeight / 2)
+                ))
+                .animation(reduceMotion ? nil : ServerRailAnimations.folderExpansion, value: isExpanded)
             }
         }
         .allowsHitTesting(false)
@@ -268,9 +277,11 @@ struct ServerFolderRailView: View {
 
     private var pointerIsOverHeader: Bool {
         guard let pointerLocation else { return false }
-        let top = isExpanded ? InterfaceScale.metric(4) : 0
-        return CGRect(x: 0, y: top, width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(isExpanded ? 46 : 54))
-            .contains(pointerLocation)
+        let top = isExpanded ? InterfaceScale.metric(ServerFolderRailMetrics.expandedPadding) : 0
+        return CGRect(
+            x: 0, y: top, width: ChatChromeMetrics.serverRailWidth,
+            height: InterfaceScale.metric(isExpanded ? ServerFolderRailMetrics.guildRowHeight : ServerFolderRailMetrics.collapsedRowHeight)
+        ).contains(pointerLocation)
     }
 
 }
@@ -299,7 +310,7 @@ struct ServerFolderRailHeader: View {
                 isHovering: isHovering && !isExpanded,
                 hasNotification: showsUnreadIndicators && entry.hasUnreadGuild
             )
-            .opacity(hidesIndicator ? 0 : 1)
+            .opacity(hidesIndicator || (morphsInFolder && !reduceMotion) ? 0 : 1)
             .animation(.easeOut(duration: 0.12), value: hidesIndicator)
             Button(action: toggle) {
                 ServerRailBadgedIcon(
@@ -338,12 +349,16 @@ struct ServerFolderRailHeader: View {
                         }
                     }
                     .clipShape(ConcentricRectangle(cornerRadius: InterfaceScale.metric(isExpanded ? 13 : 17), style: .continuous))
-                    .frame(width: InterfaceScale.metric(isExpanded ? 46 : 52), height: InterfaceScale.metric(isExpanded ? 46 : 52))
+                    .frame(
+                        width: InterfaceScale.metric(isExpanded ? 46 : ServerFolderRailMetrics.containerSize),
+                        height: InterfaceScale.metric(isExpanded ? ServerFolderRailMetrics.guildRowHeight : ServerFolderRailMetrics.containerSize)
+                    )
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(ServerRailButtonStyle())
-            .offset(x: isExpanded ? 0 : InterfaceScale.metric(-3))
+            .frame(width: InterfaceScale.metric(ServerFolderRailMetrics.containerSize))
+            .offset(x: InterfaceScale.metric(-3))
             .overlay {
                 ServerFolderContextMenuBridge(
                     isUnread: entry.hasUnreadGuild || entry.mentionCount > 0,
@@ -362,7 +377,11 @@ struct ServerFolderRailHeader: View {
             .accessibilityHint("Toggles the server folder")
             .help(displayName)
         }
-        .frame(width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(isExpanded ? 46 : 54), alignment: .leading)
+        .frame(
+            width: ChatChromeMetrics.serverRailWidth,
+            height: InterfaceScale.metric(isExpanded ? ServerFolderRailMetrics.guildRowHeight : ServerFolderRailMetrics.collapsedRowHeight),
+            alignment: .leading
+        )
         .contentShape(Rectangle())
         .anchorPreference(key: ServerRailHoverPreferenceKey.self, value: .bounds) { bounds in
             (isPointerOverHeader ?? isHovering) ? ServerRailHoverItem(name: displayName, bounds: bounds) : nil
@@ -512,14 +531,29 @@ private struct ServerFolderMorphingIcon: View {
     }
 }
 
+nonisolated private struct ServerFolderIndicatorMotion: GeometryEffect {
+    var centerY: CGFloat
+
+    var animatableData: CGFloat {
+        get { centerY }
+        set { centerY = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: 0, y: centerY - size.height / 2))
+    }
+}
+
 private enum ServerFolderRailMetrics {
     static let containerSize: CGFloat = 52
     static let previewIconSize: CGFloat = 21
     static let guildSpacing: CGFloat = 8
     static let guildRowHeight: CGFloat = 46
-    static let firstGuildTop: CGFloat = 4 + guildRowHeight + guildSpacing
+    static let collapsedRowHeight: CGFloat = 54
+    static let expandedPadding: CGFloat = 5
+    static let firstGuildTop: CGFloat = expandedPadding + guildRowHeight + guildSpacing
     static let guildStride: CGFloat = guildRowHeight + guildSpacing
-    static let firstGuildBadgeY: CGFloat = firstGuildTop + 46 + 4
+    static let firstGuildBadgeY: CGFloat = firstGuildTop + guildRowHeight + 4
     static let collapsedBadgeX: CGFloat = 61
     static let collapsedBadgeY: CGFloat = 54
 }

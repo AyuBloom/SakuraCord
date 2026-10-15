@@ -597,6 +597,7 @@ struct ServerRailSelectionIndicator: View {
     let isHovering: Bool
     let hasNotification: Bool
     var isVisible = true
+    var animatesStateChanges = true
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -609,7 +610,7 @@ struct ServerRailSelectionIndicator: View {
             .fill(colorScheme == .dark ? Color.white : Color.black)
             .frame(width: InterfaceScale.metric(7), height: InterfaceScale.metric(46))
             .opacity(indicatorHeight == 0 ? 0 : 1)
-            .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: CGSize(width: indicatorWidth, height: indicatorHeight))
+            .animation(reduceMotion || !animatesStateChanges ? nil : .smooth(duration: 0.22), value: CGSize(width: indicatorWidth, height: indicatorHeight))
             .transaction { $0.animation = nil }
     }
 

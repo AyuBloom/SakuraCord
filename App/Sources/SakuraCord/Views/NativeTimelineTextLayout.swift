@@ -1576,9 +1576,9 @@ extension NativeTimelineRowLayout {
         let timestampGutterWidth: CGFloat
 
         init(settings: InterfaceSettingsSnapshot) {
-            authorFont = .interfaceSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .headline).pointSize, weight: .semibold)
-            timestampFont = .interfacePreferredFont(forTextStyle: .caption1)
-            editedFont = .interfacePreferredFont(forTextStyle: .caption2)
+            authorFont = .interfaceSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .headline).pointSize + 1, weight: .medium)
+            timestampFont = .interfaceSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize + 1)
+            editedFont = .interfaceSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption2).pointSize + 1)
             timestampGutterWidth = NativeTimelineCompactTimestampMetrics.width(settings: settings)
         }
     }

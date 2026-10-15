@@ -32,17 +32,15 @@ func `timeline layout preparation commits a complete update or discards supersed
         onUserScrollBegan: {}, onUserScrollEnded: { _ in }
     )
     let coordinator = timeline.makeCoordinator()
-    let scrollView = coordinator.makeScrollView()
-    defer { coordinator.stopObserving() }
-    scrollView.frame = CGRect(x: 0, y: 0, width: 820, height: 300)
-    scrollView.tile()
-    scrollView.layoutSubtreeIfNeeded()
+    // Exercise layout preparation with a fixed viewport. A live document view
+    // lets AppKit retile scrollers during the await and invalidate the prepared
+    // width, even after the coordinator's notification observers are removed.
+    let viewport = CGRect(x: 0, y: 0, width: 820, height: 300)
+    let scrollView = NSScrollView(frame: viewport)
+    let canvas = NativeTimelineCanvasView(frame: viewport)
+    coordinator.canvas = canvas
+    defer { withExtendedLifetime(canvas) { coordinator.stopObserving() } }
     coordinator.update(parent: timeline, scrollView: scrollView)
-    coordinator.reconcileViewportGeometryForTesting()
-    // This fixture drives updates explicitly. AppKit notifications must not
-    // overwrite the completed update's cache statistics while it is awaited.
-    coordinator.stopObserving()
-    let canvas = try #require(coordinator.canvas)
     canvas.suppressesHoverPresentation = true
 
     if changesPresentation {
@@ -52,6 +50,7 @@ func `timeline layout preparation commits a complete update or discards supersed
     }
     coordinator.update(parent: timeline, scrollView: scrollView)
     let preparation = try #require(coordinator.layoutPreparationTask)
+    let preparedState = try #require(coordinator.layoutPreparation)
     #expect(coordinator.messageIDs == original.map(\.id))
 
     if replacesDuringPreparation {
@@ -66,6 +65,7 @@ func `timeline layout preparation commits a complete update or discards supersed
         await preparation.value
         #expect(coordinator.layoutPreparationTask == nil)
         #expect(coordinator.messageIDs == messages.map(\.id))
+        #expect(preparedState.isComplete)
         #expect(coordinator.recentLayoutCacheHits == (changesPresentation ? coordinator.items.count : 64))
         #expect(coordinator.items.count == coordinator.layouts.count)
         #expect(coordinator.layouts.count == coordinator.rowHeights.count)

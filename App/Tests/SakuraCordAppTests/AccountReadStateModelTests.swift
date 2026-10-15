@@ -1408,6 +1408,41 @@ struct AccountReadStateModelTests {
         )
     }
 
+    @Test func `loaded local sends never become the read boundary`() {
+        let model = makeModel(latest: 10, acknowledged: 10)
+        var pending = message(id: UInt64.max, author: currentUser)
+        pending.nonce = "nonce"
+        pending.outboxState = .sending
+        // A failed command placeholder is settled but keeps its local ID.
+        var notice = message(id: UInt64.max - 1, author: currentUser)
+        notice.nonce = "command"
+        notice.flags = [.ephemeral, .localInteractionFailure]
+        model.observeLoadedMessages(
+            channelID: channelID,
+            messages: [message(id: 10), notice, pending]
+        )
+        #expect(model.entries[channelID]?.latestKnownMessageID == MessageID(rawValue: 10))
+        #expect(!model.unread(channelID: channelID))
+
+        // A later message still counts and remains acknowledgeable.
+        let disposition = model.receive(
+            message(id: 11, mentionedUsers: [currentUser]),
+            currentUserID: currentUser.id
+        )
+        #expect(disposition.accepted)
+        #expect(model.mentions(channelID: channelID) == 1)
+        #expect(
+            model.updatePresentation(
+                channelID: channelID,
+                isPresented: true,
+                initialHistoryLoaded: true,
+                initialPositionEstablished: true,
+                windowIsActive: true,
+                hasReachedReadBoundary: true
+            ) == MessageID(rawValue: 11)
+        )
+    }
+
     @Test func `timeline unread summary grows as older unread pages load`() throws {
         let model = makeModel(latest: 20, acknowledged: 10)
         let latestPage = [message(id: 15), message(id: 16)]

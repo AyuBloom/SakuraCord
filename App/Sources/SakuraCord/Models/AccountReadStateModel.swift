@@ -964,7 +964,14 @@ extension AccountReadStateModel {
     }
 
     func observeLoadedMessages(channelID: ChannelID, messages: [Message]) {
-        guard let newest = messages.max(by: { $0.id < $1.id }) else { return }
+        // Local sends and interaction notices carry placeholder IDs counting
+        // down from UInt64.max. Observing one would raise the boundary past
+        // every real message, so the conversation could never be acknowledged
+        // or count new messages. Ephemeral rows never move read state.
+        guard let newest = messages.lazy
+            .filter({ $0.outboxState == .confirmed && !$0.flags.contains(.ephemeral) })
+            .max(by: { $0.id < $1.id })
+        else { return }
         var entry = entry(for: channelID)
         entry.latestKnownMessageID = maximum(entry.latestKnownMessageID, newest.id)
         if entry.hasAuthoritativeReadState {

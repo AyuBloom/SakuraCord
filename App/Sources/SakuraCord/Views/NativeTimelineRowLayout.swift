@@ -70,6 +70,7 @@ struct NativeTimelineRowLayout {
         let imageRegions: [ImageRegion]
         let mediaFrame: CGRect?
         let mediaURL: URL?
+        let mediaPreviewURL: URL?
         let mediaIsVideo: Bool
         let mediaAutoplaysInline: Bool
         let accentColor: UInt32?

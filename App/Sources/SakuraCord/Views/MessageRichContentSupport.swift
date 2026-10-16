@@ -479,6 +479,7 @@ struct RichMediaItem: Identifiable, Hashable {
     enum Kind: Hashable {
         case image(animated: Bool)
         case video, audio, file
+        case youtube(YouTubeEmbedPlayback)
     }
 
     var id: String
@@ -492,8 +493,15 @@ struct RichMediaItem: Identifiable, Hashable {
     var kind: Kind
     var isSpoiler: Bool
     var autoplaysInline: Bool
+    var videoPreviewURL: URL?
+
+    var canSave: Bool {
+        if case .youtube = kind { return false }
+        return true
+    }
 
     func videoPosterURL(maximumPixelDimension: Int) -> URL? {
+        if let videoPreviewURL { return videoPreviewURL }
         guard kind == .video else { return nil }
         return DiscordVideoPosterURL.url(
             proxyURL: previewURL,
@@ -549,7 +557,7 @@ struct RichMediaItem: Identifiable, Hashable {
     }
 
     init?(embed: MessageEmbed, attachments: [Attachment]) {
-        guard var media = embed.image ?? embed.video else { return nil }
+        guard var media = embed.video ?? embed.image else { return nil }
         if let raw = media.url?.absoluteString,
            raw.hasPrefix("attachment://"),
            let attachment = attachments.first(where: {
@@ -575,6 +583,14 @@ struct RichMediaItem: Identifiable, Hashable {
             fallbackTitle: embed.title ?? "Embed media",
             autoplaysInline: embed.type?.lowercased() == "gifv"
         )
+        if embed.video != nil {
+            let preview = embed.thumbnail ?? embed.image
+            videoPreviewURL = preview?.proxyURL ?? preview?.url
+            if let playback = media.url.flatMap(YouTubeEmbedPlayback.init(url:)) {
+                kind = .youtube(playback)
+                url = playback.watchURL
+            }
+        }
     }
 
     init(id: String, media: ComponentMedia, fallbackTitle: String) {

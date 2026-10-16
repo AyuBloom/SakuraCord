@@ -403,6 +403,24 @@ them into bot-facing snowflake references and `resolved.attachments`; the client
 does not submit that resolved map. Removing a prepared file changes the local
 draft; no remote deletion was observed. Re-adding reserves a new upload.
 
+## Embedded video playback
+
+Video previews use the thumbnail as their large poster rather than a second
+side image. Image/video/GIFV cards omit descriptions, and provider metadata
+precedes the author and title, matching the first-party renderer. YouTube player
+URLs are web content, not AVFoundation media: an explicit preview activation
+opens the existing media viewer with a nonpersistent `WKWebView`. Only validated
+YouTube embed destinations enter that path; direct media retains native playback.
+The player sends the installed bundle identifier as its Referer, as required by
+[YouTube's WebView integration contract](https://developers.google.com/youtube/terms/required-minimum-functionality#referer-format).
+The [IFrame Player API](https://developers.google.com/youtube/iframe_api_reference)
+reports progress to an in-memory, video-keyed session store. Closing the viewer
+unloads the player; reopening resumes its position while SakuraCord remains open.
+Finished videos clear their resume point, and restarting the app clears all
+positions. No playback history is persisted. Hosted videos expose watch links rather
+than file downloads; scrolling only loads the supplied poster through the media
+cache and never instantiates a player.
+
 ## Attachments
 
 Privacy preparation precedes reservation and external multipart construction.

@@ -234,14 +234,14 @@ struct MessageReactionPill: View {
 
     var body: some View {
         Button(action: react) {
-            HStack(spacing: InterfaceScale.metric(8)) {
+            HStack(spacing: MessageReactionMetrics.horizontalPadding) {
                 MessageReactionEmoji(
                     reaction: reaction,
                     url: emojiURL,
                     size: MessageReactionMetrics.emojiSize
                 )
                 if reaction.count > 1 {
-                    Text(reaction.count, format: .number)
+                    Text(String(reaction.count))
                         .font(Font(NativeTimelineReactionFonts.count))
                         .foregroundStyle(
                             reaction.didCurrentUserReact ? SakuraCordAccentColor.color : .primary

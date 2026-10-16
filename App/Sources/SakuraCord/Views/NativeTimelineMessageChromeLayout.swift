@@ -219,13 +219,13 @@ extension NativeTimelineRowLayout {
         let plan = MessageReactionPresentation.previewPlan(for: reaction)
         var width = MessageReactionMetrics.horizontalPadding * 2 + MessageReactionMetrics.emojiSize
         if reaction.count > 1 {
-            width += InterfaceScale.metric(8) + measuredTextWidth(
+            width += MessageReactionMetrics.horizontalPadding + measuredTextWidth(
                 String(reaction.count),
                 font: NativeTimelineReactionFonts.count
             )
         }
         if !plan.isEmpty {
-            width += InterfaceScale.metric(8) + reactionPreviewWidth(plan)
+            width += MessageReactionMetrics.horizontalPadding + reactionPreviewWidth(plan)
         }
         return CGSize(
             width: ceil(width),
@@ -257,7 +257,7 @@ extension NativeTimelineRowLayout {
 
         var countFrame: CGRect?
         if reaction.count > 1 {
-            horizontalOffset += InterfaceScale.metric(8)
+            horizontalOffset += MessageReactionMetrics.horizontalPadding
             let countWidth = measuredTextWidth(
                 String(reaction.count),
                 font: NativeTimelineReactionFonts.count
@@ -274,7 +274,7 @@ extension NativeTimelineRowLayout {
         let plan = MessageReactionPresentation.previewPlan(for: reaction)
         var avatars: [ReactionRegion.AvatarRegion] = []
         if !plan.isEmpty {
-            horizontalOffset += InterfaceScale.metric(8)
+            horizontalOffset += MessageReactionMetrics.horizontalPadding
             for (index, reactor) in plan.reactors.enumerated() {
                 let avatarFrame = CGRect(
                     x: horizontalOffset + CGFloat(index) * MessageReactionMetrics.avatarStride,

@@ -286,6 +286,7 @@ extension NativeTimelineCanvasView {
     /// those bounded bitmaps warm so returning to a recent conversation does
     /// not synchronously raster every visible CoreText row again.
     func invalidateConversationTransientCaches() {
+        reactionDetailsPopover?.close()
         cancelMessageJumpHighlight()
         finishSendTransitions()
         cancelTranscriptGlide()
@@ -466,6 +467,7 @@ extension NativeTimelineCanvasView {
             pressedPollTarget = nil
             hoveredPollTarget = nil
             pollPopover?.close()
+            reactionDetailsPopover?.close()
             pointer.clearHoverAndPressTargets()
             reactionHoverCoordinator.close()
             closeMessageProfilePopover()
@@ -536,6 +538,7 @@ extension NativeTimelineCanvasView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil {
+            reactionDetailsPopover?.close()
             clearDisclosure(redraws: false)
             finishSendTransitions()
             cancelTranscriptGlide()

@@ -1362,6 +1362,8 @@ extension NativeTimelineCanvasView {
             { actions.retry(row.message) }
         case .addReaction:
             { [weak self] in self?.showReactionPicker(forMessageRow: row.message) }
+        case .viewReactions:
+            { [weak self] in self?.showMessageReactions(row.message) }
         case .reply:
             {
                 guard let reply = actions.reply else { return }

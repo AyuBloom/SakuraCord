@@ -295,6 +295,19 @@ extension AppModel {
         await task.value
     }
 
+    /// Returns only identities already held locally; never starts a load.
+    func retainedReactionReactors(for reaction: Reaction, on message: Message) -> [ReactionReactor] {
+        let key = ReactionReactorLoadKey(
+            channelID: message.channelID, messageID: message.id, reactionID: reaction.id
+        )
+        let cached = loadedReactionReactorPreviews[key]
+        let saved = cached?.count == reaction.count ? cached?.reactors ?? [] : []
+        var seen: Set<UserID> = []
+        return Array((reaction.reactors + saved)
+            .filter { seen.insert($0.id).inserted }
+            .prefix(min(5, max(0, reaction.count))))
+    }
+
     func applyReactionReactors(
         _ reactors: [ReactionReactor],
         for key: ReactionReactorLoadKey

@@ -185,6 +185,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
     var pressedPollTarget: NativeTimelinePollTarget?
     var hoveredPollTarget: NativeTimelinePollTarget?
     var pollPopover: NSPopover?
+    var reactionDetailsPopover: NSPopover?
     var pollClockTask: Task<Void, Never>?
     let pollAnimationTicker = NativeTimelineDisplayLinkTicker()
     // Intermediate resize widths are short-lived; paint them without replacing
@@ -431,6 +432,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
             pollAnimationTicker.stop()
             clearDisclosure(redraws: false)
             pollPopover?.close()
+            reactionDetailsPopover?.close()
             mediaInvalidationTask?.cancel()
             visibleMediaRequestTask?.cancel()
             historySkeletonShimmerTask?.cancel()

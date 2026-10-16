@@ -51,7 +51,10 @@ enum MessageAppearancePreviewContent {
             width: 1100, height: 680,
             description: "An alpine lake reflecting green slopes and rocky mountain peaks."
         )]
-        lake.reactions = [Reaction(emoji: "🌿", count: 3, didCurrentUserReact: true)]
+        lake.reactions = [Reaction(
+            emoji: "🌿", count: 3, didCurrentUserReact: true,
+            reactors: [you, maya, theo].map { ReactionReactor(user: $0) }
+        )]
         let coffee = message(4, maya, "Imagine this with a thermos of coffee.")
         var city = message(7, theo, "And if it rains, we can always do a city walk instead.")
         city.embeds = [MessageEmbed(

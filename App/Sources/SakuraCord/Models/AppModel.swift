@@ -1073,7 +1073,8 @@ final class AppModel {
     @ObservationIgnored var pendingInteractions: [String: PendingInteractionRecord] = [:]
     @ObservationIgnored var pendingInteractionOrder: [String] = []
     @ObservationIgnored var reactionReactorLoadTasks: [ReactionReactorLoadKey: Task<Void, Never>] = [:]
-    @ObservationIgnored var loadedReactionReactorCounts: [ReactionReactorLoadKey: Int] = [:]
+    @ObservationIgnored var loadedReactionReactorPreviews:
+        [ReactionReactorLoadKey: (count: Int, reactors: [ReactionReactor])] = [:]
     @ObservationIgnored var failedReactionReactorLoads: [ReactionReactorLoadKey: Date] = [:]
     @ObservationIgnored var liveScrollingConversationIDs:
         Set<ChannelID> = []

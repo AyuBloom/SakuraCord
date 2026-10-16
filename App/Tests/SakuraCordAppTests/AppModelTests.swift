@@ -4864,6 +4864,48 @@ func `visible reaction preview reads stay within the app request budget`(hasPart
 }
 
 @MainActor
+@Test(arguments: [false, true])
+func `revisited messages restore reactor identities without another request`(isSelected: Bool) async throws {
+    let provider = ChannelLoadTestProvider(reactionPreviewResultCount: 2)
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    await model.start()
+    let channelID = ChannelID(rawValue: 91001)
+    model.selectedChannelID = isSelected ? channelID : ChannelID(rawValue: 91002)
+    let message = Message(
+        id: MessageID(rawValue: 92400), channelID: channelID,
+        author: User(id: UserID(rawValue: 91000), username: "tester", displayName: "Tester"),
+        content: "revisited reaction", reactions: [Reaction(emoji: "👍", count: 4)]
+    )
+    func replaceHistory(with messages: [Message]) {
+        if isSelected {
+            model.replaceSelectedMessages(with: messages)
+        } else {
+            model.messageCache[channelID] = messages
+        }
+    }
+    func retainedMessage() -> Message? {
+        (isSelected ? model.messages : model.messageCache[channelID] ?? []).first
+    }
+    replaceHistory(with: [message])
+    await model.loadReactionReactors(message.reactions[0], on: message)
+    let fetched = try #require(retainedMessage()?.reactions.first?.reactors)
+    #expect(fetched.count == 2)
+    #expect(await provider.reactorRequestCount() == 1)
+
+    // Leave the history window, then replace it with a fresh payload that
+    // retains the count but contains none of the previously fetched users.
+    replaceHistory(with: [])
+    replaceHistory(with: [message])
+    #expect(retainedMessage()?.reactions.first?.reactors.isEmpty == true)
+    await model.loadReactionReactors(message.reactions[0], on: message)
+    #expect(retainedMessage()?.reactions.first?.reactors == fetched)
+    #expect(await provider.reactorRequestCount() == 1)
+    if isSelected {
+        #expect(model.messageRows == MessageGrouping.rows(for: model.messages))
+    }
+}
+
+@MainActor
 @Test func `reaction preview count changes await the shared load after a view cancels`() async {
     let provider = ChannelLoadTestProvider(
         reactionPreviewResultCount: 2, suspendsFirstReactionRequest: true

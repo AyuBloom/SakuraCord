@@ -241,8 +241,12 @@ extension AppModel {
             await loadReactionReactors(reaction, on: message)
             return
         }
-        // A successful short response must not be fetched again on every draw.
-        guard loadedReactionReactorCounts[key] != reaction.count else { return }
+        // History replacements can discard the identities while preserving
+        // the count. Restore the saved preview instead of fetching it again.
+        if let cached = loadedReactionReactorPreviews[key], cached.count == reaction.count {
+            applyReactionReactors(cached.reactors, for: key)
+            return
+        }
         if let failedAt = failedReactionReactorLoads[key],
            Date.now.timeIntervalSince(failedAt) < 30
         {
@@ -267,12 +271,14 @@ extension AppModel {
                       isCurrentAccountSession(session)
                 else { return }
                 failedReactionReactorLoads[key] = nil
-                if loadedReactionReactorCounts[key] == nil, loadedReactionReactorCounts.count >= 256,
-                   let evictedKey = loadedReactionReactorCounts.keys.first {
-                    loadedReactionReactorCounts[evictedKey] = nil
+                if loadedReactionReactorPreviews[key] == nil, loadedReactionReactorPreviews.count >= 256,
+                   let evictedKey = loadedReactionReactorPreviews.keys.first {
+                    loadedReactionReactorPreviews[evictedKey] = nil
                 }
-                loadedReactionReactorCounts[key] = reaction.count
-                applyReactionReactors(reactors, for: key)
+                var seen: Set<UserID> = []
+                let previews = Array(reactors.filter { seen.insert($0.id).inserted }.prefix(5))
+                loadedReactionReactorPreviews[key] = (reaction.count, previews)
+                applyReactionReactors(previews, for: key)
             } catch is CancellationError {
                 return
             } catch {
@@ -324,7 +330,8 @@ extension AppModel {
         }
 
         if key.channelID == selectedChannelID {
-            replaceSelectedMessages(with: updating(messages))
+            let updated = updating(messages)
+            if updated != messages { replaceSelectedMessages(with: updated) }
         } else if var cached = messageCache[key.channelID] {
             cached = updating(cached)
             messageCache[key.channelID] = cached
@@ -356,7 +363,7 @@ extension AppModel {
     func resetReactionReactorLoads() {
         for task in reactionReactorLoadTasks.values { task.cancel() }
         reactionReactorLoadTasks = [:]
-        loadedReactionReactorCounts = [:]
+        loadedReactionReactorPreviews = [:]
         failedReactionReactorLoads = [:]
     }
 
@@ -368,7 +375,7 @@ extension AppModel {
         where key.channelID == channelID && key.messageID == messageID {
             reactionReactorLoadTasks[key]?.cancel()
         }
-        loadedReactionReactorCounts = loadedReactionReactorCounts.filter {
+        loadedReactionReactorPreviews = loadedReactionReactorPreviews.filter {
             $0.key.channelID != channelID || $0.key.messageID != messageID
         }
         failedReactionReactorLoads = failedReactionReactorLoads.filter {
@@ -407,7 +414,7 @@ extension AppModel {
     ) {
         // A count can return to an earlier value after removals and additions.
         // Its previous short response no longer describes the current users.
-        loadedReactionReactorCounts = loadedReactionReactorCounts.filter {
+        loadedReactionReactorPreviews = loadedReactionReactorPreviews.filter {
             $0.key.channelID != update.channelID || $0.key.messageID != update.messageID
         }
         let currentUserID = snapshot?.currentUser.id

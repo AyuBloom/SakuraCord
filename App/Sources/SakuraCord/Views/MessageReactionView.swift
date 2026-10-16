@@ -234,7 +234,7 @@ struct MessageReactionPill: View {
 
     var body: some View {
         Button(action: react) {
-            HStack(spacing: MessageReactionMetrics.horizontalSpacing) {
+            HStack(spacing: InterfaceScale.metric(8)) {
                 MessageReactionEmoji(
                     reaction: reaction,
                     url: emojiURL,
@@ -243,7 +243,6 @@ struct MessageReactionPill: View {
                 if reaction.count > 1 {
                     Text(reaction.count, format: .number)
                         .font(Font(NativeTimelineReactionFonts.count))
-                        .padding(.horizontal, InterfaceScale.metric(4))
                         .foregroundStyle(
                             reaction.didCurrentUserReact ? SakuraCordAccentColor.color : .primary
                         )
@@ -257,7 +256,6 @@ struct MessageReactionPill: View {
                 let previewPlan = MessageReactionPresentation.previewPlan(for: reaction)
                 if !previewPlan.isEmpty {
                     MessageReactionAvatarStack(plan: previewPlan)
-                        .padding(.leading, reaction.count > 1 ? 0 : InterfaceScale.metric(4))
                 }
             }
             .padding(.horizontal, MessageReactionMetrics.horizontalPadding)

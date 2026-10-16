@@ -13,8 +13,10 @@ struct MessageReactionsPopover: View {
     let message: Message
     let dismiss: () -> Void
     @State private var selectedReactionID: String?
+    @State private var reactionSnapshot: [Reaction]?
 
     private var reactions: [Reaction] {
+        if let reactionSnapshot { return reactionSnapshot }
         let current = model.retainedMessage(channelID: message.channelID, messageID: message.id) ?? message
         return MessageReactionPresentation.items(from: current.reactions)
     }
@@ -47,12 +49,24 @@ struct MessageReactionsPopover: View {
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .onChange(of: reactions.map(\.id)) { _, ids in
-            if !ids.contains(selectedReactionID ?? "") { selectedReactionID = ids.first }
+        .onReceive(NotificationCenter.default.publisher(for: .sakuracordMessageRowsDidChange, object: model)) { _ in
+            refreshReactions()
         }
         .onChange(of: model.snapshot?.currentUser.id) { _, _ in dismiss() }
-        .onChange(of: model.retainedMessage(channelID: message.channelID, messageID: message.id)?.id) { _, id in
-            if id == nil { dismiss() }
+    }
+
+    private func refreshReactions() {
+        guard let current = model.retainedMessage(channelID: message.channelID, messageID: message.id) else {
+            dismiss()
+            return
+        }
+        reactionSnapshot = MessageReactionPresentation.items(from: current.reactions).map { reaction in
+            var reaction = reaction
+            reaction.reactors = model.retainedReactionReactors(for: reaction, on: current)
+            return reaction
+        }
+        if !reactions.contains(where: { $0.id == selectedReactionID }) {
+            selectedReactionID = reactions.first?.id
         }
     }
 
@@ -142,10 +156,16 @@ struct MessageReactionsPopover: View {
 }
 
 extension NativeTimelineCanvasView {
-    func showMessageReactions(_ message: Message) {
-        guard let model, let index = items.firstIndex(where: { $0.messageID == message.id }) else { return }
-        let anchor = rowFrame(at: index).intersection(enclosingScrollView?.documentVisibleRect ?? visibleRect)
-        guard !anchor.isNull, !anchor.isEmpty else { return }
+    @discardableResult
+    func showMessageReactions(_ message: Message) -> Bool {
+        guard let model, window != nil,
+              let index = items.firstIndex(where: { $0.messageID == message.id }) else { return false }
+        let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
+        let rowAnchor = rowFrame(at: index).intersection(viewport)
+        // Accessibility exposes offscreen rows too. Use the visible viewport
+        // without scrolling, which could initiate additional history loads.
+        let anchor = rowAnchor.isNull || rowAnchor.isEmpty ? viewport : rowAnchor
+        guard !anchor.isNull, !anchor.isEmpty else { return false }
         reactionDetailsPopover?.close()
         let popover = NSPopover()
         popover.behavior = .transient
@@ -164,5 +184,6 @@ extension NativeTimelineCanvasView {
             guard popover?.isShown == true, let controller else { return }
             controller.monitorEscapeKey(in: controller.view.window, presentingWindow: self?.window)
         }
+        return popover.isShown
     }
 }

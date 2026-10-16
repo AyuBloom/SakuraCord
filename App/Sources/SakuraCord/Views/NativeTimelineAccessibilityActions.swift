@@ -89,9 +89,7 @@ extension NativeTimelineCanvasView {
         }
         result.append(accessibilityReactionAction(for: message))
         result.append(NSAccessibilityCustomAction(name: "View Reactions") { [weak self] in
-            guard let self else { return false }
-            self.showMessageReactions(message)
-            return true
+            self?.showMessageReactions(message) ?? false
         })
         if MessageReplyPresentationPolicy.allowsReplyAction(for: message),
            let reply = actions?.reply

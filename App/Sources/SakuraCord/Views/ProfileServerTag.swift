@@ -9,7 +9,7 @@ nonisolated enum ServerTagAppearance {
     static var horizontalPadding: CGFloat { InterfaceScale.metric(5) }
     static var cornerRadius: CGFloat { InterfaceScale.metric(5) }
     static let backgroundOpacity = 0.1
-    static let highlightedBackgroundOpacity = 0.1
+    static let highlightedBackgroundOpacity = 0.15
 }
 
 struct AppIdentityBadge: View {

@@ -454,8 +454,7 @@ extension NativeTimelineCanvasView {
                     keys.append(.avatar(url))
                 }
             }
-            if !region.mediaIsVideo,
-               let url = region.mediaURL
+            if let url = region.mediaPreviewURL ?? (region.mediaIsVideo ? nil : region.mediaURL)
             {
                 keys.append(.media(url))
             }

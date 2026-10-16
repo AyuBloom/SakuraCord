@@ -591,7 +591,7 @@ extension NativeTimelineRowPainter {
         else { return }
         NativeTimelineSemanticColor.opacity(.secondaryLabelColor, 0.10).setFill()
         NSBezierPath(concentricRoundedRect: frame, cornerRadius: InterfaceScale.metric(8)).fill()
-        if let image = mediaImage(for: .media(url)) {
+        if let image = mediaImage(for: .media(region.mediaPreviewURL ?? url)) {
             drawImage(image, in: frame, cornerRadius: InterfaceScale.metric(8), fillsFrame: false)
             if region.mediaIsVideo { mediaPlayGlyph(in: frame) }
         } else if region.mediaIsVideo {

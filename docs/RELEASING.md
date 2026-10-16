@@ -10,7 +10,12 @@ Development pull requests target `nightly`. The
 `retarget-pull-requests.yml` workflow redirects open PRs targeting `main` when
 they are opened, reopened, edited, or updated with new commits. Only PRs from
 this repository's own `nightly` branch may target `main` for release promotion.
-The workflow changes PR metadata only and never executes contributor code.
+An unprivileged `Pull request metadata` workflow signals changes through
+`pull_request`. Its completed run triggers the retargeter on the default branch,
+which re-reads open PRs targeting `main` and changes metadata only. Neither
+workflow checks out or executes contributor code. Fork workflow approval and
+the normal `pull_request` merge-conflict restrictions still apply; if the signal
+cannot run, retarget the PR manually.
 It must be present on the repository's default branch (`main`) to take effect.
 Retargeting with `GITHUB_TOKEN` does not start a new CI run; push a new commit
 to the PR branch to validate against the updated base before merging. This
@@ -392,8 +397,12 @@ then continues following the PR track. Retry and catalog recovery rebuild the
 track feeds from already signed artifacts, without a signing key.
 Only builds from currently open PRs appear in the catalog. Closing or merging
 a PR refreshes the catalog to hide its builds; reopening it restores its retained
-build history. These events use trusted default-branch code and never execute
-contributor code. Immutable downloads and installed PR update feeds remain
+build history. The unprivileged `Pull request metadata` signal triggers a
+default-branch `workflow_run` catalog refresh. The publisher re-reads current
+PR state and never consumes code or artifacts from that signal. GitHub's fork
+approval and merge-conflict restrictions can delay the signal; the next
+publication or manual catalog recovery also reconciles PR state.
+Immutable downloads and installed PR update feeds remain
 available after closure. Every publication and manual catalog recovery also
 refreshes PR state; a failed GitHub lookup leaves the existing catalog untouched.
 The catalog is discovery metadata, while Sparkle authenticates the
@@ -423,8 +432,10 @@ switching protocol cannot be published into the catalog.
    because fork PR workflows cannot read repository variables. Set source-repository **variable**
    `SPARKLE_ED_PUBLIC_KEY` to the same value for the trusted publisher's independent
    archive verification. Keep `SPARKLE_ED_PRIVATE_KEY` secret.
-   Existing `SAKURACORD_BOT_APP_ID` and `SAKURACORD_BOT_PRIVATE_KEY` supply the
-   publisher's GitHub App credentials.
+   Set repository variable `SAKURACORD_BOT_CLIENT_ID` to the existing SakuraCord
+   bot app's **Client ID**, not its numeric App ID. This variable and the existing
+   `SAKURACORD_BOT_PRIVATE_KEY` secret supply both the publisher and fix agent's
+   GitHub App credentials.
 3. Land the trusted publication workflow on `main` before relying on its
    `workflow_run` trigger. PR CI must contain the packaging changes and the
    current app/Sparkle switching protocol. Workflow and catalog deployment is

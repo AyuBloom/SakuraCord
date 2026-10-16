@@ -1,0 +1,16 @@
+name: Pull request metadata
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize, closed]
+
+# This unprivileged signal never checks out code or handles artifacts. Trusted
+# workflow_run consumers re-read PR state through the API on the default branch.
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo 'Pull request metadata changed.'

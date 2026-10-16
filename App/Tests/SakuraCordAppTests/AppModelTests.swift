@@ -4809,8 +4809,9 @@ func `interrupted thread history reloads after navigation`(switchesDirectly: Boo
 }
 
 @MainActor
-@Test func `visible reaction preview reads stay within the app request budget`() async {
-    let provider = ChannelLoadTestProvider()
+@Test(arguments: [false, true])
+func `visible reaction preview reads stay within the app request budget`(hasPartialPreview: Bool) async {
+    let provider = ChannelLoadTestProvider(reactionPreviewResultCount: 2)
     let model = AppModel(launchMode: .offlineTesting, provider: provider)
     await model.start()
 
@@ -4825,19 +4826,67 @@ func `interrupted thread history reloads after navigation`(switchesDirectly: Boo
                     displayName: "Tester"
                 ),
                 content: "reaction \(value)",
-                reactions: [Reaction(emoji: "emoji-\(value)", count: 1)]
+                reactions: [Reaction(
+                    emoji: "emoji-\(value)", count: 4,
+                    reactors: hasPartialPreview ? [ReactionReactor(
+                        id: UserID(rawValue: 1), displayName: "One"
+                    )] : []
+                )]
             )
+            #expect(MessageReactionPresentation.needsPreviewLoad(message.reactions[0]))
             group.addTask {
+                await model.loadReactionReactors(message.reactions[0], on: message)
+                // A short response must not trigger another request when the
+                // view is recreated with the same count and partial identities.
                 await model.loadReactionReactors(message.reactions[0], on: message)
             }
         }
     }
 
     #expect(await provider.reactorRequestCount() == 12)
+    let changed = Message(
+        id: MessageID(rawValue: 92000), channelID: ChannelID(rawValue: 91001),
+        author: User(id: UserID(rawValue: 91000), username: "tester", displayName: "Tester"),
+        content: "changed reaction", reactions: [Reaction(emoji: "emoji-0", count: 5)]
+    )
+    await model.loadReactionReactors(changed.reactions[0], on: changed)
+    #expect(await provider.reactorRequestCount() == 13)
+    model.clearReactionReactorLoadState(channelID: changed.channelID, messageID: changed.id)
+    await model.loadReactionReactors(changed.reactions[0], on: changed)
+    #expect(await provider.reactorRequestCount() == 14)
+    model.applyReactionUpdate(.removeAll(channelID: changed.channelID, messageID: changed.id))
+    await model.loadReactionReactors(changed.reactions[0], on: changed)
+    #expect(await provider.reactorRequestCount() == 15)
     #expect(
         await provider.maximumConcurrentReactorRequestCount()
             <= AppModel.maximumConcurrentReactionReactorLoads
     )
+}
+
+@MainActor
+@Test func `reaction preview count changes await the shared load after a view cancels`() async {
+    let provider = ChannelLoadTestProvider(
+        reactionPreviewResultCount: 2, suspendsFirstReactionRequest: true
+    )
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    await model.start()
+    let message = Message(
+        id: MessageID(rawValue: 92500), channelID: ChannelID(rawValue: 91001),
+        author: User(id: UserID(rawValue: 91000), username: "tester", displayName: "Tester"),
+        content: "reaction", reactions: [Reaction(emoji: "👍", count: 2)]
+    )
+    let first = Task { await model.loadReactionReactors(message.reactions[0], on: message) }
+    await provider.waitForFirstReactionRequest()
+    first.cancel()
+    let changed = Reaction(emoji: "👍", count: 4)
+    let replacement = Task { await model.loadReactionReactors(changed, on: message) }
+    await provider.releaseFirstReactionRequest()
+    await replacement.value
+    await first.value
+    #expect(await provider.reactorRequestCount() == 2)
+    await model.loadReactionReactors(changed, on: message)
+    #expect(await provider.reactorRequestCount() == 2)
+    #expect(model.reactionReactorLoadTasks.isEmpty)
 }
 
 @MainActor
@@ -5481,6 +5530,10 @@ private actor ChannelLoadTestProvider: ChatProvider {
     private var messageRequestParameters:
         [ChannelID: [ChannelLoadMessageRequest]] = [:]
     private var cancelledMessageRequests: Set<ChannelID> = []
+    private let reactionPreviewResultCount: Int
+    private let suspendsFirstReactionRequest: Bool
+    private var firstReactionRequestGate: CheckedContinuation<Void, Never>?
+    private var firstReactionRequestStarted: CheckedContinuation<Void, Never>?
     private var reactorRequests = 0
     private var activeReactorRequests = 0
     private var maximumActiveReactorRequests = 0
@@ -5495,8 +5548,12 @@ private actor ChannelLoadTestProvider: ChatProvider {
     init(
         failsFirstEarlierPage: Bool = false,
         blockFirstMessageRequestIn channelID: ChannelID? = nil,
-        paginatedThreadID: ChannelID? = nil
+        paginatedThreadID: ChannelID? = nil,
+        reactionPreviewResultCount: Int = 5,
+        suspendsFirstReactionRequest: Bool = false
     ) {
+        self.reactionPreviewResultCount = reactionPreviewResultCount
+        self.suspendsFirstReactionRequest = suspendsFirstReactionRequest
         self.failsFirstEarlierPage = failsFirstEarlierPage
         blockedFirstMessageRequestChannelID = channelID
         self.paginatedThreadID = paginatedThreadID
@@ -5619,8 +5676,15 @@ private actor ChannelLoadTestProvider: ChatProvider {
             activeReactorRequests
         )
         defer { activeReactorRequests -= 1 }
+        if suspendsFirstReactionRequest, reactorRequests == 1 {
+            await withCheckedContinuation { continuation in
+                firstReactionRequestGate = continuation
+                firstReactionRequestStarted?.resume()
+                firstReactionRequestStarted = nil
+            }
+        }
         try await Task.sleep(for: .milliseconds(25))
-        return (1 ... 5).map {
+        return (1 ... reactionPreviewResultCount).map {
             ReactionReactor(
                 id: UserID(rawValue: UInt64($0)),
                 displayName: ["One", "Two", "Three", "Four", "Five"][$0 - 1]
@@ -5659,6 +5723,16 @@ private actor ChannelLoadTestProvider: ChatProvider {
 
     func requestWasCancelled(for channelID: ChannelID) -> Bool {
         cancelledMessageRequests.contains(channelID)
+    }
+
+    func waitForFirstReactionRequest() async {
+        guard reactorRequests == 0 else { return }
+        await withCheckedContinuation { firstReactionRequestStarted = $0 }
+    }
+
+    func releaseFirstReactionRequest() {
+        firstReactionRequestGate?.resume()
+        firstReactionRequestGate = nil
     }
 
     func reactorRequestCount() -> Int {

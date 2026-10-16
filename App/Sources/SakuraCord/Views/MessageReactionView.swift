@@ -16,14 +16,21 @@ nonisolated enum MessageReactionMetrics {
 
 nonisolated struct MessageReactionPreviewPlan: Equatable, Sendable {
     var reactors: [ReactionReactor]
+    var placeholderCount: Int
+
+    var avatarCount: Int {
+        reactors.count + placeholderCount
+    }
+
     var isEmpty: Bool {
-        reactors.isEmpty
+        avatarCount == 0
     }
 }
 
 nonisolated struct MessageReactionPreviewLoadKey: Equatable, Hashable, Sendable {
     nonisolated struct Entry: Equatable, Hashable, Sendable {
         let reactionID: String
+        let count: Int
     }
 
     let entries: [Entry]
@@ -31,6 +38,7 @@ nonisolated struct MessageReactionPreviewLoadKey: Equatable, Hashable, Sendable 
 
 nonisolated struct MessageReactionAutomaticLoadKey: Equatable, Hashable, Sendable {
     let reactionID: String
+    let count: Int
     let needsLoad: Bool
 }
 
@@ -68,34 +76,40 @@ nonisolated enum MessageReactionPresentation {
     static func previewPlan(for reaction: Reaction) -> MessageReactionPreviewPlan {
         let safeCount = max(0, reaction.count)
         let knownReactors = uniqueReactors(reaction.reactors, maximumCount: safeCount)
+        // Reserve every preview slot before reactor metadata or images arrive.
         let avatarCount = min(safeCount, MessageReactionMetrics.maximumAvatarCount)
         let previews = Array(knownReactors.prefix(avatarCount))
         return MessageReactionPreviewPlan(
-            reactors: previews
+            reactors: previews,
+            placeholderCount: avatarCount - previews.count
         )
     }
 
     static func previewLoadKey(for reactions: [Reaction]) -> MessageReactionPreviewLoadKey {
         MessageReactionPreviewLoadKey(
             entries: items(from: reactions).map {
-                MessageReactionPreviewLoadKey.Entry(reactionID: $0.id)
+                MessageReactionPreviewLoadKey.Entry(reactionID: $0.id, count: $0.count)
             })
     }
 
+    static func needsPreviewLoad(_ reaction: Reaction) -> Bool {
+        previewPlan(for: reaction).placeholderCount > 0
+    }
+
     static func previewLoadCandidates(from reactions: [Reaction]) -> [Reaction] {
-        items(from: reactions).filter { $0.reactors.isEmpty }
+        items(from: reactions).filter(needsPreviewLoad)
     }
 
     static func previewLoadKey(forPresented reactions: [Reaction]) -> MessageReactionPreviewLoadKey
     {
         MessageReactionPreviewLoadKey(
             entries: reactions.map {
-                MessageReactionPreviewLoadKey.Entry(reactionID: $0.id)
+                MessageReactionPreviewLoadKey.Entry(reactionID: $0.id, count: $0.count)
             })
     }
 
     static func previewLoadCandidates(fromPresented reactions: [Reaction]) -> [Reaction] {
-        reactions.filter { $0.reactors.isEmpty }
+        reactions.filter(needsPreviewLoad)
     }
 
     static func tooltipSummary(for reaction: Reaction) -> MessageReactionTooltipSummary {
@@ -275,10 +289,11 @@ struct MessageReactionPill: View {
         .task(
             id: MessageReactionAutomaticLoadKey(
                 reactionID: reaction.id,
-                needsLoad: reaction.count > 0 && reaction.reactors.isEmpty
+                count: reaction.count,
+                needsLoad: MessageReactionPresentation.needsPreviewLoad(reaction)
             )
         ) {
-            guard reaction.count > 0, reaction.reactors.isEmpty else { return }
+            guard MessageReactionPresentation.needsPreviewLoad(reaction) else { return }
             await loadReactors()
         }
         .onContinuousHover(coordinateSpace: .local) { phase in
@@ -374,12 +389,27 @@ private struct MessageReactionAvatarStack: View {
 
     var body: some View {
         HStack(spacing: MessageReactionMetrics.avatarStride - MessageReactionMetrics.avatarSize) {
-            ForEach(plan.reactors) { reactor in
-                AvatarView(
-                    name: reactor.displayName,
-                    url: reactor.avatarURL,
-                    size: MessageReactionMetrics.avatarSize
-                )
+            ForEach(0 ..< plan.avatarCount, id: \.self) { index in
+                let reactor = index < plan.reactors.count ? plan.reactors[index] : nil
+                Group {
+                    if let reactor {
+                        AvatarView(
+                            name: reactor.displayName,
+                            url: reactor.avatarURL,
+                            size: MessageReactionMetrics.avatarSize
+                        )
+                        .background {
+                            Circle().fill(Color(nsColor: .quaternaryLabelColor))
+                        }
+                    } else {
+                        Circle()
+                            .fill(Color(nsColor: .quaternaryLabelColor))
+                            .frame(
+                                width: MessageReactionMetrics.avatarSize,
+                                height: MessageReactionMetrics.avatarSize
+                            )
+                    }
+                }
                 .overlay {
                     Circle().strokeBorder(Color.primary.opacity(0.24), lineWidth: 1)
                 }

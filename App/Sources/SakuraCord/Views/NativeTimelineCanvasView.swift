@@ -38,6 +38,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
     struct ReactionPreviewLoadKey: Hashable {
         let messageID: MessageID
         let reactionID: String
+        let count: Int
     }
 
     struct ActiveReactionCountAnimation {

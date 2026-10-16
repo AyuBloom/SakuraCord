@@ -225,7 +225,9 @@ extension AppModel {
     }
 
     func loadReactionReactors(_ reaction: Reaction, on message: Message) async {
-        guard reaction.count > 0, reaction.reactors.isEmpty else { return }
+        guard reaction.count > 0,
+              Set(reaction.reactors.map(\.id)).count < min(reaction.count, 5)
+        else { return }
         guard await waitForTimelineScrollingToEnd() else { return }
         let session = accountSession()
         let key = ReactionReactorLoadKey(
@@ -233,43 +235,58 @@ extension AppModel {
             messageID: message.id,
             reactionID: reaction.id
         )
+        if let task = reactionReactorLoadTasks[key] {
+            await task.value
+            guard !Task.isCancelled, isCurrentAccountSession(session) else { return }
+            await loadReactionReactors(reaction, on: message)
+            return
+        }
+        // A successful short response must not be fetched again on every draw.
+        guard loadedReactionReactorCounts[key] != reaction.count else { return }
         if let failedAt = failedReactionReactorLoads[key],
            Date.now.timeIntervalSince(failedAt) < 30
         {
             return
         }
-        guard loadingReactionReactors.insert(key).inserted else { return }
-        defer {
-            if isCurrentAccountSession(session) {
-                loadingReactionReactors.remove(key)
+        let task = Task { @MainActor [self] in
+            defer {
+                if isCurrentAccountSession(session) {
+                    reactionReactorLoadTasks[key] = nil
+                }
+            }
+            do {
+                let reactors = try await reactionReactorLoadLimiter.withPermit {
+                    try await session.provider.reactionReactors(
+                        for: reaction.emoji,
+                        messageID: message.id,
+                        channelID: message.channelID,
+                        reactionCount: reaction.count
+                    )
+                }
+                guard await waitForTimelineScrollingToEnd(),
+                      isCurrentAccountSession(session)
+                else { return }
+                failedReactionReactorLoads[key] = nil
+                if loadedReactionReactorCounts[key] == nil, loadedReactionReactorCounts.count >= 256,
+                   let evictedKey = loadedReactionReactorCounts.keys.first {
+                    loadedReactionReactorCounts[evictedKey] = nil
+                }
+                loadedReactionReactorCounts[key] = reaction.count
+                applyReactionReactors(reactors, for: key)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard isCurrentAccountSession(session) else { return }
+                if failedReactionReactorLoads.count >= 256,
+                   let oldest = failedReactionReactorLoads.min(by: { $0.value < $1.value })?.key
+                {
+                    failedReactionReactorLoads[oldest] = nil
+                }
+                failedReactionReactorLoads[key] = .now
             }
         }
-
-        do {
-            let reactors = try await reactionReactorLoadLimiter.withPermit {
-                try await session.provider.reactionReactors(
-                    for: reaction.emoji,
-                    messageID: message.id,
-                    channelID: message.channelID,
-                    reactionCount: reaction.count
-                )
-            }
-            guard await waitForTimelineScrollingToEnd(),
-                  isCurrentAccountSession(session)
-            else { return }
-            failedReactionReactorLoads[key] = nil
-            applyReactionReactors(reactors, for: key)
-        } catch is CancellationError {
-            return
-        } catch {
-            guard isCurrentAccountSession(session) else { return }
-            if failedReactionReactorLoads.count >= 256,
-               let oldest = failedReactionReactorLoads.min(by: { $0.value < $1.value })?.key
-            {
-                failedReactionReactorLoads[oldest] = nil
-            }
-            failedReactionReactorLoads[key] = .now
-        }
+        reactionReactorLoadTasks[key] = task
+        await task.value
     }
 
     func applyReactionReactors(
@@ -336,14 +353,24 @@ extension AppModel {
         updateForumPresentation(with: forumPost)
     }
 
+    func resetReactionReactorLoads() {
+        for task in reactionReactorLoadTasks.values { task.cancel() }
+        reactionReactorLoadTasks = [:]
+        loadedReactionReactorCounts = [:]
+        failedReactionReactorLoads = [:]
+    }
+
     func clearReactionReactorLoadState(
         channelID: ChannelID,
         messageID: MessageID
     ) {
-        loadingReactionReactors = Set(
-            loadingReactionReactors.filter {
-                $0.channelID != channelID || $0.messageID != messageID
-            })
+        for key in reactionReactorLoadTasks.keys
+        where key.channelID == channelID && key.messageID == messageID {
+            reactionReactorLoadTasks[key]?.cancel()
+        }
+        loadedReactionReactorCounts = loadedReactionReactorCounts.filter {
+            $0.key.channelID != channelID || $0.key.messageID != messageID
+        }
         failedReactionReactorLoads = failedReactionReactorLoads.filter {
             $0.key.channelID != channelID || $0.key.messageID != messageID
         }
@@ -378,6 +405,11 @@ extension AppModel {
         _ update: MessageReactionUpdate,
         persistsResult: Bool = true
     ) {
+        // A count can return to an earlier value after removals and additions.
+        // Its previous short response no longer describes the current users.
+        loadedReactionReactorCounts = loadedReactionReactorCounts.filter {
+            $0.key.channelID != update.channelID || $0.key.messageID != update.messageID
+        }
         let currentUserID = snapshot?.currentUser.id
         let reactor: ReactionReactor? =
             switch update {

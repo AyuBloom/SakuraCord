@@ -236,10 +236,10 @@ extension NativeTimelineRowLayout {
     private static func reactionPreviewWidth(
         _ plan: MessageReactionPreviewPlan
     ) -> CGFloat {
-        plan.reactors.count == 0
+        plan.avatarCount == 0
             ? 0
             : MessageReactionMetrics.avatarSize
-                + CGFloat(plan.reactors.count - 1) * MessageReactionMetrics.avatarStride
+                + CGFloat(plan.avatarCount - 1) * MessageReactionMetrics.avatarStride
     }
 
     static func reactionRegion(
@@ -273,16 +273,21 @@ extension NativeTimelineRowLayout {
 
         let plan = MessageReactionPresentation.previewPlan(for: reaction)
         var avatars: [ReactionRegion.AvatarRegion] = []
+        var placeholderAvatarFrames: [CGRect] = []
         if !plan.isEmpty {
             horizontalOffset += MessageReactionMetrics.horizontalPadding
-            for (index, reactor) in plan.reactors.enumerated() {
+            for index in 0 ..< plan.avatarCount {
                 let avatarFrame = CGRect(
                     x: horizontalOffset + CGFloat(index) * MessageReactionMetrics.avatarStride,
                     y: frame.midY - MessageReactionMetrics.avatarSize / 2,
                     width: MessageReactionMetrics.avatarSize,
                     height: MessageReactionMetrics.avatarSize
                 )
-                avatars.append(.init(frame: avatarFrame, reactor: reactor))
+                if index < plan.reactors.count {
+                    avatars.append(.init(frame: avatarFrame, reactor: plan.reactors[index]))
+                } else {
+                    placeholderAvatarFrames.append(avatarFrame)
+                }
             }
         }
 
@@ -291,7 +296,8 @@ extension NativeTimelineRowLayout {
             reaction: reaction,
             emojiFrame: emojiFrame,
             countFrame: countFrame,
-            avatarRegions: avatars
+            avatarRegions: avatars,
+            placeholderAvatarFrames: placeholderAvatarFrames
         )
     }
 

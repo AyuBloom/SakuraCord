@@ -1408,6 +1408,41 @@ struct AccountReadStateModelTests {
         )
     }
 
+    @Test func `loaded local sends never become the read boundary`() {
+        let model = makeModel(latest: 10, acknowledged: 10)
+        var pending = message(id: UInt64.max, author: currentUser)
+        pending.nonce = "nonce"
+        pending.outboxState = .sending
+        // A failed command placeholder is settled but keeps its local ID.
+        var notice = message(id: UInt64.max - 1, author: currentUser)
+        notice.nonce = "command"
+        notice.flags = [.ephemeral, .localInteractionFailure]
+        model.observeLoadedMessages(
+            channelID: channelID,
+            messages: [message(id: 10), notice, pending]
+        )
+        #expect(model.entries[channelID]?.latestKnownMessageID == MessageID(rawValue: 10))
+        #expect(!model.unread(channelID: channelID))
+
+        // A later message still counts and remains acknowledgeable.
+        let disposition = model.receive(
+            message(id: 11, mentionedUsers: [currentUser]),
+            currentUserID: currentUser.id
+        )
+        #expect(disposition.accepted)
+        #expect(model.mentions(channelID: channelID) == 1)
+        #expect(
+            model.updatePresentation(
+                channelID: channelID,
+                isPresented: true,
+                initialHistoryLoaded: true,
+                initialPositionEstablished: true,
+                windowIsActive: true,
+                hasReachedReadBoundary: true
+            ) == MessageID(rawValue: 11)
+        )
+    }
+
     @Test func `timeline unread summary grows as older unread pages load`() throws {
         let model = makeModel(latest: 20, acknowledged: 10)
         let latestPage = [message(id: 15), message(id: 16)]
@@ -3017,6 +3052,37 @@ private func makeLowerBoundBacklog(in model: AppModel, channelID: ChannelID) {
     #expect(request.channelID == channelID)
     #expect(request.messageID == model.readState.entries[channelID]?.latestKnownMessageID)
     #expect(!request.manual)
+}
+
+@MainActor
+@Test func `a never acknowledged conversation opened at its newest message acknowledges`() async throws {
+    let provider = MockChatProvider()
+    let model = AppModel(
+        launchMode: .offlineTesting,
+        provider: provider,
+        readAcknowledgementTiming: .init(debounce: .milliseconds(10))
+    )
+    await model.start()
+    let channelID = ChannelID(rawValue: 210)
+    model.selectedChannelID = channelID
+    #expect(await until { !model.isLoadingMessages && model.selectedChannelID == channelID })
+    model.reportMainWindowActive(true)
+    model.hasMoreMessages = true
+    model.unreadDividerMessageIDs[channelID] = nil
+    // READY can carry a non-snowflake boundary, which decodes as none.
+    #expect(model.readState.applyRemote(ChannelReadState(
+        channelID: channelID,
+        lastAcknowledgedMessageID: nil,
+        isManual: true
+    )))
+    #expect(model.readState.entries[channelID]?.isUnread == true)
+    #expect(!model.hasUnresolvedUnreadBoundary(channelID: channelID))
+
+    model.reportTimelineInitialPosition(channelID: channelID, hasReachedReadBoundary: true)
+    #expect(await until { !model.isChannelUnread(channelID) })
+    #expect(await eventually { await provider.acknowledgementRequests.count == 1 })
+    let request = try #require(await provider.acknowledgementRequests.first)
+    #expect(request.messageID == model.readState.entries[channelID]?.latestKnownMessageID)
 }
 
 @MainActor

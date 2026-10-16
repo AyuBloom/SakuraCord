@@ -31,8 +31,13 @@ jobs:
           # instead of trusting the signal's code, artifacts, or PR metadata.
           numbers="$(gh api --paginate "repos/$GH_REPO/pulls?state=open&base=main&per_page=100" \
             --jq '.[].number')"
+          failed=()
           for number in $numbers; do
-            pr="$(gh api "repos/$GH_REPO/pulls/$number")"
+            if ! pr="$(gh api "repos/$GH_REPO/pulls/$number")"; then
+              echo "::error::Could not read PR #$number."
+              failed+=("$number")
+              continue
+            fi
             # Re-read the current state in case this event waited in the queue.
             if ! jq -e --arg repo "$GH_REPO" '
               .state == "open" and .base.ref == "main" and
@@ -41,7 +46,15 @@ jobs:
               continue
             fi
 
-            gh api --method PATCH "repos/$GH_REPO/pulls/$number" \
-              -f base=nightly > /dev/null
+            if ! gh api --method PATCH "repos/$GH_REPO/pulls/$number" \
+              -f base=nightly > /dev/null; then
+              echo "::error::Could not retarget PR #$number."
+              failed+=("$number")
+              continue
+            fi
             echo "Retargeted PR #$number to nightly." >> "$GITHUB_STEP_SUMMARY"
           done
+          if (( ${#failed[@]} > 0 )); then
+            printf 'Failed to process PR #%s.\n' "${failed[@]}" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

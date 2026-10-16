@@ -5,20 +5,19 @@ import SwiftUI
 nonisolated enum MessageReactionMetrics {
     static var pillHeight: CGFloat { InterfaceScale.metric(28) }
     static var emojiSize: CGFloat { InterfaceScale.metric(18) }
-    static let nativeEmojiVisualScale: CGFloat = 0.78
+    static let countOpacity: CGFloat = 0.6
     static var avatarSize: CGFloat { InterfaceScale.metric(16) }
-    static let maximumAvatarCount = 5
-    static let avatarCountBeforeOverflow = 4
+    static let maximumAvatarCount = 4
+    static var horizontalPadding: CGFloat { InterfaceScale.metric(6) }
+    static var avatarStride: CGFloat { avatarSize - InterfaceScale.metric(5) }
     static var horizontalSpacing: CGFloat { InterfaceScale.metric(4) }
     static var verticalSpacing: CGFloat { InterfaceScale.metric(4) }
 }
 
 nonisolated struct MessageReactionPreviewPlan: Equatable, Sendable {
     var reactors: [ReactionReactor]
-    var overflowCount: Int
-
     var isEmpty: Bool {
-        reactors.isEmpty && overflowCount == 0
+        reactors.isEmpty
     }
 }
 
@@ -69,21 +68,10 @@ nonisolated enum MessageReactionPresentation {
     static func previewPlan(for reaction: Reaction) -> MessageReactionPreviewPlan {
         let safeCount = max(0, reaction.count)
         let knownReactors = uniqueReactors(reaction.reactors, maximumCount: safeCount)
-        guard !knownReactors.isEmpty else {
-            return MessageReactionPreviewPlan(reactors: [], overflowCount: 0)
-        }
-        if safeCount <= MessageReactionMetrics.maximumAvatarCount {
-            return MessageReactionPreviewPlan(
-                reactors: Array(knownReactors.prefix(MessageReactionMetrics.maximumAvatarCount)),
-                overflowCount: 0
-            )
-        }
-        let previews = Array(
-            knownReactors.prefix(MessageReactionMetrics.avatarCountBeforeOverflow)
-        )
+        let avatarCount = min(safeCount, MessageReactionMetrics.maximumAvatarCount)
+        let previews = Array(knownReactors.prefix(avatarCount))
         return MessageReactionPreviewPlan(
-            reactors: previews,
-            overflowCount: max(0, safeCount - previews.count)
+            reactors: previews
         )
     }
 
@@ -246,19 +234,20 @@ struct MessageReactionPill: View {
 
     var body: some View {
         Button(action: react) {
-            HStack(spacing: InterfaceScale.metric(4)) {
+            HStack(spacing: MessageReactionMetrics.horizontalSpacing) {
                 MessageReactionEmoji(
                     reaction: reaction,
                     url: emojiURL,
                     size: MessageReactionMetrics.emojiSize
                 )
-                if reaction.count > 0 {
+                if reaction.count > 1 {
                     Text(reaction.count, format: .number)
-                        .font(.interface(.caption).weight(.semibold))
-                        .monospacedDigit()
+                        .font(Font(NativeTimelineReactionFonts.count))
+                        .padding(.horizontal, InterfaceScale.metric(4))
                         .foregroundStyle(
                             reaction.didCurrentUserReact ? SakuraCordAccentColor.color : .primary
                         )
+                        .opacity(reaction.didCurrentUserReact ? 0.95 : MessageReactionMetrics.countOpacity)
                         .contentTransition(.numericText(value: Double(reaction.count)))
                         .animation(
                             reduceMotion ? nil : .smooth(duration: 0.24),
@@ -268,9 +257,10 @@ struct MessageReactionPill: View {
                 let previewPlan = MessageReactionPresentation.previewPlan(for: reaction)
                 if !previewPlan.isEmpty {
                     MessageReactionAvatarStack(plan: previewPlan)
+                        .padding(.leading, reaction.count > 1 ? 0 : InterfaceScale.metric(4))
                 }
             }
-            .padding(.horizontal, InterfaceScale.metric(6))
+            .padding(.horizontal, MessageReactionMetrics.horizontalPadding)
             .frame(height: MessageReactionMetrics.pillHeight)
             .background(
                 ConcentricRectangle(cornerRadius: InterfaceScale.metric(9), style: .continuous)
@@ -278,8 +268,8 @@ struct MessageReactionPill: View {
             )
             .overlay {
                 ConcentricRectangle(cornerRadius: InterfaceScale.metric(9), style: .continuous)
-                    .stroke(borderColor, lineWidth: reaction.didCurrentUserReact ? 1.5 : 1)
-                    .padding(reaction.didCurrentUserReact ? 0.75 : 0.5)
+                    .stroke(borderColor, lineWidth: 1)
+                    .padding(0.5)
             }
             .contentShape(ConcentricRectangle(cornerRadius: InterfaceScale.metric(9), style: .continuous))
         }
@@ -371,8 +361,8 @@ struct MessageReactionEmoji: View {
                     .resizable()
                     .scaledToFit()
                     .frame(
-                        width: size * MessageReactionMetrics.nativeEmojiVisualScale,
-                        height: size * MessageReactionMetrics.nativeEmojiVisualScale
+                        width: size,
+                        height: size
                     )
             }
         }
@@ -385,28 +375,17 @@ private struct MessageReactionAvatarStack: View {
     let plan: MessageReactionPreviewPlan
 
     var body: some View {
-        HStack(spacing: InterfaceScale.metric(2)) {
-            HStack(spacing: -InterfaceScale.metric(5)) {
-                ForEach(plan.reactors) { reactor in
-                    AvatarView(
-                        name: reactor.displayName,
-                        url: reactor.avatarURL,
-                        size: MessageReactionMetrics.avatarSize
-                    )
-                    .overlay {
-                        Circle().strokeBorder(Color.primary.opacity(0.24), lineWidth: 1)
-                    }
-                    .accessibilityHidden(true)
+        HStack(spacing: MessageReactionMetrics.avatarStride - MessageReactionMetrics.avatarSize) {
+            ForEach(plan.reactors) { reactor in
+                AvatarView(
+                    name: reactor.displayName,
+                    url: reactor.avatarURL,
+                    size: MessageReactionMetrics.avatarSize
+                )
+                .overlay {
+                    Circle().strokeBorder(Color.primary.opacity(0.24), lineWidth: 1)
                 }
-            }
-            if plan.overflowCount > 0 {
-                Text("+\(plan.overflowCount)")
-                    .font(.interface(.caption2).monospacedDigit().weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(minWidth: MessageReactionMetrics.avatarSize)
-                    .accessibilityLabel("\(plan.overflowCount) more reactors")
+                .accessibilityHidden(true)
             }
         }
     }

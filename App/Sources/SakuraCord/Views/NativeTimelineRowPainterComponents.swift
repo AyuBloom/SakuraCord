@@ -1020,7 +1020,7 @@ extension NativeTimelineRowPainter {
         shape.fill()
         if selected {
             NSColor.sakuraCordAccentColor.withAlphaComponent(0.95).setStroke()
-            shape.lineWidth = 1.5
+            shape.lineWidth = 1
             shape.stroke()
         } else if isHovered {
             NSColor.labelColor.withAlphaComponent(0.28).setStroke()
@@ -1065,15 +1065,9 @@ extension NativeTimelineRowPainter {
             let image = ComponentUnicodeEmojiRenderer.image(
                 for: reference.name
             )
-            let optical = region.emojiFrame.insetBy(
-                dx: region.emojiFrame.width
-                    * (1 - MessageReactionMetrics.nativeEmojiVisualScale) / 2,
-                dy: region.emojiFrame.height
-                    * (1 - MessageReactionMetrics.nativeEmojiVisualScale) / 2
-            )
             drawImage(
                 image,
-                in: optical,
+                in: region.emojiFrame,
                 cornerRadius: 0,
                 fillsFrame: false
             )
@@ -1089,7 +1083,9 @@ extension NativeTimelineRowPainter {
             reactionCount(
                 region.reaction.count,
                 in: countFrame,
-                color: selected ? .sakuraCordAccentColor : .labelColor
+                color: selected
+                    ? NSColor.sakuraCordAccentColor.withAlphaComponent(0.95)
+                    : NSColor.labelColor.withAlphaComponent(MessageReactionMetrics.countOpacity)
             )
         }
         for avatarRegion in region.avatarRegions {
@@ -1105,18 +1101,6 @@ extension NativeTimelineRowPainter {
             ))
             border.lineWidth = 1
             border.stroke()
-        }
-        if let overflowFrame = region.overflowFrame {
-            let overflow = MessageReactionPresentation.previewPlan(
-                for: region.reaction
-            ).overflowCount
-            text(
-                "+\(overflow)",
-                in: overflowFrame,
-                font: NativeTimelineReactionFonts.overflow,
-                color: .secondaryLabelColor,
-                alignment: .center
-            )
         }
     }
 
@@ -1140,7 +1124,7 @@ extension NativeTimelineRowPainter {
         systemSymbol(
             SakuraCordSystemSymbol.emojiFaceGrinning,
             in: NativeTimelineReactionAddControlGeometry.iconFrame(in: frame),
-            color: .labelColor,
+            color: NSColor.labelColor.withAlphaComponent(0.8),
             inset: 0,
             weight: .medium
         )

@@ -225,6 +225,11 @@ extension NativeTimelineCanvasView {
         rowIndex: Int,
         reaction: Reaction
     ) {
+        // A new count can hide the label entirely. Remove the previous host
+        // before checking whether the replacement count has a frame.
+        reactionCountAnimationTasks.removeValue(forKey: key)?.cancel()
+        reactionCountAnimationHosts.removeValue(forKey: key)?.removeFromSuperview()
+
         guard layouts.indices.contains(rowIndex),
               let region = layouts[rowIndex].reactionRegions.first(where: {
                   $0.reaction.id == reaction.id
@@ -235,13 +240,9 @@ extension NativeTimelineCanvasView {
             return
         }
 
-        reactionCountAnimationTasks[key]?.cancel()
-        reactionCountAnimationTasks[key] = nil
-        reactionCountAnimationHosts[key]?.removeFromSuperview()
-
         let color: NSColor = reaction.didCurrentUserReact
-            ? .sakuraCordAccentColor
-            : .labelColor
+            ? NSColor.sakuraCordAccentColor.withAlphaComponent(0.95)
+            : NSColor.labelColor.withAlphaComponent(MessageReactionMetrics.countOpacity)
         let animationState = TimelineReactionCountAnimation(
             from: from,
             to: to

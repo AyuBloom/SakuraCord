@@ -37,10 +37,10 @@ nonisolated enum NativeTimelineReactionCountBaseline {
 nonisolated enum NativeTimelineReactionAddControlGeometry {
     static func iconFrame(in frame: CGRect) -> CGRect {
         CGRect(
-            x: frame.midX - InterfaceScale.metric(8),
-            y: frame.midY - InterfaceScale.metric(8),
-            width: InterfaceScale.metric(16),
-            height: InterfaceScale.metric(16)
+            x: frame.midX - InterfaceScale.metric(9),
+            y: frame.midY - InterfaceScale.metric(9),
+            width: InterfaceScale.metric(18),
+            height: InterfaceScale.metric(18)
         )
     }
 }

@@ -9,7 +9,7 @@ enum NativeTimelineReactionFonts {
 
     static var count: NSFont {
         let pointSize = InterfaceScale.fontSize(
-            NSFont.preferredFont(forTextStyle: .caption1).pointSize
+            NSFont.preferredFont(forTextStyle: .caption1).pointSize + 3
         )
         if let cachedCount, cachedCount.pointSize == pointSize {
             return cachedCount.font
@@ -17,17 +17,13 @@ enum NativeTimelineReactionFonts {
         let font = AppPerformanceSignposts.measureSync(
             "TimelineReactionCountFontCacheMiss"
         ) {
-            NSFont.monospacedDigitSystemFont(
+            NSFont.systemFont(
                 ofSize: pointSize,
-                weight: .semibold
+                weight: .medium
             )
         }
         cachedCount = (pointSize, font)
         return font
-    }
-
-    static var overflow: NSFont {
-        NSFont.interfaceMonospacedDigitSystemFont(ofSize: 10, weight: .bold)
     }
 }
 
@@ -221,15 +217,15 @@ extension NativeTimelineRowLayout {
 
     static func reactionSize(_ reaction: Reaction) -> CGSize {
         let plan = MessageReactionPresentation.previewPlan(for: reaction)
-        var width: CGFloat = 12 + MessageReactionMetrics.emojiSize
-        if reaction.count > 0 {
-            width += InterfaceScale.metric(4) + measuredTextWidth(
+        var width = MessageReactionMetrics.horizontalPadding * 2 + MessageReactionMetrics.emojiSize
+        if reaction.count > 1 {
+            width += InterfaceScale.metric(8) + measuredTextWidth(
                 String(reaction.count),
                 font: NativeTimelineReactionFonts.count
             )
         }
         if !plan.isEmpty {
-            width += InterfaceScale.metric(4) + reactionPreviewWidth(plan)
+            width += InterfaceScale.metric(8) + reactionPreviewWidth(plan)
         }
         return CGSize(
             width: ceil(width),
@@ -240,28 +236,17 @@ extension NativeTimelineRowLayout {
     private static func reactionPreviewWidth(
         _ plan: MessageReactionPreviewPlan
     ) -> CGFloat {
-        let avatarsWidth = plan.reactors.isEmpty
+        plan.reactors.count == 0
             ? 0
             : MessageReactionMetrics.avatarSize
-                + CGFloat(plan.reactors.count - 1) * 11
-        guard plan.overflowCount > 0 else { return avatarsWidth }
-        let overflowWidth = max(
-            MessageReactionMetrics.avatarSize,
-            measuredTextWidth(
-                "+\(plan.overflowCount)",
-                font: NativeTimelineReactionFonts.overflow
-            )
-        )
-        return avatarsWidth
-            + (plan.reactors.isEmpty ? 0 : 2)
-            + overflowWidth
+                + CGFloat(plan.reactors.count - 1) * MessageReactionMetrics.avatarStride
     }
 
     static func reactionRegion(
         _ reaction: Reaction,
         frame: CGRect
     ) -> ReactionRegion {
-        var horizontalOffset = frame.minX + 6
+        var horizontalOffset = frame.minX + MessageReactionMetrics.horizontalPadding
         let emojiFrame = CGRect(
             x: horizontalOffset,
             y: frame.midY - MessageReactionMetrics.emojiSize / 2,
@@ -271,8 +256,8 @@ extension NativeTimelineRowLayout {
         horizontalOffset = emojiFrame.maxX
 
         var countFrame: CGRect?
-        if reaction.count > 0 {
-            horizontalOffset += InterfaceScale.metric(4)
+        if reaction.count > 1 {
+            horizontalOffset += InterfaceScale.metric(8)
             let countWidth = measuredTextWidth(
                 String(reaction.count),
                 font: NativeTimelineReactionFonts.count
@@ -288,44 +273,25 @@ extension NativeTimelineRowLayout {
 
         let plan = MessageReactionPresentation.previewPlan(for: reaction)
         var avatars: [ReactionRegion.AvatarRegion] = []
-        var overflowFrame: CGRect?
         if !plan.isEmpty {
-            horizontalOffset += InterfaceScale.metric(4)
+            horizontalOffset += InterfaceScale.metric(8)
             for (index, reactor) in plan.reactors.enumerated() {
                 let avatarFrame = CGRect(
-                    x: horizontalOffset + CGFloat(index) * 11,
+                    x: horizontalOffset + CGFloat(index) * MessageReactionMetrics.avatarStride,
                     y: frame.midY - MessageReactionMetrics.avatarSize / 2,
                     width: MessageReactionMetrics.avatarSize,
                     height: MessageReactionMetrics.avatarSize
                 )
                 avatars.append(.init(frame: avatarFrame, reactor: reactor))
             }
-            if !plan.reactors.isEmpty {
-                horizontalOffset += MessageReactionMetrics.avatarSize
-                    + CGFloat(plan.reactors.count - 1) * 11
-            }
-            if plan.overflowCount > 0 {
-                if !plan.reactors.isEmpty {
-                    horizontalOffset += InterfaceScale.metric(2)
-                }
-                overflowFrame = CGRect(
-                    x: horizontalOffset,
-                    y: frame.minY,
-                    width: max(
-                        MessageReactionMetrics.avatarSize,
-                        frame.maxX - InterfaceScale.metric(6) - horizontalOffset
-                    ),
-                    height: frame.height
-                )
-            }
         }
+
         return ReactionRegion(
             frame: frame,
             reaction: reaction,
             emojiFrame: emojiFrame,
             countFrame: countFrame,
-            avatarRegions: avatars,
-            overflowFrame: overflowFrame
+            avatarRegions: avatars
         )
     }
 

@@ -80,6 +80,26 @@ the [message author contract](https://docs.discord.com/developers/resources/mess
 and Swiftcord's webhook profile-fetch exclusion; pinned Paicord retains the
 raw author fields but has no equivalent dedicated profile path.
 
+### Embed media
+
+The provider normalizes wire media before presentation: `article` and `image`
+embeds promote `thumbnail` into `image`, with an explicit `image` taking
+precedence. They do not retain a side thumbnail. Other types, including `link`
+and `rich`, preserve the separate image and thumbnail slots. Keep the complete
+media metadata and proxy URL during normalization; do not fetch the linked page
+to infer its layout. REST history, Gateway updates and forwarded snapshots share
+`MessageEmbedDTO` and this rule.
+
+Discord's [embed schema](https://docs.discord.com/developers/resources/message#embed-object)
+defines the media slots; its [link-preview guide](https://docs.discord.com/developers/link-previews/overview#preview-layouts)
+distinguishes side thumbnails from large images below the text. The first-party
+normalization is visible in the [stable web client](https://discord.com/assets/web.c5b338cc7e610833.js)
+(`web.c5b338cc7e610833.js`, 16 October 2026):
+the article/image cases assign the wire thumbnail to the main image before an
+explicit image overrides it. Discord's in-memory message dump therefore differs
+from its wire payload. [RichMessageDecodingTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/RichMessageDecodingTests.swift)
+protects promotion, explicit-image precedence and link-thumbnail preservation.
+
 ## Reactions, pins and forwarding
 
 Reaction intent is serialized per message/emoji with one coalesced follow-up.

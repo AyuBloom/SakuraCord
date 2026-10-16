@@ -496,7 +496,7 @@ extension NativeTimelineRowLayout {
             }
             if let poll = message.poll {
                 if hasRichContent { verticalOffset += InterfaceScale.metric(6) }
-                let layout = NativeTimelinePollLayout(poll: poll, x: contentX, y: verticalOffset, width: contentWidth)
+                let layout = NativeTimelinePollLayout(poll: poll, x: contentX, y: verticalOffset, width: contentWidth, integratesWithBubble: usesBubbles)
                 result.pollLayout = layout
                 verticalOffset = layout.frame.maxY
                 hasRichContent = true
@@ -599,7 +599,8 @@ extension NativeTimelineRowLayout {
                     let region = NativeTimelineInviteLayout(reference: reference, index: index,
                         origin: CGPoint(x: contentX, y: verticalOffset + (hasRichContent ? InterfaceScale.metric(8) : 0)),
                         maximumWidth: inlineMediaMaximumWidth, model: model,
-                        isOwnMessage: message.author.id == model?.snapshot?.currentUser.id)
+                        isOwnMessage: message.author.id == model?.snapshot?.currentUser.id,
+                        integratesWithBubble: usesBubbles)
                     result.inviteRegions.append(region)
                     verticalOffset = region.frame.maxY
                     hasRichContent = true
@@ -612,7 +613,7 @@ extension NativeTimelineRowLayout {
                         deepLink,
                         componentIndex: index,
                         origin: CGPoint(x: contentX, y: deepLinkY),
-                        maximumWidth: inlineMediaMaximumWidth
+                        maximumWidth: inlineMediaMaximumWidth, integratesWithBubble: usesBubbles
                     )
                     result.sakuraCordDeepLinkRegions.append(region)
                     verticalOffset = region.frame.maxY
@@ -795,7 +796,7 @@ extension NativeTimelineRowLayout {
                 result.threadFrame = CGRect(
                     x: contentX,
                     y: verticalOffset,
-                    width: min(contentWidth, InterfaceScale.metric(440)),
+                    width: usesBubbles ? contentWidth : min(contentWidth, InterfaceScale.metric(440)),
                     height: NativeTimelineThreadCard.height
                 )
                 verticalOffset += NativeTimelineThreadCard.height
@@ -810,30 +811,12 @@ extension NativeTimelineRowLayout {
                     minY: bubbleStartY,
                     maxY: verticalOffset,
                     isOutgoing: isOutgoingBubble,
-                    showsTail: row.endsGroup,
-                    isBare: showsBareContent
+                    showsTail: row.endsGroup
                 )
                 result.bubbleRegion = region
                 result.avatarFrame = NativeTimelineBubbleLayout.bottomAlignedAvatarFrame(result.avatarFrame, to: region)
             }
 
-        }
-
-        /// Emoji-only text and stickers read as standalone content, as in
-        /// Messages, so their bubble draws no fill.
-        private var showsBareContent: Bool {
-            let isEmojiOnlyText = result.attributedContent == nil
-                || row.textPlan.preparedText?.isEmojiOnly == true
-            return isEmojiOnlyText
-                && (result.contentFrame != nil || !result.stickerFrames.isEmpty)
-                && result.linkedImageRegions.isEmpty && result.attachmentRegions.isEmpty
-                && result.voiceMessageRegion == nil
-                && result.embedRegions.isEmpty && result.componentLayouts.isEmpty
-                && result.inviteRegions.isEmpty && result.sakuraCordDeepLinkRegions.isEmpty
-                && result.translationRegion == nil && result.pollLayout == nil
-                && result.pollResultFrame == nil && result.threadFrame == nil
-                && result.forwardedHeaderFrame == nil && translationPresentation == nil
-                && !message.flags.contains(.loading)
         }
 
         private mutating func appendReactions() {

@@ -26,6 +26,8 @@ struct MockMessageFixtureBuilder {
 
     var messages: [ChannelID: [Message]] {
         [
+            ChannelID(rawValue: 216): messageShowcase(),
+            ChannelID(rawValue: 902): showcaseThreadMessages(),
             ChannelID(rawValue: 200): [
                 message(
                     1001, 200, rowan,

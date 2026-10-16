@@ -1,11 +1,12 @@
 name: Pull request metadata
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, edited, synchronize, closed]
 
-# This unprivileged signal never checks out code or handles artifacts. Trusted
-# workflow_run consumers re-read PR state through the API on the default branch.
+# A scoped Actions event policy permits this default-branch signal to run for
+# forks and conflicted PRs. It has no token permissions, checkout, or artifacts.
+# Trusted workflow_run consumers re-read current PR state through the API.
 permissions: {}
 
 jobs:

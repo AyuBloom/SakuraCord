@@ -330,6 +330,19 @@ public actor MockChatProvider: ChatProvider {
         snapshot.guilds = items.flattenedGuildIDs.compactMap { guildsByID[$0] }
     }
 
+    public func serverInvite(_ reference: ServerInviteReference) async throws -> ServerInvite {
+        guard reference.code == "offline-showcase",
+              let guild = snapshot.guilds.first(where: { $0.id == GuildID(rawValue: 100) })
+        else { throw ServerInviteError.unavailable }
+        return ServerInvite(
+            reference: reference, guildID: guild.id, channelID: ChannelID(rawValue: 216), channelType: 0,
+            name: guild.name, iconURL: guild.iconURL, inviter: currentUser, brandColor: guild.accentHex,
+            description: "A fictional community for native-app design and development.",
+            traits: [.init(label: "Design", emoji: "🎨"), .init(label: "Development", emoji: "💻")],
+            memberCount: 42, onlineCount: 5
+        )
+    }
+
     public func createServerInvite(in channelID: ChannelID, guildID: GuildID, settings: ServerInviteSettings) async throws -> CreatedServerInvite {
         let alphabet = Array("abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789")
         let code = String((0 ..< 8).map { _ in alphabet.randomElement()! })

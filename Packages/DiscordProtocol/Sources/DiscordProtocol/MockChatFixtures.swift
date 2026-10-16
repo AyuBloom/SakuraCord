@@ -77,7 +77,7 @@ struct MockChatFixture {
         demoResource(name, extension: "png")
     }
 
-    fileprivate static func demoResource(
+    static func demoResource(
         _ name: String,
         extension fileExtension: String
     ) -> URL? {
@@ -574,6 +574,10 @@ private struct MockFixtureAssembly {
                     name: "bug_hunt",
                     guildID: auroraID,
                     assetURL: demoAsset("avatar-juniper")
+                ),
+                DiscordEmoji(
+                    id: "900000000000000104", name: "animated_fixture", isAnimated: true,
+                    guildID: auroraID, assetURL: animatedFixture
                 )
             ],
             nativeLabID: [
@@ -652,6 +656,12 @@ private struct MockFixtureAssembly {
                 id: ChannelID(rawValue: 213), guildID: auroraID, name: "empty-canvas",
                 topic: "A quiet channel ready for its first message", category: "COMMUNITY",
                 categoryID: communityCategoryID, position: 3, categoryPosition: 1
+            ),
+            Channel(
+                id: ChannelID(rawValue: 216), guildID: auroraID, name: "message-showcase",
+                topic: "Text, media, embeds, components, replies, polls, and system messages",
+                category: "COMMUNITY", categoryID: communityCategoryID,
+                position: 6, categoryPosition: 1
             ),
             Channel(
                 id: ChannelID(rawValue: 214), guildID: auroraID, name: "read-only",

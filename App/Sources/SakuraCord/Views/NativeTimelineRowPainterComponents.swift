@@ -909,14 +909,19 @@ extension NativeTimelineRowPainter {
         preview: Message?,
         message: Message,
         model: AppModel?,
-        in frame: CGRect
+        in frame: CGRect,
+        bubbleRegion: NativeTimelineBubbleRegion? = nil
     ) {
-        NSColor.secondaryLabelColor.withAlphaComponent(0.08).setFill()
-        NSBezierPath(
-            concentricRoundedRect: frame,
-            cornerRadius: InterfaceScale.metric(8)
-        ).fill()
-        let inset: CGFloat = InterfaceScale.metric(10)
+        if let bubbleRegion {
+            bubbleIntegratedSection(frame, bubbleRegion: bubbleRegion, accentColor: nil,
+                drawsTopSeparator: frame.minY - bubbleRegion.frame.minY > 8.5, drawsNeutralRail: false)
+        } else {
+            NSColor.secondaryLabelColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(concentricRoundedRect: frame, cornerRadius: InterfaceScale.metric(8)).fill()
+        }
+        let foreground = NativeTimelineBubbleDrawing.foregroundColor(for: bubbleRegion)
+        let secondary = NativeTimelineBubbleDrawing.secondaryForegroundColor(for: bubbleRegion)
+        let inset: CGFloat = bubbleRegion == nil ? InterfaceScale.metric(10) : 0
         let nameFont = NSFont.interfaceSystemFont(ofSize: 13, weight: .semibold)
         let nameWidth = min(
             NativeTimelineReplyMetrics.textWidth(thread.name, font: nameFont),
@@ -926,7 +931,7 @@ extension NativeTimelineRowPainter {
             thread.name,
             in: CGRect(x: frame.minX + inset, y: frame.minY + InterfaceScale.metric(7), width: nameWidth, height: InterfaceScale.metric(18)),
             font: nameFont,
-            color: .labelColor
+            color: foreground
         )
         text(
             NativeTimelineThreadCard.countText(thread),
@@ -937,7 +942,7 @@ extension NativeTimelineRowPainter {
                 height: InterfaceScale.metric(18)
             ),
             font: .interfaceSystemFont(ofSize: 13, weight: .semibold),
-            color: .sakuraCordAccentColor
+            color: bubbleRegion?.isOutgoing == true ? .white : .sakuraCordAccentColor
         )
 
         let rowFrame = CGRect(
@@ -955,7 +960,7 @@ extension NativeTimelineRowPainter {
             activity,
             in: CGRect(x: rowFrame.maxX - activityWidth, y: rowFrame.minY + 1, width: activityWidth, height: InterfaceScale.metric(18)),
             font: activityFont,
-            color: .tertiaryLabelColor
+            color: bubbleRegion?.isOutgoing == true ? secondary : .tertiaryLabelColor
         )
         let bodyFrame = CGRect(
             x: rowFrame.minX,
@@ -970,7 +975,7 @@ extension NativeTimelineRowPainter {
                     : "There are no messages in this thread yet.",
                 in: bodyFrame,
                 font: NativeTimelineReplyMetrics.summaryFont,
-                color: .secondaryLabelColor
+                color: secondary
             )
             return
         }
@@ -981,7 +986,8 @@ extension NativeTimelineRowPainter {
             trailingInset: 0,
             showsReplyMention: false,
             message: message,
-            model: model
+            model: model,
+            foregroundColor: bubbleRegion?.isOutgoing == true ? foreground : nil
         )
     }
 

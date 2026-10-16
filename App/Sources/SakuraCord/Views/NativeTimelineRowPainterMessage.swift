@@ -60,7 +60,10 @@ extension NativeTimelineRowPainter {
 
     private static func drawMessageBubbleTint(_ input: NativeTimelineMessageDrawInput) {
         guard let bubbleRegion = input.layout.bubbleRegion else { return }
-        let integratedSectionFrames = input.layout.embedRegions.compactMap {
+        let integratedSectionFrames = input.layout.inviteRegions.map(\.frame)
+            + input.layout.sakuraCordDeepLinkRegions.map(\.frame)
+            + [input.layout.threadFrame, input.layout.pollLayout?.frame].compactMap { $0 }
+            + input.layout.embedRegions.compactMap {
             $0.kind == .bubbleIntegratedCard ? $0.frame : nil
         } + input.layout.componentLayouts.flatMap { componentLayout in
             componentLayout.containers.compactMap { container in
@@ -619,7 +622,7 @@ extension NativeTimelineRowPainter {
         let componentButtonPressProgress = input.componentButtonPressProgress
         for card in layout.inviteRegions {
             let target = NativeTimelineComponentButtonTarget(messageID: message.id, componentID: card.componentID)
-            inviteCard(card, isHovered: hoveredComponentButton == target,
+            inviteCard(card, bubbleRegion: layout.bubbleRegion, isHovered: hoveredComponentButton == target,
                        pressProgress: pressedComponentButton == target ? componentButtonPressProgress : 0)
         }
         for region in layout.sakuraCordDeepLinkRegions {
@@ -629,6 +632,7 @@ extension NativeTimelineRowPainter {
             )
             sakuraCordDeepLinkCard(
                 region,
+                bubbleRegion: layout.bubbleRegion,
                 isButtonHovered: hoveredComponentButton == target,
                 buttonPressProgress:
                     pressedComponentButton == target
@@ -722,7 +726,8 @@ extension NativeTimelineRowPainter {
                 preview: model?.threadPreviewMessages[thread.id],
                 message: message,
                 model: model,
-                in: frame
+                in: frame,
+                bubbleRegion: layout.bubbleRegion
             )
         }
         ComponentUnicodeEmojiRenderer.prepareImages(
@@ -931,7 +936,8 @@ extension NativeTimelineRowPainter {
         reservesSummary: Bool = false,
         showsReplyMention: Bool = true,
         message: Message,
-        model: AppModel?
+        model: AppModel?,
+        foregroundColor: NSColor? = nil
     ) {
         let replySummary = NativeTimelineReplyMetrics.summary(for: preview, in: message, model: model)
         let summary = replySummary.text
@@ -959,7 +965,8 @@ extension NativeTimelineRowPainter {
             avatarFrame: avatarFrame,
             showsReplyMention: showsReplyMention,
             message: message,
-            model: model
+            model: model,
+            foregroundColor: foregroundColor
         )
         let summaryX = authorFrame.maxX + NativeTimelineReplyMetrics.horizontalSpacing
         let summaryWidth = max(
@@ -979,7 +986,7 @@ extension NativeTimelineRowPainter {
                 height: InterfaceScale.metric(20)
             ),
             font: NativeTimelineReplyMetrics.summaryFont,
-            color: .secondaryLabelColor,
+            color: foregroundColor?.withAlphaComponent(0.72) ?? .secondaryLabelColor,
             concealedSpoilerRanges: replySummary.spoilerRanges
         )
         let mediaSymbolFrame = CGRect(
@@ -990,7 +997,7 @@ extension NativeTimelineRowPainter {
             systemSymbol(
                 mediaSymbol,
                 in: mediaSymbolFrame,
-                color: .secondaryLabelColor,
+                color: foregroundColor?.withAlphaComponent(0.72) ?? .secondaryLabelColor,
                 inset: InterfaceScale.metric(2)
             )
         }
@@ -1021,7 +1028,8 @@ extension NativeTimelineRowPainter {
         avatarFrame: CGRect,
         showsReplyMention: Bool,
         message: Message,
-        model: AppModel?
+        model: AppModel?,
+        foregroundColor: NSColor? = nil
     ) -> CGRect {
         let presentation = model?.authorPresentation(for: preview, in: message)
         let author = presentation?.user ?? preview.author
@@ -1059,9 +1067,9 @@ extension NativeTimelineRowPainter {
             displayName,
             in: authorFrame,
             font: font,
-            color: author.isBot
+            color: foregroundColor ?? (author.isBot
                 ? .sakuraCordAccentColor
-                : model?.accessibilitySettings.roleColorDisplay == .inNames ? roleColor ?? .labelColor : .labelColor
+                : model?.accessibilitySettings.roleColorDisplay == .inNames ? roleColor ?? .labelColor : .labelColor)
         )
         if showsIndicator, let roleColor {
             roleColor.setFill()
@@ -1340,37 +1348,37 @@ extension NativeTimelineRowPainter {
 
     static func sakuraCordDeepLinkCard(
         _ region: NativeTimelineRowLayout.SakuraCordDeepLinkRegion,
+        bubbleRegion: NativeTimelineBubbleRegion? = nil,
         isButtonHovered: Bool,
         buttonPressProgress: CGFloat
     ) {
         let colors = sakuraCordDeepLinkColors(for: region.action)
-        let accent = colors.first ?? NSColor.sakuraCordAccentColor
+        let outgoing = bubbleRegion?.isOutgoing == true
+        let accent = outgoing ? NSColor.white : colors.first ?? NSColor.sakuraCordAccentColor
         let cardCornerRadius = ChatChromeMetrics.composerCornerRadius
         let shape = NSBezierPath(
             concentricRoundedRect: region.cardFrame,
             cornerRadius: cardCornerRadius
         )
 
-        NSGraphicsContext.saveGraphicsState()
-        let glow = NSShadow()
-        glow.shadowColor = accent.withAlphaComponent(0.28)
-        glow.shadowBlurRadius = 13
-        glow.shadowOffset = .zero
-        glow.set()
-        accent.withAlphaComponent(0.20).setFill()
-        shape.fill()
-        NSGraphicsContext.restoreGraphicsState()
+        if let bubbleRegion {
+            bubbleIntegratedSection(region.frame, bubbleRegion: bubbleRegion, accentColor: nil,
+                drawsTopSeparator: region.frame.minY - bubbleRegion.frame.minY > 8.5, drawsNeutralRail: false)
+        } else {
+            NSGraphicsContext.saveGraphicsState()
+            let glow = NSShadow()
+            glow.shadowColor = accent.withAlphaComponent(0.28)
+            glow.shadowBlurRadius = 13
+            glow.shadowOffset = .zero
+            glow.set()
+            accent.withAlphaComponent(0.20).setFill()
+            shape.fill()
+            NSGraphicsContext.restoreGraphicsState()
 
-        sakuraCordGradient(colors)?.draw(in: shape, angle: 0)
-        NativeTimelineSemanticColor.opacity(
-            .controlBackgroundColor,
-            0.94
-        ).setFill()
-        NSBezierPath(
-            concentricRoundedRect:
-                region.cardFrame.insetBy(dx: 1, dy: 1),
-            cornerRadius: cardCornerRadius - 1
-        ).fill()
+            sakuraCordGradient(colors)?.draw(in: shape, angle: 0)
+            NativeTimelineSemanticColor.opacity(.controlBackgroundColor, 0.94).setFill()
+            NSBezierPath(concentricRoundedRect: region.cardFrame.insetBy(dx: 1, dy: 1), cornerRadius: cardCornerRadius - 1).fill()
+        }
 
         accent.withAlphaComponent(0.16).setFill()
         NSBezierPath(
@@ -1387,7 +1395,7 @@ extension NativeTimelineRowPainter {
             region.action.title,
             in: region.titleFrame,
             font: .interfaceSystemFont(ofSize: 14, weight: .semibold),
-            color: .labelColor,
+            color: NativeTimelineBubbleDrawing.foregroundColor(for: bubbleRegion),
             lineBreakMode: .byTruncatingTail
         )
 
@@ -1403,12 +1411,9 @@ extension NativeTimelineRowPainter {
             outline.stroke()
         }
 
-        sakuraCordDeepLinkButton(
-            region,
-            isHovered: isButtonHovered,
-            pressProgress: buttonPressProgress,
-            colors: colors
-        )
+        sakuraCordButton(title: region.action.buttonTitle, frame: region.buttonFrame,
+            isHovered: isButtonHovered, pressProgress: buttonPressProgress,
+            colors: outgoing ? [.white] : colors, foreground: outgoing ? .sakuraCordAccentColor : .white)
     }
 
     static func sakuraCordDeepLinkButton(

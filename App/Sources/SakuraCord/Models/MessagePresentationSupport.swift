@@ -586,10 +586,14 @@ nonisolated enum MessageGrouping {
             if messages.indices.contains(index + 1) {
                 affected.insert(index + 1)
             }
-        } else if let neighborIndex,
-                  messages.indices.contains(neighborIndex)
-        {
-            affected.insert(neighborIndex)
+        } else if let neighborIndex {
+            // Deletion changes the group boundary on both sides of the gap.
+            if messages.indices.contains(neighborIndex - 1) {
+                affected.insert(neighborIndex - 1)
+            }
+            if messages.indices.contains(neighborIndex) {
+                affected.insert(neighborIndex)
+            }
         }
         if let replyingMessageIDs, let messageIndex {
             for replyingMessageID in replyingMessageIDs {

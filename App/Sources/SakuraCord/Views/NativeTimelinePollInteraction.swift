@@ -183,7 +183,8 @@ extension NativeTimelineCanvasView {
         let popover = NSPopover()
         popover.behavior = .transient
         let controller = StablePopoverHostingController(rootView:
-            PollVotersView(model: model, message: hit.message, initialAnswerID: answerID), dismiss: { [weak popover] in popover?.close() })
+            PollVotersView(model: model, message: hit.message, initialAnswerID: answerID, dismiss: { [weak popover] in popover?.close() }),
+            dismiss: { [weak popover] in popover?.close() })
         popover.contentViewController = controller
         popover.contentSize = PollVotersView.size
         pollPopover = popover

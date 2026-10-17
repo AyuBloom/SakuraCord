@@ -114,6 +114,28 @@ emoji started before a change must not save or apply its
 identities, even when removals and additions return the count to its earlier
 value. Shared-load waiters recheck the retained reaction before loading again.
 
+View Reactions uses the poll-voter browser's shared people rows and pagination.
+Opening or selecting an emoji loads users on demand; scrolling loads subsequent
+pages. Each page reads normal (`type=0`) and Super Reactions (`type=1`) with the
+same exclusive `after` user ID and `limit=100`, then merges, deduplicates and sorts
+the users by ID before taking at most 100. The last returned ID advances both
+streams, so a person who used both kinds appears once and neither stream loses
+users at a page boundary. Either full response or an unreturned merged suffix
+keeps pagination open. These details pages never expand the five-person timeline
+preview cache or initiate member/profile lookups. Changes invalidate only the
+affected emoji's detail pages, including in-flight results; closing the popover
+or changing accounts prevents late publication.
+
+The [documented reaction endpoint](https://docs.discord.com/developers/resources/message#get-reactions)
+defines `type`, `after` and limits of 1–100. The official stable client (build
+641004, inspected 17 October 2026) shares its `limit/after/type` user loader with
+poll voters; reaction responses are raw user arrays, whereas votes use `users`.
+[Pinned Paicord](https://github.com/llsc12/Paicord/blob/694761c1938b73bb60bd58942674dfe73aab1135/PaicordLib/Sources/DiscordHTTP/DiscordClient%2BAPIEndpoint.swift)
+corroborates that paginated route. Pinned Swiftcord v1 has no equivalent full
+reaction-user browser. SakuraCord deliberately combines normal/Super users in
+one list rather than presenting separate reaction-kind tabs. Provider contract
+tests protect both streams' cursor boundaries and the separate preview budget.
+
 Reaction coalescing reduces requests but does not prevent server rate limits.
 A definite reaction `429` records the transport cooldown and returns a typed
 rate-limit error to the model. The model retains optimistic state and permits

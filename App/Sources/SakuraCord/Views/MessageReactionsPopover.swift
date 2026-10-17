@@ -2,23 +2,18 @@ import AppKit
 import SakuraCordModels
 import SwiftUI
 
-/// Presents the identities already retained by the timeline. Opening or
-/// switching reactions must never initiate a reactor or member request.
 struct MessageReactionsPopover: View {
-    static var size: CGSize {
-        CGSize(width: InterfaceScale.metric(480), height: InterfaceScale.metric(380))
-    }
+    static var size: CGSize { MessagePeoplePopoverLayout.size }
 
     let model: AppModel
     let message: Message
     let dismiss: () -> Void
     @State private var selectedReactionID: String?
     @State private var reactionSnapshot: [Reaction]?
+    @State private var pager = MessagePeoplePager<String>()
 
     private var reactions: [Reaction] {
-        if let reactionSnapshot { return reactionSnapshot }
-        let current = model.retainedMessage(channelID: message.channelID, messageID: message.id) ?? message
-        return MessageReactionPresentation.items(from: current.reactions)
+        reactionSnapshot ?? (model.retainedMessage(channelID: message.channelID, messageID: message.id) ?? message).reactions
     }
 
     private var selectedReaction: Reaction? {
@@ -26,30 +21,49 @@ struct MessageReactionsPopover: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Reactions").font(.interface(.headline))
-                Spacer()
-                Button(action: dismiss) {
-                    Image(systemName: "xmark")
-                        .font(.interface(.callout).weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: InterfaceScale.metric(24), height: InterfaceScale.metric(24))
-                        .contentShape(Rectangle())
+        MessagePeoplePopover(
+            model: model, message: message, selection: selectedReaction?.id, count: selectedReaction?.count,
+            pager: pager, emptyTitle: "No Reactions", errorTitle: "Couldn't Load Reactions", systemImage: "face.smiling",
+            sidebarWidth: 112, displayedUsers: displayedUsers,
+            fetch: { provider, reactionID, after in
+                guard let reaction = reactions.first(where: { $0.id == reactionID }) else { throw CancellationError() }
+                return try await provider.reactionUsers(for: reaction.emoji, messageID: message.id,
+                                                        channelID: message.channelID, after: after, limit: 100)
+            },
+            header: {
+                HStack {
+                    Text("Reactions").font(.interface(.headline))
+                    Spacer()
+                    Button(action: dismiss) { Image(systemName: "xmark").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain).accessibilityLabel("Close reactions")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close reactions")
+            },
+            categories: {
+                ForEach(reactions) { reaction in
+                    Button { selectedReactionID = reaction.id } label: {
+                        HStack(spacing: InterfaceScale.metric(10)) {
+                            MessageReactionEmoji(
+                                reaction: reaction,
+                                url: MessageReactionPresentation.emojiURL(for: reaction, customEmojiURLsByID: model.customEmojiURLsByID),
+                                size: InterfaceScale.metric(24)
+                            )
+                            Text(String(reaction.count)).font(.interface(.callout).weight(.medium)).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(InterfaceScale.metric(10)).frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PopoverRowButtonStyle(isSelected: selectedReaction?.id == reaction.id))
+                    .accessibilityLabel("\(MessageReactionPresentation.emojiName(for: reaction)), \(reaction.count) reactions")
+                    .accessibilityAddTraits(selectedReaction?.id == reaction.id ? .isSelected : [])
+                }
             }
-            .padding(InterfaceScale.metric(16))
-            Divider()
-            HStack(spacing: 0) {
-                reactionList.frame(width: InterfaceScale.metric(112))
-                Divider()
-                peopleList.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(width: Self.size.width, height: Self.size.height)
-        .onReceive(NotificationCenter.default.publisher(for: .sakuracordMessageRowsDidChange, object: model)) { _ in
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .sakuracordMessageRowsDidChange, object: model)) { _ in refreshReactions() }
+        .onReceive(NotificationCenter.default.publisher(for: .sakuracordMessageReactionDidChange, object: model)) { notification in
+            guard let update = notification.userInfo?["update"] as? MessageReactionUpdate,
+                  update.messageID == message.id, update.channelID == message.channelID else { return }
+            if let id = update.reactionID { pager.invalidate(id) } else { pager.reset() }
             refreshReactions()
         }
         .onChange(of: model.snapshot?.currentUser.id) { _, _ in dismiss() }
@@ -60,98 +74,14 @@ struct MessageReactionsPopover: View {
             dismiss()
             return
         }
-        reactionSnapshot = MessageReactionPresentation.items(from: current.reactions).map { reaction in
-            var reaction = reaction
-            reaction.reactors = model.retainedReactionReactors(for: reaction, on: current)
-            return reaction
-        }
-        if !reactions.contains(where: { $0.id == selectedReactionID }) {
-            selectedReactionID = reactions.first?.id
-        }
+        reactionSnapshot = current.reactions
+        if !reactions.contains(where: { $0.id == selectedReactionID }) { selectedReactionID = reactions.first?.id }
     }
 
-    private var reactionList: some View {
-        let selection = selectedReaction?.id
-        return ScrollView(.vertical) {
-            VStack(spacing: InterfaceScale.metric(2)) {
-                ForEach(reactions) { reaction in
-                    Button { selectedReactionID = reaction.id } label: {
-                        HStack(spacing: InterfaceScale.metric(10)) {
-                            MessageReactionEmoji(
-                                reaction: reaction,
-                                url: MessageReactionPresentation.emojiURL(
-                                    for: reaction, customEmojiURLsByID: model.customEmojiURLsByID
-                                ),
-                                size: InterfaceScale.metric(24)
-                            )
-                            Text(String(reaction.count))
-                                .font(.interface(.callout).weight(.medium))
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(InterfaceScale.metric(10))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PopoverRowButtonStyle(isSelected: selection == reaction.id))
-                    .accessibilityLabel("\(MessageReactionPresentation.emojiName(for: reaction)), \(reaction.count) reactions")
-                    .accessibilityAddTraits(selection == reaction.id ? .isSelected : [])
-                }
-            }
-            .padding(InterfaceScale.metric(8))
-        }
-        .scrollBounceBehavior(.basedOnSize)
-    }
-
-    @ViewBuilder private var peopleList: some View {
-        if let reaction = selectedReaction {
-            let members = members(for: reaction)
-            VStack(spacing: 0) {
-                NativeMemberListView(
-                    sections: [MemberSection(
-                        id: .online, title: "", colorHex: nil,
-                        totalCount: members.count, members: members
-                    )],
-                    customEmojiURLsByID: model.customEmojiURLsByID,
-                    profilePresentation: nil, isProfilePresented: false,
-                    selectMember: { _ in }, dismissProfile: {},
-                    runsPerformanceAutoScroll: false, viewportIdentity: nil,
-                    presentation: NativeMemberListPresentation(
-                        roleColorDisplay: .hidden, dimsOfflineMembers: false,
-                        presenceHiddenUserIDs: Set(members.map(\.id)),
-                        activityTextPrimaryOpacity: 0.6
-                    ),
-                    contentIdentity: reaction.id
-                )
-                .padding(.vertical, InterfaceScale.metric(8))
-                .overlay {
-                    if members.isEmpty {
-                        ContentUnavailableView("No People to Show", systemImage: "person.2")
-                    }
-                }
-                if members.count < reaction.count {
-                    Text("Showing \(members.count) of \(reaction.count)")
-                        .font(.interface(.caption))
-                        .foregroundStyle(.secondary)
-                        .padding(InterfaceScale.metric(12))
-                }
-            }
-        } else {
-            ContentUnavailableView("No Reactions", systemImage: "face.smiling")
-        }
-    }
-
-    private func members(for reaction: Reaction) -> [Member] {
-        model.retainedReactionReactors(for: reaction, on: message).map { reactor in
-            let known = model.snapshot?.currentUser.id == reactor.id ? model.snapshot?.currentUser
-                : model.membersByID[reactor.id]?.user
-                    ?? model.snapshot?.knownUsers.first { $0.id == reactor.id }
-            let user = User(
-                id: reactor.id, username: known?.username ?? "",
-                displayName: reactor.displayName, avatarURL: reactor.avatarURL
-            )
-            return Member(user: user, roleName: "", isOnline: false, activityText: known?.username)
-        }
+    private func displayedUsers(_ users: [User]) -> [User] {
+        guard let reaction = selectedReaction, let me = model.snapshot?.currentUser else { return users }
+        let others = users.filter { $0.id != me.id }
+        return reaction.didCurrentUserReact || reaction.didCurrentUserBurstReact ? [me] + others : others
     }
 }
 

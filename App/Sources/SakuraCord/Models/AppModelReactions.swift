@@ -591,6 +591,7 @@ extension AppModel {
         if persistsResult, let messageToPersist {
             recordAuthoritativeMessageUpsert(messageToPersist)
         }
+        NotificationCenter.default.post(name: .sakuracordMessageReactionDidChange, object: self, userInfo: ["update": update])
     }
 
 }

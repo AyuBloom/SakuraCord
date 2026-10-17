@@ -107,8 +107,10 @@ If the target is absent from the working set, read `around={message}&limit=1`
 before deciding whether PUT/DELETE is needed. Missing/failed reads prevent the
 mutation; an already satisfied intent sends nothing.
 
-Reaction changes invalidate saved previews and pending reads in both the model
-and provider. A response started before a change must not save or apply its
+Reaction changes invalidate the affected emoji's saved previews and pending reads
+in both the model and provider, preserving other emojis' loads and previews.
+Clearing all reactions invalidates the whole message. A response for an affected
+emoji started before a change must not save or apply its
 identities, even when removals and additions return the count to its earlier
 value. Shared-load waiters recheck the retained reaction before loading again.
 

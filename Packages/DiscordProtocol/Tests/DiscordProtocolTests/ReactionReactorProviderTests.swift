@@ -104,6 +104,12 @@ struct ReactionReactorProviderTests {
         }
         var iterator = received.stream.makeAsyncIterator()
         _ = await iterator.next()
+        let unaffected = Task {
+            try await provider.reactionReactors(
+                for: "✅", messageID: MessageID(rawValue: 300), channelID: ChannelID(rawValue: 200), reactionCount: 2
+            )
+        }
+        _ = await iterator.next()
         let removed = MessageReactionUpdate.remove(
             channelID: ChannelID(rawValue: 200), messageID: MessageID(rawValue: 300),
             userID: UserID(rawValue: 1), emoji: "👍", kind: .normal
@@ -111,18 +117,28 @@ struct ReactionReactorProviderTests {
         await provider.receiveGatewayReactionForTesting(removed)
         release.continuation.finish()
         await #expect(throws: CancellationError.self) { try await first.value }
-        #expect(await provider.cachedReactionReactors.isEmpty)
+        let retained = try await unaffected.value
+        #expect(retained.count == 5)
+        #expect(await provider.cachedReactionReactors.keys.map(\.emojiIdentity) == ["unicode:✅"])
         #expect(await provider.reactionReactorTasks.isEmpty)
 
         _ = try await provider.reactionReactors(
             for: "👍", messageID: MessageID(rawValue: 300), channelID: ChannelID(rawValue: 200), reactionCount: 2
         )
-        #expect(ReactionReactorURLProtocol.requestCount == 2)
+        #expect(ReactionReactorURLProtocol.requestCount == 3)
+        _ = try await provider.reactionReactors(
+            for: "✅", messageID: MessageID(rawValue: 300), channelID: ChannelID(rawValue: 200), reactionCount: 2
+        )
+        #expect(ReactionReactorURLProtocol.requestCount == 3)
         await provider.receiveGatewayReactionForTesting(removed)
         _ = try await provider.reactionReactors(
             for: "👍", messageID: MessageID(rawValue: 300), channelID: ChannelID(rawValue: 200), reactionCount: 2
         )
-        #expect(ReactionReactorURLProtocol.requestCount == 3)
+        #expect(ReactionReactorURLProtocol.requestCount == 4)
+        await provider.receiveGatewayReactionForTesting(.removeAll(
+            channelID: ChannelID(rawValue: 200), messageID: MessageID(rawValue: 300)
+        ))
+        #expect(await provider.cachedReactionReactors.isEmpty)
         await provider.disconnect()
     }
 }

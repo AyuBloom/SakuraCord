@@ -561,7 +561,7 @@ extension DiscordRESTProvider {
             ), with: response)
         }
         try validateEmptyResponse(response)
-        invalidateReactionReactors(channelID: channelID, messageID: messageID)
+        invalidateReactionReactors(channelID: channelID, messageID: messageID, reactionID: Reaction(emoji: emoji, count: 0).id)
         guard let currentUserID = currentUser?.id,
               var updated = cachedMessages[messageID]
         else { return }
@@ -664,18 +664,18 @@ extension DiscordRESTProvider {
         }
     }
 
-    func invalidateReactionReactors(channelID: ChannelID, messageID: MessageID) {
+    func invalidateReactionReactors(channelID: ChannelID, messageID: MessageID, reactionID: String? = nil) {
+        func matches(_ key: ReactionReactorCacheKey) -> Bool {
+            key.channelID == channelID && key.messageID == messageID
+                && (reactionID == nil || key.emojiIdentity == reactionID)
+        }
         for key in reactionReactorTasks.keys
-        where key.channelID == channelID && key.messageID == messageID {
+        where matches(key) {
             reactionReactorTasks.removeValue(forKey: key)?.cancel()
             reactionReactorTaskIDs[key] = nil
         }
-        cachedReactionReactors = cachedReactionReactors.filter {
-            $0.key.channelID != channelID || $0.key.messageID != messageID
-        }
-        reactionReactorCacheOrder.removeAll {
-            $0.channelID == channelID && $0.messageID == messageID
-        }
+        cachedReactionReactors = cachedReactionReactors.filter { !matches($0.key) }
+        reactionReactorCacheOrder.removeAll { matches($0) }
     }
 
     func cacheReactionReactors(

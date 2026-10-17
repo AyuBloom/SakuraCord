@@ -443,17 +443,17 @@ extension AppModel {
         invalidateReactionReactorPreviews(channelID: channelID, messageID: messageID)
     }
 
-    private func invalidateReactionReactorPreviews(channelID: ChannelID, messageID: MessageID) {
+    private func invalidateReactionReactorPreviews(channelID: ChannelID, messageID: MessageID, reactionID: String? = nil) {
+        func matches(_ key: ReactionReactorLoadKey) -> Bool {
+            key.channelID == channelID && key.messageID == messageID
+                && (reactionID == nil || key.reactionID == reactionID)
+        }
         for key in reactionReactorLoadTasks.keys
-        where key.channelID == channelID && key.messageID == messageID {
+        where matches(key) {
             reactionReactorLoadTasks[key]?.cancel()
         }
-        loadedReactionReactorPreviews = loadedReactionReactorPreviews.filter {
-            $0.key.channelID != channelID || $0.key.messageID != messageID
-        }
-        failedReactionReactorLoads = failedReactionReactorLoads.filter {
-            $0.key.channelID != channelID || $0.key.messageID != messageID
-        }
+        loadedReactionReactorPreviews = loadedReactionReactorPreviews.filter { !matches($0.key) }
+        failedReactionReactorLoads = failedReactionReactorLoads.filter { !matches($0.key) }
     }
 
     func clearReactionMutationState(
@@ -487,7 +487,9 @@ extension AppModel {
     ) {
         // A count can return to an earlier value after removals and additions.
         // Its previous short response no longer describes the current users.
-        invalidateReactionReactorPreviews(channelID: update.channelID, messageID: update.messageID)
+        invalidateReactionReactorPreviews(
+            channelID: update.channelID, messageID: update.messageID, reactionID: update.reactionID
+        )
         let currentUserID = snapshot?.currentUser.id
         let reactor: ReactionReactor? =
             switch update {

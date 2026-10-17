@@ -5067,6 +5067,39 @@ func `reaction changes discard pending preview identities even if the count retu
 }
 
 @MainActor
+@Test(arguments: [false, true])
+func `reaction changes preserve unrelated pending and saved previews`(clearsAll: Bool) async throws {
+    let provider = ChannelLoadTestProvider(reactionPreviewResultCount: 2, suspendsFirstReactionRequest: true)
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    await model.start()
+    let message = Message(
+        id: MessageID(rawValue: 92502), channelID: ChannelID(rawValue: 91001),
+        author: try #require(model.snapshot?.currentUser), content: "Independent previews",
+        reactions: [Reaction(emoji: "✅", count: 2), Reaction(emoji: "👍", count: 2)]
+    )
+    model.replaceSelectedMessages(with: [message])
+    let load = Task { await model.loadReactionReactors(message.reactions[0], on: message) }
+    await provider.waitForFirstReactionRequest()
+    model.applyReactionUpdate(clearsAll
+        ? .removeAll(channelID: message.channelID, messageID: message.id)
+        : .removeEmoji(channelID: message.channelID, messageID: message.id, emoji: "👍"))
+    await provider.releaseFirstReactionRequest()
+    await load.value
+
+    let current = try #require(model.messages.first)
+    let reactors = model.retainedReactionReactors(for: message.reactions[0], on: current)
+    #expect(reactors.count == (clearsAll ? 0 : 2))
+    #expect(model.loadedReactionReactorPreviews.count == (clearsAll ? 0 : 1))
+    if !clearsAll {
+        // History replacement should restore the unaffected cache without another read.
+        model.replaceSelectedMessages(with: [message])
+        await model.loadReactionReactors(message.reactions[0], on: message)
+        #expect(model.messages.first?.reactions.first?.reactors == reactors)
+    }
+    #expect(await provider.reactorRequestCount() == 1)
+}
+
+@MainActor
 @Test func `voice server reallocation keeps the call selected and reconnects`() async throws {
     let provider = VoiceMigrationTestProvider()
     let sounds = RecordingAppSoundPlayer()

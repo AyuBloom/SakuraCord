@@ -186,6 +186,10 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
     var hoveredPollTarget: NativeTimelinePollTarget?
     var pollPopover: NSPopover?
     var reactionDetailsPopover: NSPopover?
+    var reactionDetailsMessageID: MessageID?
+    var reactionPickerMessageID: MessageID?
+    weak var reactionDetailsPopoverAnchor: NSView?
+    var reactionPopoverLayoutAnchors: [(view: NSView, frameInWindow: CGRect)] = []
     var pollClockTask: Task<Void, Never>?
     let pollAnimationTicker = NativeTimelineDisplayLinkTicker()
     // Intermediate resize widths are short-lived; paint them without replacing

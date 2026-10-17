@@ -5,14 +5,17 @@ extension NativeTimelineCanvasView {
     /// Poll voters and reaction users share the system popover and dismissal path.
     func presentMessagePeoplePopover<Content: View>(
         relativeTo anchor: CGRect,
+        followsTimelineScroll: Bool = false,
         @ViewBuilder content: (NSPopover) -> Content
     ) -> NSPopover? {
         guard let window, !anchor.isNull, !anchor.isEmpty else { return nil }
-        // Keep the popover in window coordinates, just like the emoji picker.
-        // Updating a bottom-pinned reaction row can change the canvas origin.
+        // Freeze the anchor independently of later reaction layout changes.
+        // Reaction popovers keep that snapshot inside the scrolling document.
         let source = StableReactionPickerSourceView(frame: anchor)
+        source.followsScrolling = followsTimelineScroll
         addSubview(source)
         let snapshotAnchor = source.installSnapshotAnchor(in: window)
+        if followsTimelineScroll { reactionDetailsPopoverAnchor = snapshotAnchor }
         source.removeFromSuperview()
         let popover = NSPopover()
         popover.behavior = .transient

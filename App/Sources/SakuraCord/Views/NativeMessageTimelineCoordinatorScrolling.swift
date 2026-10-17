@@ -1206,6 +1206,7 @@ extension NativeMessageTimelineCoordinator {
             positionViewportCanvas()
             updateHistorySkeletonPresentation()
             guard !isApplyingUpdate else { return }
+            canvas?.dismissOffscreenReactionPopovers()
             canvas?.dismissHoverPresentationForScroll()
             noteScrollActivity()
             // Once the clip view is pinned to the loaded-history

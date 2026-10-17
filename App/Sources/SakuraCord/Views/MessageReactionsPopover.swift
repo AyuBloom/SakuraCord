@@ -84,7 +84,8 @@ extension NativeTimelineCanvasView {
         guard let model, window != nil,
               let anchor = messageReactionPopoverAnchor(for: message) else { return false }
         reactionDetailsPopover?.close()
-        reactionDetailsPopover = presentMessagePeoplePopover(relativeTo: anchor) { popover in
+        reactionDetailsMessageID = message.id
+        reactionDetailsPopover = presentMessagePeoplePopover(relativeTo: anchor, followsTimelineScroll: true) { popover in
             MessageReactionsPopover(model: model, message: message, dismiss: { [weak popover] in popover?.close() })
         }
         return reactionDetailsPopover?.isShown == true

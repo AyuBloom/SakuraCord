@@ -394,33 +394,59 @@ extension NativeTimelineCanvasView {
         )
     }
 
-    /// Both reaction popovers start at the inline add button. Resolve it at
-    /// presentation time, then freeze the anchor while reactions change.
+    /// Both native reaction popovers use the visible message row as their anchor.
+    /// The presenters freeze this rectangle while the popover remains open.
     func messageReactionPopoverAnchor(for message: Message) -> CGRect? {
         guard let index = items.firstIndex(where: { $0.messageID == message.id }),
               layouts.indices.contains(index) else { return nil }
         let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
-        if let frame = layouts[index].addReactionFrame {
-            let anchor = frame.offsetBy(dx: 0, dy: displayedRowOrigin(at: index)).intersection(viewport)
-            if !anchor.isNull, !anchor.isEmpty { return anchor }
-        }
-        // Offscreen accessibility actions still need a visible anchor without
-        // scrolling the timeline or starting another history request.
         let visibleRow = rowFrame(at: index).intersection(viewport)
-        let fallback = visibleRow.isNull || visibleRow.isEmpty ? viewport : visibleRow
-        guard !fallback.isNull, !fallback.isEmpty else { return nil }
-        let diameter = HoverActionPillMetrics.controlDiameter
-        return CGRect(
-            x: max(fallback.minX, fallback.maxX - diameter - InterfaceScale.metric(4)),
-            y: fallback.minY,
-            width: min(diameter, fallback.width),
-            height: min(diameter, fallback.height)
-        )
+        let anchor = visibleRow.isNull || visibleRow.isEmpty ? viewport : visibleRow
+        return anchor.isNull || anchor.isEmpty ? nil : anchor
+    }
+
+    func beginReactionPopoverLayout() {
+        // Layout may restore the viewport or rebase history coordinates. Keep
+        // open popovers steady through that correction, independently of scroll.
+        reactionPopoverLayoutAnchors = [reactionPickerSource.installedSnapshotAnchor, reactionDetailsPopoverAnchor]
+            .compactMap { anchor in
+                guard let anchor, anchor.window != nil, anchor.superview != nil else { return nil }
+                return (anchor, anchor.convert(anchor.bounds, to: nil))
+            }
+    }
+
+    func endReactionPopoverLayout() {
+        for (anchor, frameInWindow) in reactionPopoverLayoutAnchors {
+            guard let parent = anchor.superview, anchor.window === window else { continue }
+            anchor.frame = parent.convert(frameInWindow, from: nil)
+        }
+        reactionPopoverLayoutAnchors.removeAll(keepingCapacity: true)
+        dismissOffscreenReactionPopovers()
+    }
+
+    func dismissOffscreenReactionPopovers() {
+        guard reactionPickerCoordinator.isShown || reactionDetailsPopover?.isShown == true else { return }
+        let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
+        func isVisible(_ messageID: MessageID?) -> Bool {
+            guard let messageID, let index = items.firstIndex(where: { $0.messageID == messageID }) else { return false }
+            let intersection = rowFrame(at: index).intersection(viewport)
+            return !intersection.isNull && !intersection.isEmpty
+        }
+        if reactionPickerCoordinator.isShown, !isVisible(reactionPickerMessageID) {
+            reactionPickerMessageID = nil
+            reactionPickerCoordinator.close(notifyBinding: true)
+        }
+        if reactionDetailsPopover?.isShown == true, !isVisible(reactionDetailsMessageID) {
+            reactionDetailsMessageID = nil
+            reactionDetailsPopover?.close()
+        }
     }
 
     func showReactionPicker(forMessageRow message: Message) {
         guard let model, let anchor = messageReactionPopoverAnchor(for: message) else { return }
+        reactionPickerMessageID = message.id
         reactionPickerSource.frame = anchor
+        reactionPickerSource.followsScrolling = true
         let content = EmojiPickerView(
             model: model,
             useCase: .reaction(

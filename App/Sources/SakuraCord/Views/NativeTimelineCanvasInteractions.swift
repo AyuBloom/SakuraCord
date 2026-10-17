@@ -394,60 +394,59 @@ extension NativeTimelineCanvasView {
         )
     }
 
-    /// Presents the reaction picker beside the message's visible bubble, on
-    /// the side facing the open timeline. Otherwise, such as for a non-bubble
-    /// row or a bubble scrolled away above its visible reactions, it opens
-    /// from the top-right of the row's visible part. The row is looked up
-    /// when the picker opens because the timeline may have changed while a
-    /// context menu was open.
-    func showReactionPicker(forMessageRow message: Message) {
-        guard let index = items.firstIndex(where: {
-            $0.messageID == message.id
-        }) else { return }
-        let visibleBounds = enclosingScrollView?.documentVisibleRect ?? visibleRect
-        let anchor: CGRect
-        let presentation: ReactionActionMenuPresentation
-        let preferredEdge: NSRectEdge?
-        if layouts.indices.contains(index),
-           let bubble = layouts[index].bubbleRegion,
-           case let visibleBubble = bubble.frame.offsetBy(
-               dx: 0,
-               dy: displayedRowOrigin(at: index)
-           ).intersection(visibleBounds),
-           !visibleBubble.isNull
-        {
-            anchor = visibleBubble
-            presentation = .inline
-            preferredEdge = bubble.isOutgoing ? .minX : .maxX
-        } else {
-            let rowFrame = rowFrame(at: index)
-            let visibleRow = rowFrame.intersection(visibleBounds)
-            let diameter = HoverActionPillMetrics.controlDiameter
-            anchor = CGRect(
-                x: rowFrame.maxX - diameter - InterfaceScale.metric(4),
-                y: visibleRow.isNull ? rowFrame.minY : visibleRow.minY,
-                width: diameter,
-                height: diameter
-            )
-            presentation = .toolbar
-            preferredEdge = nil
-        }
-        showReactionPicker(
-            for: message,
-            anchor: anchor,
-            presentation: presentation,
-            preferredEdge: preferredEdge
-        )
+    /// Both native reaction popovers use the visible message row as their anchor.
+    /// The presenters freeze this rectangle while the popover remains open.
+    func messageReactionPopoverAnchor(for message: Message) -> CGRect? {
+        guard let index = items.firstIndex(where: { $0.messageID == message.id }),
+              layouts.indices.contains(index) else { return nil }
+        let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
+        let visibleRow = rowFrame(at: index).intersection(viewport)
+        let anchor = visibleRow.isNull || visibleRow.isEmpty ? viewport : visibleRow
+        return anchor.isNull || anchor.isEmpty ? nil : anchor
     }
 
-    func showReactionPicker(
-        for message: Message,
-        anchor: CGRect,
-        presentation: ReactionActionMenuPresentation,
-        preferredEdge: NSRectEdge? = nil
-    ) {
-        guard let model else { return }
+    func beginReactionPopoverLayout() {
+        // Layout may restore the viewport or rebase history coordinates. Keep
+        // open popovers steady through that correction, independently of scroll.
+        reactionPopoverLayoutAnchors = [reactionPickerSource.installedSnapshotAnchor, reactionDetailsPopoverAnchor]
+            .compactMap { anchor in
+                guard let anchor, anchor.window != nil, anchor.superview != nil else { return nil }
+                return (anchor, anchor.convert(anchor.bounds, to: nil))
+            }
+    }
+
+    func endReactionPopoverLayout() {
+        for (anchor, frameInWindow) in reactionPopoverLayoutAnchors {
+            guard let parent = anchor.superview, anchor.window === window else { continue }
+            anchor.frame = parent.convert(frameInWindow, from: nil)
+        }
+        reactionPopoverLayoutAnchors.removeAll(keepingCapacity: true)
+        dismissOffscreenReactionPopovers()
+    }
+
+    func dismissOffscreenReactionPopovers() {
+        guard reactionPickerCoordinator.isShown || reactionDetailsPopover?.isShown == true else { return }
+        let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
+        func isVisible(_ messageID: MessageID?) -> Bool {
+            guard let messageID, let index = items.firstIndex(where: { $0.messageID == messageID }) else { return false }
+            let intersection = rowFrame(at: index).intersection(viewport)
+            return !intersection.isNull && !intersection.isEmpty
+        }
+        if reactionPickerCoordinator.isShown, !isVisible(reactionPickerMessageID) {
+            reactionPickerMessageID = nil
+            reactionPickerCoordinator.close(notifyBinding: true)
+        }
+        if reactionDetailsPopover?.isShown == true, !isVisible(reactionDetailsMessageID) {
+            reactionDetailsMessageID = nil
+            reactionDetailsPopover?.close()
+        }
+    }
+
+    func showReactionPicker(forMessageRow message: Message) {
+        guard let model, let anchor = messageReactionPopoverAnchor(for: message) else { return }
+        reactionPickerMessageID = message.id
         reactionPickerSource.frame = anchor
+        reactionPickerSource.followsScrolling = true
         let content = EmojiPickerView(
             model: model,
             useCase: .reaction(
@@ -477,8 +476,8 @@ extension NativeTimelineCanvasView {
         reactionPickerCoordinator.update(
             sourceView: reactionPickerSource,
             isPresented: true,
-            preferredEdge: preferredEdge ?? presentation.popoverEdge,
-            accessibilityIdentifier: presentation.pickerAccessibilityIdentifier,
+            preferredEdge: .maxX,
+            accessibilityIdentifier: ReactionActionMenuPresentation.inline.pickerAccessibilityIdentifier,
             content: content,
             setPresented: { [weak self] isPresented in
                 if !isPresented {
@@ -1362,6 +1361,8 @@ extension NativeTimelineCanvasView {
             { actions.retry(row.message) }
         case .addReaction:
             { [weak self] in self?.showReactionPicker(forMessageRow: row.message) }
+        case .viewReactions:
+            { [weak self] in self?.showMessageReactions(row.message) }
         case .reply:
             {
                 guard let reply = actions.reply else { return }

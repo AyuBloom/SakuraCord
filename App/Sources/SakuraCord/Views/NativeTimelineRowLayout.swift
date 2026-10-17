@@ -34,7 +34,7 @@ struct NativeTimelineRowLayout {
         let emojiFrame: CGRect
         let countFrame: CGRect?
         let avatarRegions: [AvatarRegion]
-        let overflowFrame: CGRect?
+        let placeholderAvatarFrames: [CGRect]
     }
 
     struct LinkedImageRegion {

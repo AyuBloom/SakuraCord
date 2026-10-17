@@ -225,7 +225,13 @@ extension NativeTimelineCanvasView {
         rowIndex: Int,
         reaction: Reaction
     ) {
-        guard layouts.indices.contains(rowIndex),
+        // Remove the previous host even when the replacement needs no animation.
+        reactionCountAnimationTasks.removeValue(forKey: key)?.cancel()
+        reactionCountAnimationHosts.removeValue(forKey: key)?.removeFromSuperview()
+
+        // A newly added reaction shows its first count immediately.
+        guard !(from == 0 && to == 1),
+              layouts.indices.contains(rowIndex),
               let region = layouts[rowIndex].reactionRegions.first(where: {
                   $0.reaction.id == reaction.id
               }),
@@ -234,10 +240,6 @@ extension NativeTimelineCanvasView {
             activeReactionCountAnimations[key] = nil
             return
         }
-
-        reactionCountAnimationTasks[key]?.cancel()
-        reactionCountAnimationTasks[key] = nil
-        reactionCountAnimationHosts[key]?.removeFromSuperview()
 
         let color: NSColor = reaction.didCurrentUserReact
             ? .sakuraCordAccentColor

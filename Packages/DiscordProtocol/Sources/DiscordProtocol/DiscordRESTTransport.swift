@@ -358,6 +358,10 @@ extension DiscordRESTProvider {
     ) async throws {
         let (_, response) = try await perform(
             path, method: method, query: query, body: body, headers: [:])
+        try validateEmptyResponse(response)
+    }
+
+    func validateEmptyResponse(_ response: HTTPURLResponse) throws {
         guard (200 ..< 300).contains(response.statusCode) else {
             if response.statusCode == 401 {
                 authorizationValue = nil

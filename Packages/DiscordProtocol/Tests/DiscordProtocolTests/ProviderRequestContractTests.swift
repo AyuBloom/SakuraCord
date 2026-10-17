@@ -763,6 +763,38 @@ struct ProviderRequestContractTests {
         try await ReactionGatewayScenario().run
     }
 
+    @Test(arguments: [false, true])
+    func `reaction rate limits expose cooldown without replaying the mutation`(reacted: Bool) async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReactionRateLimitURLProtocol.self]
+        let diagnostics = DiscordAPIDiagnosticStore()
+        let provider = DiscordRESTProvider(
+            credentials: TestCredentialStore(), handle: CredentialHandle(accountID: "1"),
+            session: URLSession(configuration: configuration), installationID: "fixture",
+            apiDiagnostics: diagnostics
+        )
+        let message = Message(
+            id: MessageID(rawValue: 350), channelID: ChannelID(rawValue: 200),
+            author: User(id: UserID(rawValue: 1), username: "tester", displayName: "Tester"),
+            content: "Reaction retry fixture",
+            reactions: reacted ? [] : [Reaction(emoji: "🔥", count: 1, didCurrentUserReact: true)]
+        )
+        await provider.seedMessageForTesting(message)
+        await #expect(throws: ChatProviderError.rateLimited(retryAfter: 0.55, requestID: "fixture")) {
+            try await provider.setReaction(
+                "🔥", reacted: reacted, messageID: message.id, channelID: message.channelID
+            )
+        }
+        let entries = try diagnostics.exportData().split(separator: 0x0A).map {
+            try JSONSerialization.jsonObject(with: Data($0)) as? [String: Any] ?? [:]
+        }
+        let requests = entries.filter { $0["direction"] as? String == "request" }
+        #expect(requests.count == 1)
+        #expect(requests.first?["method"] as? String == (reacted ? "PUT" : "DELETE"))
+        #expect(await provider.cachedMessageForTesting(messageID: message.id) == message)
+        await provider.disconnect()
+    }
+
     @Test func `external forum reaction deltas publish once and change the count once`() async
         throws
     {
@@ -863,4 +895,24 @@ private extension DiscordRESTProvider {
     func setEmojiResponseGate(_ callback: (@Sendable () async -> Void)?) {
         emojiResponseReceivedForTesting = callback
     }
+}
+
+private final class ReactionRateLimitURLProtocol: URLProtocol, @unchecked Sendable {
+    override static func canInit(with request: URLRequest) -> Bool { true }
+
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url,
+              let response = HTTPURLResponse(
+                  url: url, statusCode: 429, httpVersion: "HTTP/1.1",
+                  headerFields: ["Content-Type": "application/json", "Retry-After": "1", "x-request-id": "fixture"]
+              )
+        else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"retry_after":0.3,"global":false}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

@@ -886,11 +886,7 @@ extension NativeTimelineCanvasView {
                 actions?.react(reaction.emoji, hit.message)
             }
         case .add:
-            showReactionPicker(
-                for: hit.message,
-                anchor: hit.frame,
-                presentation: .inline
-            )
+            showReactionPicker(forMessageRow: hit.message)
         }
     }
 

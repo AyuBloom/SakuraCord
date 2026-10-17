@@ -32,6 +32,7 @@ nonisolated enum NativeTimelineMessageMenuAction: Equatable {
     case jumpToMessage
     case retrySending
     case addReaction
+    case viewReactions
     case reply
     case forward
     case markUnread
@@ -117,14 +118,22 @@ nonisolated enum NativeTimelineMessageMenuPolicy {
         if let translationTitle, !canRetry {
             entries.insert(
                 .action(.toggleTranslation, title: translationTitle, systemImage: "translate"),
-                at: entries.firstIndex(of: .separator) ?? entries.count
+                at: messageActionsEnd(in: entries)
             )
         }
         if canCopyTranslation {
             entries.insert(.action(.copyTranslation, title: "Copy Translation", systemImage: "doc.on.doc"),
-                           at: entries.firstIndex(of: .separator) ?? entries.count)
+                           at: messageActionsEnd(in: entries))
         }
         return entries
+    }
+
+    private static func messageActionsEnd(in entries: [NativeTimelineMessageMenuEntry]) -> Int {
+        guard let copyIndex = entries.firstIndex(where: {
+            if case .action(.copyText, _, _, _) = $0 { return true }
+            return false
+        }) else { return entries.count }
+        return entries[..<copyIndex].lastIndex(of: .separator) ?? copyIndex
     }
 
     private static func conversationEntries(
@@ -163,8 +172,14 @@ nonisolated enum NativeTimelineMessageMenuPolicy {
         result.append(.action(
             .addReaction,
             title: "Add Reaction",
+            systemImage: "emoji.face.grinning.and.plus"
+        ))
+        result.append(.action(
+            .viewReactions,
+            title: "View Reactions",
             systemImage: SakuraCordSystemSymbol.emojiFaceGrinning
         ))
+        result.append(.separator)
         if canReply {
             result.append(.action(
                 .reply,

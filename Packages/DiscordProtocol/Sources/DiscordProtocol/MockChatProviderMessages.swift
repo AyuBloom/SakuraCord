@@ -523,9 +523,9 @@ public extension MockChatProvider {
         continuation?.yield(.messageUpdated(message))
     }
 
-    func pollVoters(messageID: MessageID, channelID: ChannelID, answerID: Int, after: UserID?, limit: Int) async throws -> PollVoterPage {
+    func pollVoters(messageID: MessageID, channelID: ChannelID, answerID: Int, after: UserID?, limit: Int) async throws -> MessagePeoplePage {
         let poll = messagesByChannel[channelID]?.first(where: { $0.id == messageID })?.poll
-        return PollVoterPage(users: after == nil && poll?.selectedAnswerIDs.contains(answerID) == true ? [currentUser] : [], hasMore: false)
+        return MessagePeoplePage(users: after == nil && poll?.selectedAnswerIDs.contains(answerID) == true ? [currentUser] : [], hasMore: false)
     }
 
     func endPoll(messageID: MessageID, channelID: ChannelID) async throws -> Message {

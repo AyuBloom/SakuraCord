@@ -311,7 +311,16 @@ final class NativeMessageTimelineCoordinator: NSObject {
         var initialPositionConversation:
             NativeTimelineConversation?
         var lastViewportSize = CGSize.zero
-        var isApplyingUpdate = false
+        var isApplyingUpdate = false {
+            didSet {
+                guard oldValue != isApplyingUpdate else { return }
+                if isApplyingUpdate {
+                    canvas?.beginReactionPopoverLayout()
+                } else {
+                    canvas?.endReactionPopoverLayout()
+                }
+            }
+        }
         var pendingModelRowsUpdateTask: Task<Void, Never>?
         var layoutPreparationTask: Task<Void, Never>?
         var layoutPreparation: LayoutPreparation?

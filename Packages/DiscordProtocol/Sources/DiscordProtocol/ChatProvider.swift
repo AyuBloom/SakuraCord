@@ -181,7 +181,7 @@ public protocol ChatProvider: Sendable {
     func send(_ draft: SendMessageDraft, progress: @escaping @Sendable (MessageSendProgress) -> Void)
         async throws -> Message
     func setPollAnswers(_ answerIDs: [Int], messageID: MessageID, channelID: ChannelID) async throws
-    func pollVoters(messageID: MessageID, channelID: ChannelID, answerID: Int, after: UserID?, limit: Int) async throws -> PollVoterPage
+    func pollVoters(messageID: MessageID, channelID: ChannelID, answerID: Int, after: UserID?, limit: Int) async throws -> MessagePeoplePage
     func endPoll(messageID: MessageID, channelID: ChannelID) async throws -> Message
     /// Returns a freshly signed copy of a Discord attachment URL, or nil when Discord returns none.
     func refreshAttachmentURL(_ url: URL) async throws -> URL?
@@ -294,6 +294,7 @@ public protocol ChatProvider: Sendable {
         channelID: ChannelID,
         reactionCount: Int
     ) async throws -> [ReactionReactor]
+    func reactionUsers(for emoji: String, messageID: MessageID, channelID: ChannelID, after: UserID?, limit: Int) async throws -> MessagePeoplePage
     func joinVoice(
         channelID: ChannelID,
         guildID: GuildID?,
@@ -1018,6 +1019,10 @@ public extension ChatProvider {
         []
     }
 
+    func reactionUsers(for emoji: String, messageID: MessageID, channelID: ChannelID, after: UserID?, limit: Int) async throws -> MessagePeoplePage {
+        throw ChatProviderError.invalidRequest("Reaction details are unavailable for this provider.")
+    }
+
     func joinVoice(
         channelID: ChannelID,
         guildID: GuildID?,
@@ -1079,6 +1084,7 @@ public enum ChatProviderError: LocalizedError, Equatable, Sendable {
     case slowmode(retryAfter: TimeInterval)
     case messageNotFound
     case invalidRequest(String)
+    case rateLimited(retryAfter: TimeInterval, requestID: String?)
     case transport(status: Int, requestID: String?)
     case capabilityDisabled(ChatCapability)
 
@@ -1089,6 +1095,8 @@ public enum ChatProviderError: LocalizedError, Equatable, Sendable {
         case .channelNotFound: "The selected channel is unavailable."
         case .messageNotFound: "The message no longer exists."
         case let .invalidRequest(message): message
+        case let .rateLimited(_, requestID):
+            ChatProviderError.transport(status: 429, requestID: requestID).errorDescription
         case let .transport(status, requestID):
             requestID.map { "Discord returned HTTP \(status) (request \($0))." }
                 ?? "Discord returned HTTP \(status)."
@@ -1130,7 +1138,7 @@ public extension ChatProvider {
     func setPollAnswers(_ answerIDs: [Int], messageID: MessageID, channelID: ChannelID) async throws {
         throw ChatProviderError.invalidRequest("Poll voting is unavailable.")
     }
-    func pollVoters(messageID: MessageID, channelID: ChannelID, answerID: Int, after: UserID?, limit: Int) async throws -> PollVoterPage {
+    func pollVoters(messageID: MessageID, channelID: ChannelID, answerID: Int, after: UserID?, limit: Int) async throws -> MessagePeoplePage {
         throw ChatProviderError.invalidRequest("Poll voters are unavailable.")
     }
     func endPoll(messageID: MessageID, channelID: ChannelID) async throws -> Message {

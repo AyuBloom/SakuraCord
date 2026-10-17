@@ -312,6 +312,7 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
     var reactionReactorCacheOrder: [ReactionReactorCacheKey] = []
     var reactionReactorTasks: [ReactionReactorCacheKey: Task<[ReactionReactor], Error>] =
         [:]
+    var reactionReactorTaskIDs: [ReactionReactorCacheKey: UUID] = [:]
     var cachedApplicationCommandCatalogs:
         [ApplicationCommandIndexTarget: ApplicationCommandCatalog] = [:]
     var applicationCommandCatalogTasks:
@@ -339,6 +340,7 @@ public actor DiscordRESTProvider: PendingCredentialChatProvider {
         var eventOverflowDidStopRequestsForTesting: (@Sendable () -> Void)?
         var derivedCacheClearDidBeginForTesting: (@Sendable () -> Void)?
         var emojiResponseReceivedForTesting: (@Sendable () async -> Void)?
+        var reactorResponseReceivedForTesting: (@Sendable () async -> Void)?
     #endif
 
     struct ForumCatalogueLoadKey: Hashable {

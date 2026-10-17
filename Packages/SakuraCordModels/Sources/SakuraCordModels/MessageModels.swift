@@ -181,6 +181,16 @@ public enum MessageReactionUpdate: Equatable, Sendable {
     case removeAll(channelID: ChannelID, messageID: MessageID)
     case removeEmoji(channelID: ChannelID, messageID: MessageID, emoji: String)
 
+    /// The affected emoji identity, or nil when all reactions are cleared.
+    public var reactionID: String? {
+        switch self {
+        case .add(_, _, _, let emoji, _), .remove(_, _, _, let emoji, _), .removeEmoji(_, _, let emoji):
+            Reaction(emoji: emoji, count: 0).id
+        case .removeAll:
+            nil
+        }
+    }
+
     public var channelID: ChannelID {
         switch self {
         case .add(let channelID, _, _, _, _),

@@ -455,8 +455,10 @@ extension NativeTimelineCanvasView {
                     keys.append(.avatar(url))
                 }
             }
-            if !region.mediaIsVideo,
-               let url = region.mediaURL
+            if TimelineInlineVideoPolicy.canvasOwnsLoadingSurface(
+                mediaIsVideo: region.mediaIsVideo,
+                autoplaysInline: region.mediaAutoplaysInline
+            ), let url = region.mediaPreviewURL ?? (region.mediaIsVideo ? nil : region.mediaURL)
             {
                 keys.append(.media(url))
             }

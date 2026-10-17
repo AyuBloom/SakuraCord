@@ -70,6 +70,7 @@ struct NativeTimelineRowLayout {
         let imageRegions: [ImageRegion]
         let mediaFrame: CGRect?
         let mediaURL: URL?
+        let mediaPreviewURL: URL?
         let mediaIsVideo: Bool
         let mediaAutoplaysInline: Bool
         let accentColor: UInt32?
@@ -152,6 +153,7 @@ struct NativeTimelineRowLayout {
     var timestampText: NativeIdentityTextPresentation?
     var editedText: NativeIdentityTextPresentation?
     var botBadgeFrame: CGRect?
+    var botBadgeText: NativeIdentityTextPresentation?
     var timestampFrame: CGRect?
     var editedFrame: CGRect?
     var activityIndicators: [ActivityIndicator] = []

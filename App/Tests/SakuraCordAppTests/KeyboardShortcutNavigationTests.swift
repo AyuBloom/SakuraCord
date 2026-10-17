@@ -38,6 +38,18 @@ struct KeyboardShortcutNavigationTests {
         #expect(model.keyboardShortcutConversationDestination(direction: 1, unreadOnly: false) == ChannelID(rawValue: 12))
         model.checkingChannelIDs = [ChannelID(rawValue: 12)]
         #expect(model.keyboardShortcutConversationDestination(direction: 1, unreadOnly: false) == nil)
+
+        model.hiddenChannelIDs = []
+        model.checkingChannelIDs = []
+        model.applyNotificationSettings(.init(guildID: GuildID(rawValue: 1), hideMutedChannels: true,
+            channelOverrides: [.init(channelID: ChannelID(rawValue: 11), isMuted: true)]))
+        #expect(model.keyboardShortcutConversationDestination(direction: 1, unreadOnly: false) == ChannelID(rawValue: 12))
+        #expect(model.hasKeyboardShortcutConversationDestination(unreadOnly: false))
+        model.updateLocalChannelNotificationOverride(guildID: GuildID(rawValue: 1), channelID: ChannelID(rawValue: 12)) {
+            $0.isMuted = true
+        }
+        #expect(model.keyboardShortcutConversationDestination(direction: 1, unreadOnly: false) == nil)
+        #expect(!model.hasKeyboardShortcutConversationDestination(unreadOnly: false))
     }
 
     @Test func `unread shortcuts keep their position across read channels and wrap across servers`() {

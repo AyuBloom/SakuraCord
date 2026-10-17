@@ -62,6 +62,22 @@ Do not recompute targets from a later rerender or restore obsolete mention count
 on Undo. Fully loaded expanded empty groups may acknowledge and disappear without
 Undo; incomplete loads do not establish emptiness.
 
+The optional server-rail Read All action uses the same bulk route with type 0
+entries for accessible current server channels and active joined threads, including
+muted conversations. It excludes DMs, departed/archived threads, resource channels
+and scheduled events. Targets are captured only after native confirmation; new
+messages beyond those boundaries stay unread. Accepted batches remain read if a
+later batch fails; failed targets roll back without automatic replay.
+
+This scope follows Vencord’s
+[ReadAllNotificationsButton](https://github.com/Vendicated/Vencord/blob/32c90633ce6a95d7e56c95479efbb431bacf1eac/src/plugins/readAllNotificationsButton/index.tsx),
+which dispatches Discord’s `BULK_ACK` with channel IDs, last-message IDs and type 0.
+The [production web client](https://discord.com/assets/web.4d4b2f75fdea5470.js)
+(build 641004) maps that action to
+`POST /read-states/ack-bulk` with `read_states` containing `channel_id`,
+`message_id` and `read_state_type`, in batches of at most 100. SakuraCord retains
+its existing one-attempt mutation policy and partial-batch reconciliation.
+
 Restricted groups require the applicable account eligibility and local server
 consent before exposing their contents. Mentions also gate restricted accessories.
 Bookmark and Reminder surfaces are outside this Inbox implementation.

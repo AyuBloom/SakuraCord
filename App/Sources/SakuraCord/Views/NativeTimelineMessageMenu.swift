@@ -2,7 +2,7 @@ import AppKit
 
 enum NativeTimelineCompactTimestampMetrics {
     static var font: NSFont {
-        .interfacePreferredFont(forTextStyle: .caption2)
+        .interfaceSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption2).pointSize)
     }
 
     private static var cachedWidth: (key: String, width: CGFloat)?

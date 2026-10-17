@@ -170,7 +170,11 @@ struct ChannelSidebarView: View {
                             customizationTitle: voiceModel.customizationTitle(in: guild?.id),
                             hasCustomization: guild.map { voiceModel.hasChannelsAndRoles(in: $0.id) } ?? false,
                             hasGuide: guild.map { voiceModel.hasGuildGuide(in: $0.id) } ?? false,
-                            channelGroups: voiceModel.selectedChannelGroups(channelGroups, guildID: guild?.id),
+                            channelGroups: voiceModel.selectedChannelGroups(
+                                channelGroups,
+                                guildID: guild?.id,
+                                threadsByParentID: threads.threadsByParentID
+                            ),
                             rulesChannelID: guild?.rulesChannelID,
                             activeVoiceChannelID: activeVoiceChannelID,
                             hiddenChannelIDs: hiddenChannelIDs,

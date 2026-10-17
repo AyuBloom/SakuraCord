@@ -1150,11 +1150,14 @@ final class AppModel {
     @ObservationIgnored var acknowledgementQueueOrder: [ChannelID] = []
     @ObservationIgnored var acknowledgementProcessorTask: Task<Void, Never>?
     @ObservationIgnored var acknowledgementGeneration = 0
+    var isMarkingAllServersRead = false
+    @ObservationIgnored var allServersReadTask: Task<Void, Never>?
     @ObservationIgnored var guildAcknowledgementTasks:
         [GuildID: Task<Void, Never>] = [:]
     @ObservationIgnored var categoryAcknowledgementTasks:
         [ChannelID: Task<Void, Never>] = [:]
     @ObservationIgnored var guildNotificationMutationTasks: [GuildID: Task<Void, Never>] = [:]
+    @ObservationIgnored var guildNotificationSettingsRevisions: [GuildID: UInt64] = [:]
     @ObservationIgnored var channelNotificationMutationTasks: [ChannelID: Task<Void, Never>] = [:]
     @ObservationIgnored var categoryCollapseMutationTasks: [ChannelID: Task<Void, Never>] = [:]
     @ObservationIgnored var categoryCollapseMutationStates:

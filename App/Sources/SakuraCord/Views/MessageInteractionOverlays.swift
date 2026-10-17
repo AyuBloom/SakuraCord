@@ -9,8 +9,8 @@ enum MessageRowLayoutMetrics {
     nonisolated static var avatarColumnGap: CGFloat { InterfaceScale.metric(12) }
     nonisolated static var compactContentHeight: CGFloat { InterfaceScale.metric(18) }
     nonisolated static var authorLineHeight: CGFloat { InterfaceScale.metric(16) }
-    nonisolated static var authorContentSpacing: CGFloat { InterfaceScale.metric(4) }
-    nonisolated static var commandAuthorContentSpacing: CGFloat { InterfaceScale.metric(2) }
+    nonisolated static var authorContentSpacing: CGFloat { InterfaceScale.metric(2) }
+    nonisolated static var commandAuthorContentSpacing: CGFloat { InterfaceScale.metric(0) }
     nonisolated static var messageGroupSeparation: CGFloat { InterfaceScale.metric(12) }
     // Message density is set in points and is independent of interface size.
     nonisolated static let visibleHighlightInset: CGFloat = 3

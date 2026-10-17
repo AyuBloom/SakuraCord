@@ -146,19 +146,11 @@ struct ServerRailView: View {
                     .transition(ServerRailAnimations.membershipTransition)
                 }
 
-                Divider().padding(.horizontal, InterfaceScale.metric(12))
-
-                if showsReadAllButton {
-                    Button(action: readAll) {
-                        Text("Read All")
-                            .font(.interfaceSystem(size: 13, weight: .semibold))
-                            .frame(width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(24))
-                            .contentShape(Rectangle())
+                VStack(spacing: InterfaceScale.metric(4)) {
+                    Divider().padding(.horizontal, InterfaceScale.metric(12))
+                    if showsReadAllButton {
+                        ReadAllServersButton(isReadingAll: isReadingAll, action: readAll)
                     }
-                        .buttonStyle(.plain)
-                        .disabled(isReadingAll)
-                        .help("Mark all servers as read")
-                        .accessibilityIdentifier("read-all-servers")
                 }
 
                 ForEach(items) { item in
@@ -309,6 +301,27 @@ struct ServerRailView: View {
                 )
             }
         }
+    }
+}
+
+private struct ReadAllServersButton: View {
+    let isReadingAll: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("Read All")
+                .font(.interfaceSystem(size: 12, weight: .medium))
+                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .frame(width: ChatChromeMetrics.serverRailWidth)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadingAll)
+        .onModalHover { isHovering = $0 }
+        .help("Mark all servers as read")
+        .accessibilityIdentifier("read-all-servers")
     }
 }
 

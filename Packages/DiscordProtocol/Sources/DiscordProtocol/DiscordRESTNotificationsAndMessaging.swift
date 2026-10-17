@@ -206,6 +206,7 @@ extension DiscordRESTProvider {
     }
 
     func performForward(_ draft: ForwardMessageDraft) async throws -> Message {
+        try requireGuildCommunication(in: draft.destinationChannelID)
         let isKnownChannel = cachedChannels.values.lazy.flatMap(\.self).contains(where: {
             $0.id == draft.destinationChannelID
         })
@@ -494,6 +495,7 @@ extension DiscordRESTProvider {
     public func edit(messageID: MessageID, channelID: ChannelID, content: String) async throws
         -> Message
     {
+        try requireGuildCommunication(in: channelID)
         let dto: MessageDTO = try await request(
             "/channels/\(channelID)/messages/\(messageID)", method: "PATCH",
             body: ["content": .string(content)]
@@ -541,6 +543,7 @@ extension DiscordRESTProvider {
         messageID: MessageID,
         channelID: ChannelID
     ) async throws {
+        try requireGuildCommunication(in: channelID)
         let message = try await messageForReaction(messageID, channelID: channelID)
         let apiEmoji = Self.reactionAPIValue(emoji)
         let currentReaction = message.reactions.first {

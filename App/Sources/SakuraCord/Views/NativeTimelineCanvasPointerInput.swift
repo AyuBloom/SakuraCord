@@ -880,6 +880,7 @@ extension NativeTimelineCanvasView {
     }
 
     func activateReactionPointerHit(_ hit: ReactionPointerHit) {
+        guard model?.canUpdateReactions(on: hit.message) == true else { return }
         switch hit.target {
         case .reaction:
             if let reaction = hit.reaction {

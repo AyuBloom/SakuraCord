@@ -446,6 +446,7 @@ extension NativeTimelineCanvasView {
         presentation: ReactionActionMenuPresentation,
         preferredEdge: NSRectEdge? = nil
     ) {
+        guard model?.canCreateReactions(on: message) == true else { return }
         guard let model else { return }
         reactionPickerSource.frame = anchor
         let content = EmojiPickerView(
@@ -1196,6 +1197,7 @@ extension NativeTimelineCanvasView {
             row.message.author.id == model?.snapshot?.currentUser.id
                 && !row.message.hasPoll
                 && !row.message.flags.contains(.voiceMessage)
+                && model?.guildTimeoutUntil(in: row.message.channelID, guildID: row.message.guildID) == nil
                 && MessageReplyPresentationPolicy.allowsReplyAction(
                     for: row.message
                 )
@@ -1212,6 +1214,7 @@ extension NativeTimelineCanvasView {
             canDelete: canDelete,
             canRetry: row.message.outboxState == .failed,
             canReply: actions.reply != nil
+                && model?.guildTimeoutUntil(in: row.message.channelID, guildID: row.message.guildID) == nil
                 && MessageReplyPresentationPolicy.allowsReplyAction(
                     for: row.message
                 ),
@@ -1244,6 +1247,7 @@ extension NativeTimelineCanvasView {
                 }
                 continue
             }
+            if case .addReaction = action, model?.canCreateReactions(on: row.message) != true { continue }
             let handler = messageMenuHandler(
                 action: action,
                 row: row,

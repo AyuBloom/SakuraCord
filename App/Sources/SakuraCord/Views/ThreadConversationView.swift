@@ -173,7 +173,15 @@ private struct ThreadCreationView: View {
         .padding(.bottom, InterfaceScale.metric(12))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            ComposerView(model: model, channelName: "", conversation: .thread)
+            if let until = model.guildTimeoutUntil(in: creation.parentID) {
+                DisabledComposerView(
+                    message: "You are timed out.",
+                    appearance: model.appearanceSettings.composerBarAppearance,
+                    timeoutUntil: until
+                )
+            } else {
+                ComposerView(model: model, channelName: "", conversation: .thread)
+            }
         }
         .disabled(creation.isSubmitting)
     }
@@ -272,6 +280,13 @@ private struct ThreadConversationComposer: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let until = model.guildTimeoutUntil(in: thread.id, guildID: thread.guildID) {
+                DisabledComposerView(
+                    message: "You are timed out.",
+                    appearance: model.appearanceSettings.composerBarAppearance,
+                    timeoutUntil: until
+                )
+            } else {
             switch model.openThreadAccess {
             case .checking:
                 DisabledComposerView(
@@ -294,6 +309,7 @@ private struct ThreadConversationComposer: View {
                 }
             case .hidden:
                 EmptyView()
+            }
             }
         }
     }

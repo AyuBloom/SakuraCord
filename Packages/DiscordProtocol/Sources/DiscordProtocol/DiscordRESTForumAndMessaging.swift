@@ -152,6 +152,7 @@ extension DiscordRESTProvider {
         _ draft: CreateForumPostDraft,
         progress: @escaping @Sendable (MessageSendProgress) -> Void
     ) async throws -> ForumPost {
+        try requireGuildCommunication(in: draft.channelID)
         guard
             let channel = cachedChannels.values.lazy.flatMap(\.self).first(where: {
                 $0.id == draft.channelID && $0.kind == .forum
@@ -239,6 +240,7 @@ extension DiscordRESTProvider {
     /// Mirrors the first-party composer Plus Button action. The starter
     /// message is an ordinary send to the returned thread.
     public func createThread(_ draft: CreateThreadDraft) async throws -> MessageThreadSummary {
+        try requireGuildCommunication(in: draft.channelID)
         guard
             let channel = cachedChannels.values.lazy.flatMap(\.self).first(where: {
                 $0.id == draft.channelID && ($0.kind == .text || $0.kind == .announcement)
@@ -265,7 +267,9 @@ extension DiscordRESTProvider {
                 "location": .string("Plus Button"),
             ]
         )
-        return try dto.forumPost(fallbackGuildID: channel.guildID).thread
+        let thread = try dto.forumPost(fallbackGuildID: channel.guildID).thread
+        ingestForumThreads([dto], fallbackGuildID: channel.guildID)
+        return thread
     }
 
     public func updateForumPost(_ post: ForumPost, mutation: ForumPostMutation) async throws
@@ -931,6 +935,7 @@ extension DiscordRESTProvider {
     }
 
     public func sendTyping(in channelID: ChannelID) async throws {
+        try requireGuildCommunication(in: channelID)
         let channel = cachedChannels.values.lazy.flatMap(\.self).first { $0.id == channelID }
         guard let channel else { throw ChatProviderError.channelNotFound }
         guard channel.kind != .voice, channel.kind != .forum, channel.kind != .unknown else {

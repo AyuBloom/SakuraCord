@@ -663,18 +663,21 @@ extension DiscordRESTProvider {
             guard !guild.members.isEmpty else { continue }
             let guildRoles = cachedGuildRoles[guildID] ?? []
             let guildRoleCatalog = GuildMemberRoleCatalog(guildRoles)
+            let previousMembers = cachedMemberIndex(guildID: guildID)
             let members = guild.members.compactMap {
                 try? $0.domain(
                     currentUserID: currentUser?.id,
                     currentStatus: presenceStatus,
                     guildRoles: guildRoles,
                     guildRoleCatalog: guildRoleCatalog,
-                    guildID: guildID
+                    guildID: guildID,
+                    previousCommunicationDisabledUntil: UserID($0.user.id).flatMap { previousMembers[$0]?.communicationDisabledUntil }
                 )
             }
             cachedMembers[guildID] = DiscordMemberStoreOrdering.merging(
                 existing: cachedMembers[guildID] ?? [], updates: members
             )
+            publishCurrentMemberTimeoutChange(previousMembers: previousMembers, guildID: guildID)
             if let currentUserID = currentUser?.id,
                let currentMember = members.first(where: { $0.id == currentUserID })
             {

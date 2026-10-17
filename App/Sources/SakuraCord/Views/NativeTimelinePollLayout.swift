@@ -152,7 +152,9 @@ extension NativeTimelineRowPainter {
             guard let answer = poll.answers.first(where: { $0.id == region.id }) else { continue }
             drawPollAnswer(answer, region: region, poll: poll, state: state, bubbleRegion: bubble)
         }
-        drawPollFooter(poll, layout: layout, state: state, isConfirmed: input.row.message.outboxState == .confirmed, bubbleRegion: bubble)
+        drawPollFooter(poll, layout: layout, state: state,
+                       isConfirmed: input.row.message.outboxState == .confirmed,
+                       canVote: input.model?.canUpdatePollVote(on: input.row.message, removing: !poll.selectedAnswerIDs.isEmpty) != false, bubbleRegion: bubble)
     }
 
     private static func drawPollAnswer(_ answer: PollAnswer, region: NativeTimelinePollLayout.Answer,
@@ -245,7 +247,8 @@ extension NativeTimelineRowPainter {
     }
 
     private static func drawPollFooter(_ poll: MessagePoll, layout: NativeTimelinePollLayout,
-                                       state: NativeTimelinePollPresentation, isConfirmed: Bool, bubbleRegion: NativeTimelineBubbleRegion?) {
+                                       state: NativeTimelinePollPresentation, isConfirmed: Bool, canVote: Bool,
+                                       bubbleRegion: NativeTimelineBubbleRegion?) {
         let results = state.showsResults(for: poll)
         pollButton(poll.results == nil ? "— votes" : "\(poll.totalVotes) \(poll.totalVotes == 1 ? "vote" : "votes")",
                    in: layout.votesFrame, control: .votes, state: state, bubbleRegion: bubbleRegion)
@@ -259,7 +262,7 @@ extension NativeTimelineRowPainter {
         }
         if !results || !poll.selectedAnswerIDs.isEmpty {
             let removing = !poll.selectedAnswerIDs.isEmpty
-            let enabled = removing || !state.selected.isEmpty
+            let enabled = canVote && (removing || !state.selected.isEmpty)
             pollButton(removing ? "Remove Vote" : "Vote",
                        in: layout.submitFrame, control: .submit, state: state, isEnabled: enabled, isProminent: !removing, bubbleRegion: bubbleRegion)
         }

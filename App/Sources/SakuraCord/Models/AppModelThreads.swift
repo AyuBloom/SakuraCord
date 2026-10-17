@@ -266,6 +266,7 @@ extension AppModel {
     }
 
     func closeThread() {
+        threadVoiceMessageComposer.discard(playback: voiceMessagePlayback)
         threadCommandComposer.resetForChannelChange()
         if let threadID = openThread?.id {
             cancelConversationRefresh(in: threadID)
@@ -454,7 +455,8 @@ extension AppModel {
         thread: MessageThreadSummary,
         clearsComposer: Bool
     ) -> Task<Bool, Never>? {
-        guard allowOnboardingSubmission(in: thread.id), allowSlowmodeSubmission(in: thread.id) else { return nil }
+        guard guildTimeoutUntil(in: thread.id, guildID: thread.guildID) == nil,
+              allowOnboardingSubmission(in: thread.id), allowSlowmodeSubmission(in: thread.id) else { return nil }
         let draft = SendMessageDraft(
             channelID: thread.id,
             content: content,
@@ -533,7 +535,8 @@ extension AppModel {
     ) async -> ComposerSubmissionResult {
         guard threadCreation === creation, !creation.isSubmitting else { return .rejected }
         let permissions = selectedChannelThreadCreationPermissions
-        let content = threadDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let originalDraft = threadDraft
+        let content = originalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard creation.isPrivate ? permissions.canCreatePrivate : permissions.canCreatePublic,
               !creation.trimmedName.isEmpty, !content.isEmpty || !attachments.isEmpty,
               validateAttachmentCount(attachments),
@@ -564,7 +567,8 @@ extension AppModel {
             return .rejected
         }
         guard isCurrentAccountSession(session) else { return .rejected }
-        if threadCreation === creation {
+        let presentsCreatedThread = threadCreation === creation
+        if presentsCreatedThread {
             openThreadConversation(
                 thread,
                 starter: currentUser,
@@ -577,7 +581,16 @@ extension AppModel {
             attachments: attachments,
             thread: thread,
             clearsComposer: false
-        ) else { return .rejected }
+        ) else {
+            if presentsCreatedThread, openThread?.id == thread.id,
+               guildTimeoutUntil(in: thread.id, guildID: thread.guildID) != nil {
+                // Creation can succeed before a live timeout blocks its first
+                // message. Keep that unsent message in the created thread.
+                threadDraft = originalDraft
+                restoreComposerAttachments(attachments, to: .thread)
+            }
+            return .rejected
+        }
         return .enqueued(delivery: delivery)
     }
 

@@ -953,13 +953,15 @@ extension NativeTimelineCanvasView {
                     region.frame,
                     rowIndex: rowIndex
                 ),
-                parent: parent
+                parent: parent,
+                isEnabled: model?.canUpdateReactions(on: message) == true
             ) { [weak self] in
-                self?.actions?.react(reaction.emoji, message)
-                return self != nil
+                guard let self, model?.canUpdateReactions(on: message) == true else { return false }
+                actions?.react(reaction.emoji, message)
+                return true
             })
         }
-        if let frame = layout.addReactionFrame {
+        if let frame = layout.addReactionFrame, model?.canCreateReactions(on: message) == true {
             children.append(accessibilityElement(
                 role: .button,
                 label: "Add reaction",

@@ -90,7 +90,8 @@ extension AppModel {
                 guild: basis.guild, channel: channel,
                 resolvedBasePermissions: basis.resolvedBasePermissions,
                 overwritePrincipals: basis.overwritePrincipals,
-                hasCurrentRoleIdentity: basis.hasCurrentRoleIdentity
+                hasCurrentRoleIdentity: basis.hasCurrentRoleIdentity,
+            communicationDisabledUntil: basis.currentUserCommunicationDisabledUntil
             ) else { return false }
             return permissions & required == required
         }

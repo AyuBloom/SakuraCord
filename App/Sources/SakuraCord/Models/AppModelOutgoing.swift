@@ -292,6 +292,10 @@ extension AppModel {
         isRetry: Bool,
         session: AppModelAccountSession
     ) async -> Bool {
+        guard guildTimeoutUntil(in: outgoing.channelID) == nil else {
+            updateOutgoingState(.failed, nonce: outgoing.nonce, channelID: outgoing.channelID)
+            return false
+        }
         let uploadsAttachments = !outgoing.attachmentURLs.isEmpty
         if uploadsAttachments { activeAttachmentUploadCount += 1 }
         defer { if uploadsAttachments { activeAttachmentUploadCount -= 1 } }

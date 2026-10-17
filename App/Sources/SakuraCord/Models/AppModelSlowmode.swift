@@ -21,7 +21,8 @@ extension AppModel {
             channel: channel,
             resolvedBasePermissions: basis.resolvedBasePermissions,
             overwritePrincipals: basis.overwritePrincipals,
-            hasCurrentRoleIdentity: basis.hasCurrentRoleIdentity
+            hasCurrentRoleIdentity: basis.hasCurrentRoleIdentity,
+            communicationDisabledUntil: basis.currentUserCommunicationDisabledUntil
         )
         return (interval, permissions.map { $0 & DiscordPermissionBits.bypassSlowmode != 0 } ?? false)
     }
@@ -35,6 +36,7 @@ extension AppModel {
 
     /// Called before consuming drafts and again at the shared delivery boundary.
     func allowSlowmodeSubmission(in channelID: ChannelID) -> Bool {
+        guard guildTimeoutUntil(in: channelID) == nil else { return false }
         if slowmodeRemaining(in: channelID) > 0 {
             composer.slowmode.reject(in: channelID)
             return false

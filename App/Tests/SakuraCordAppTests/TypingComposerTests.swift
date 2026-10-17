@@ -2717,6 +2717,54 @@ func `thread creation holds queue capacity until it enqueues or fails`(fails: Bo
 }
 
 @MainActor
+@Test(.timeLimit(.minutes(1)), arguments: [false, true])
+func `timeout during thread creation preserves its unsent message without replacing another thread draft`(navigatesAway: Bool) async throws {
+    let permissions = DiscordPermissionBits.viewChannel | DiscordPermissionBits.readMessageHistory
+        | DiscordPermissionBits.sendMessages | DiscordPermissionBits.sendMessagesInThreads
+        | DiscordPermissionBits.createPublicThreads | DiscordPermissionBits.attachFiles
+    let guild = Guild(id: GuildID(rawValue: 20), name: "Guild", currentUserPermissions: permissions)
+    let provider = TypingTestProvider(guild: guild)
+    let model = AppModel(launchMode: .offlineTesting, provider: provider)
+    await model.start()
+    await model.memberLoadTask?.value
+    defer { model.onboarding.reset() }
+    let channelID = try #require(model.selectedChannelID)
+    let creation = ThreadCreationDraft(parentID: channelID, permissions: model.selectedChannelThreadCreationPermissions)
+    try #require(creation.permissions.canCreatePublic)
+    creation.name = "Thread"
+    model.threadCreation = creation
+    let originalDraft = "  Keep this first message\n"
+    let attachment = ForumPostAttachment(url: URL(fileURLWithPath: "/tmp/thread-timeout-draft.txt"))
+    model.threadDraft = originalDraft
+    model.threadComposerAttachments = [attachment]
+
+    let submission = Task { await model.submitThreadCreation(creation, attachments: [attachment]) }
+    await provider.waitUntilThreadCreationStarts()
+    var member = Member(user: try #require(model.currentUser), roleName: "Member", isOnline: false)
+    member.communicationDisabledUntil = .now.addingTimeInterval(300)
+    model.consumeMembersChanged(guildID: guild.id, members: [member], groups: [])
+    let otherThread = MessageThreadSummary(
+        id: ChannelID(rawValue: 31), guildID: guild.id, parentID: channelID, name: "Other"
+    )
+    let otherAttachment = ForumPostAttachment(url: URL(fileURLWithPath: "/tmp/other-thread-draft.txt"))
+    if navigatesAway {
+        model.open(otherThread)
+        model.threadDraft = "Other thread draft"
+        model.threadComposerAttachments = [otherAttachment]
+    }
+
+    await provider.completeThreadCreation(fails: false)
+    let result = await submission.value
+
+    #expect(!result.consumedComposer)
+    #expect(await provider.sendCount == 0)
+    #expect(model.composer.outbox.waitingDeliveryCount == 0)
+    #expect(model.openThread?.id == (navigatesAway ? otherThread.id : ChannelID(rawValue: 30)))
+    #expect(model.threadDraft == (navigatesAway ? "Other thread draft" : originalDraft))
+    #expect(model.threadComposerAttachments == [navigatesAway ? otherAttachment : attachment])
+}
+
+@MainActor
 @Test(arguments: [OutboxState.sending, .failed])
 func `unconfirmed local send stays below and groups only with a recent confirmation`(state: OutboxState) {
     let author = User(id: UserID(rawValue: 1), username: "me", displayName: "Me")

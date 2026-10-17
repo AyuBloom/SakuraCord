@@ -1292,6 +1292,165 @@ private final class GatewayDispatchCountingURLProtocol: URLProtocol, @unchecked 
 }
 
 extension GatewayLifecycleEventTests {
+    @Test(arguments: ["member-list", "chunk", "thread", "supplemental", "merged-supplemental"])
+    func `sparse membership hydration preserves omitted timeout and publishes explicit changes`(source: String) async throws {
+        let provider = makeProvider()
+        await provider.receiveGatewayDispatchForTesting(name: "READY", data: .object([
+            "user": user(id: "1", username: "before", globalName: "Before"), "guilds": .array([]),
+        ]))
+        await provider.receiveGatewayDispatchForTesting(name: "GUILD_CREATE", data: guildCreatePayload(includesUnavailable: false))
+        let events = await provider.eventStream()
+        let until = Date.now.addingTimeInterval(300).ISO8601Format()
+        let expiry = try #require(DiscordDate.parse(until))
+
+        func deliver(_ timeout: JSONValue?) async throws {
+            var member: [String: JSONValue] = [
+                "user": user(id: "1", username: "before", globalName: "Before"),
+                "roles": .array([.string("101")]),
+            ]
+            member["communication_disabled_until"] = timeout
+            switch source {
+            case "member-list":
+                await provider.receiveGatewayDispatchForTesting(name: "GUILD_MEMBER_LIST_UPDATE", data: .object([
+                    "guild_id": .string("100"), "id": .string("everyone"),
+                    "ops": .array([.object([
+                        "op": .string("SYNC"), "range": .array([.number(0), .number(0)]),
+                        "items": .array([.object(["member": .object(member)])]),
+                    ])]),
+                ]))
+            case "chunk":
+                await provider.receiveGatewayDispatchForTesting(name: "GUILD_MEMBERS_CHUNK", data: .object([
+                    "guild_id": .string("100"), "members": .array([.object(member)]),
+                    "chunk_index": .number(0), "chunk_count": .number(1),
+                ]))
+            case "thread":
+                let entry = try JSONValueDecoder().decode(ThreadMemberDTO.self, from: .object([
+                    "user_id": .string("1"), "member": .object(member),
+                ]))
+                await provider.ingestThreadMembers([entry], guildID: guildID)
+            case "merged-supplemental":
+                member["user"] = nil
+                member["user_id"] = .string("1")
+                await provider.receiveGatewayDispatchForTesting(name: "READY_SUPPLEMENTAL", data: .object([
+                    "guilds": .array([.object(["id": .string("100")])]),
+                    "merged_members": .array([.array([.object(member)])]),
+                ]))
+            default:
+                await provider.receiveGatewayDispatchForTesting(name: "READY_SUPPLEMENTAL", data: .object([
+                    "guilds": .array([.object(["id": .string("100"), "members": .array([.object(member)])])]),
+                ]))
+            }
+        }
+
+        try await deliver(.string(until))
+        #expect(await provider.cachedMembersForTesting(guildID: guildID).first?.communicationDisabledUntil == expiry)
+        try await deliver(nil)
+        #expect(await provider.cachedMembersForTesting(guildID: guildID).first?.communicationDisabledUntil == expiry)
+        try await deliver(.null)
+        #expect(await provider.cachedMembersForTesting(guildID: guildID).first?.communicationDisabledUntil == nil)
+        try await deliver(.string(until))
+        await provider.disconnect()
+        var publishedTimeouts: [Date?] = []
+        for await event in events {
+            if case let .membersChanged(eventGuildID, members, _) = event,
+               eventGuildID == guildID, let member = members.first(where: { $0.id == currentUserID }) {
+                publishedTimeouts.append(member.communicationDisabledUntil)
+            }
+        }
+        #expect(publishedTimeouts == [expiry, nil, expiry])
+    }
+
+    @Test func `timeout updates preserve omission clear null and expire locally`() async throws {
+        GatewayDispatchCountingURLProtocol.requestCount = 0
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [GatewayDispatchCountingURLProtocol.self]
+        let provider = makeProvider(session: URLSession(configuration: configuration))
+        await provider.receiveGatewayDispatchForTesting(name: "READY", data: .object([
+            "user": user(id: "1", username: "before", globalName: "Before"), "guilds": .array([]),
+        ]))
+        await provider.receiveGatewayDispatchForTesting(name: "GUILD_CREATE", data: guildCreatePayload(includesUnavailable: false))
+        let until = Date.now.addingTimeInterval(300)
+        var update: [String: JSONValue] = [
+            "guild_id": .string("100"), "user": user(id: "1", username: "before", globalName: "Before"),
+            "roles": .array([.string("101")]), "communication_disabled_until": .string(until.ISO8601Format()),
+        ]
+        await provider.receiveGatewayDispatchForTesting(name: "GUILD_MEMBER_UPDATE", data: .object(update))
+        let member = try #require(await provider.cachedMembersForTesting(guildID: guildID).first)
+        let expiry = try #require(member.communicationDisabledUntil)
+        await #expect(throws: ChatProviderError.self) { try await provider.requireGuildCommunication(in: textChannelID) }
+        await #expect(throws: ChatProviderError.self) {
+            _ = try await provider.send(SendMessageDraft(channelID: textChannelID, content: "blocked", nonce: "timeout"))
+        }
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.setReaction("👍", reacted: false, messageID: .init(rawValue: 300), channelID: textChannelID)
+        }
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.requireGuildCommunicationForRequest(path: "/channels/200/messages", method: "POST", body: nil)
+        }
+        // The shared voice boundary also covers deferred joins and later
+        // voice-state changes, before any Gateway connection is required.
+        await #expect(throws: ChatProviderError.invalidRequest("You are timed out in this server.")) {
+            try await provider.updateVoiceState(
+                channelID: voiceChannelID, guildID: guildID,
+                selfMute: false, selfDeaf: false, selfVideo: false
+            )
+        }
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.requireGuildCommunicationForRequest(
+                path: "/channels/\(voiceChannelID)/send-soundboard-sound", method: "POST", body: nil
+            )
+        }
+        await #expect(throws: ChatProviderError.self) {
+            _ = try await provider.edit(messageID: .init(rawValue: 300), channelID: textChannelID, content: "blocked")
+        }
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.requireGuildCommunicationForRequest(
+                path: "/channels/200/messages/300", method: "PATCH", body: ["content": .string("blocked")]
+            )
+        }
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.setPollAnswers([1], messageID: .init(rawValue: 300), channelID: textChannelID)
+        }
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.requireGuildCommunicationForRequest(
+                path: "/channels/200/polls/300/answers/@me", method: "PUT", body: ["answer_ids": .array([.number(1)])]
+            )
+        }
+        // Search results can identify an unjoined thread before any thread
+        // metadata is cached. Its queued reactions must still be restricted.
+        let searchThreadID = ChannelID(rawValue: 250)
+        let searchMessage = Message(
+            id: MessageID(rawValue: 350), channelID: searchThreadID,
+            author: member.user, content: "Search result", guildID: guildID
+        )
+        await provider.seedMessageForTesting(searchMessage)
+        await #expect(throws: ChatProviderError.self) {
+            try await provider.requireGuildCommunicationForRequest(
+                path: "/channels/250/messages/350/reactions/%F0%9F%91%8D/@me", method: "PUT", body: nil
+            )
+        }
+        try await provider.requireGuildCommunication(in: ChannelID(rawValue: 900))
+        #expect(GatewayDispatchCountingURLProtocol.requestCount == 0)
+        // A timeout must not block reading or acknowledging existing messages.
+        try await provider.requireGuildCommunicationForRequest(path: "/channels/200/messages/300/ack", method: "POST", body: nil)
+        try await provider.requireGuildCommunicationForRequest(path: "/channels/200/messages/300", method: "DELETE", body: nil)
+        try await provider.requireGuildCommunicationForRequest(path: "/channels/200/messages", method: "GET", body: nil)
+        try await provider.requireGuildCommunicationForRequest(path: "/channels/200/polls/300/answers/1", method: "GET", body: nil)
+        try await provider.requireGuildCommunicationForRequest(
+            path: "/channels/200/polls/300/answers/@me", method: "PUT", body: ["answer_ids": .array([])]
+        )
+        try await provider.requireGuildCommunication(in: textChannelID, now: expiry)
+        // Unrelated sparse member updates must not restore communication.
+        update["communication_disabled_until"] = nil
+        await provider.receiveGatewayDispatchForTesting(name: "GUILD_MEMBER_UPDATE", data: .object(update))
+        #expect(await provider.cachedMembersForTesting(guildID: guildID).first?.communicationDisabledUntil == expiry)
+        update["communication_disabled_until"] = .null
+        await provider.receiveGatewayDispatchForTesting(name: "GUILD_MEMBER_UPDATE", data: .object(update))
+        #expect(await provider.cachedMembersForTesting(guildID: guildID).first?.communicationDisabledUntil == nil)
+        try await provider.requireGuildCommunication(in: textChannelID)
+        await provider.disconnect()
+    }
+
     @Test func `older sends preserve a newer invalidation and cooldown recovery is bounded`() async throws {
         let fixture = try await makeMemberListProvider()
         let (provider, socket) = (fixture.provider, fixture.socket)

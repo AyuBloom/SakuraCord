@@ -107,6 +107,7 @@ extension DiscordRESTProvider {
             let channels = try (payload.threads ?? []).map {
                 try $0.domain(guildID: guildID)
             }
+            self.ingestForumThreads(payload.threads ?? [], fallbackGuildID: guildID)
             return MessageSearchPage(
                 results: results,
                 channels: channels,

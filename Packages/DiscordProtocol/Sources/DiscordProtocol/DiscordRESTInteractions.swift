@@ -160,6 +160,7 @@ extension DiscordRESTProvider {
         _ invocation: ApplicationCommandInvocation,
         progress: @escaping @Sendable (ApplicationCommandProgress) -> Void
     ) async throws {
+        try requireGuildCommunication(in: invocation.channelID, guildID: invocation.guildID)
         progress(.preparing)
         var payload = try ApplicationCommandPayloadBuilder.execution(invocation)
         let sessionID = try await interactionSessionID()

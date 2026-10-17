@@ -4,7 +4,9 @@ import SakuraCordModels
 
 extension AppModel {
     func edit(_ message: Message, content: String) async {
-        guard !message.hasPoll, !message.flags.contains(.voiceMessage) else { return }
+        guard !message.hasPoll, !message.flags.contains(.voiceMessage),
+              guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil
+        else { return }
         let session = accountSession()
         do {
             let updated = try await session.provider.edit(
@@ -50,6 +52,7 @@ extension AppModel {
     }
 
     func toggleReaction(_ emoji: String, on message: Message) async {
+        guard canUpdateReactions(on: message) else { return }
         let guildID = message.guildID ?? selectedGuildID
         let currentGuildEmojis = guildID.flatMap { emojisByGuild[$0] } ?? []
         guard
@@ -131,6 +134,11 @@ extension AppModel {
             return
         }
 
+        guard guildTimeoutUntil(in: key.channelID) == nil else {
+            applyCurrentUserReactionState(state.confirmedReacted, for: key, emoji: state.emoji)
+            reactionMutations[key] = nil
+            return
+        }
         let sentState = state.desiredReacted
         state.isSending = true
         reactionMutations[key] = state

@@ -33,6 +33,7 @@ extension NativeTimelineCanvasView {
         } else if !poll.isClosed(), layout.revealFrame.contains(local), poll.selectedAnswerIDs.isEmpty {
             control = .reveal; frame = layout.revealFrame
         } else if !poll.isClosed(), layout.submitFrame.contains(local),
+                  model?.canUpdatePollVote(on: row.message, removing: !poll.selectedAnswerIDs.isEmpty) == true,
                   !poll.selectedAnswerIDs.isEmpty || (!state.showsResults(for: poll) && !state.selected.isEmpty) {
             control = .submit; frame = layout.submitFrame
         } else { return nil }
@@ -164,7 +165,7 @@ extension NativeTimelineCanvasView {
 
     private func submitPollVote(_ message: Message, poll: MessagePoll, state: NativeTimelinePollPresentation, model: AppModel) {
         let removing = !poll.selectedAnswerIDs.isEmpty
-        guard !poll.isClosed(), poll.layoutType == 1,
+        guard model.canUpdatePollVote(on: message, removing: !poll.selectedAnswerIDs.isEmpty), !poll.isClosed(), poll.layoutType == 1,
               removing || (!state.showsResults(for: poll) && !state.selected.isEmpty) else { return }
         // The model applies the vote before the request; unknown tallies show
         // results while they load.
@@ -208,7 +209,8 @@ extension NativeTimelineCanvasView {
         if !poll.isClosed() {
             if poll.selectedAnswerIDs.isEmpty { frames.append(layout.revealFrame) }
             let state = pollPresentation(for: row.id)
-            if !poll.selectedAnswerIDs.isEmpty || (!state.showsResults(for: poll) && !state.selected.isEmpty) {
+            if model?.canUpdatePollVote(on: row.message, removing: !poll.selectedAnswerIDs.isEmpty) == true,
+               !poll.selectedAnswerIDs.isEmpty || (!state.showsResults(for: poll) && !state.selected.isEmpty) {
                 frames.append(layout.submitFrame)
             }
         }
@@ -269,7 +271,8 @@ extension NativeTimelineCanvasView {
             }
             if !results || !poll.selectedAnswerIDs.isEmpty {
                 append(.submit, label: poll.selectedAnswerIDs.isEmpty ? "Vote" : "Remove Vote", frame: layout.submitFrame,
-                       enabled: !state.selected.isEmpty || !poll.selectedAnswerIDs.isEmpty)
+                       enabled: model?.canUpdatePollVote(on: message, removing: !poll.selectedAnswerIDs.isEmpty) == true
+                           && (!state.selected.isEmpty || !poll.selectedAnswerIDs.isEmpty))
             }
         }
     }

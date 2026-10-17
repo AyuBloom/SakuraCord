@@ -66,6 +66,7 @@ extension NativeTimelineCanvasView {
         guard MessageOutboxPresentation.interactionMode(for: message).allowsMessageContextMenu else { return [] }
         let canEdit = !message.hasPoll && !message.flags.contains(.voiceMessage)
             && message.author.id == model?.snapshot?.currentUser.id
+            && model?.guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil
             && MessageReplyPresentationPolicy.allowsReplyAction(for: message)
         let canDelete = model?.canDeleteMessage(message) == true
         if messageInteractionContext != .conversation {
@@ -87,8 +88,9 @@ extension NativeTimelineCanvasView {
             })
             return result
         }
-        result.append(accessibilityReactionAction(for: message))
-        if MessageReplyPresentationPolicy.allowsReplyAction(for: message),
+        if model?.canCreateReactions(on: message) == true { result.append(accessibilityReactionAction(for: message)) }
+        if model?.guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil,
+           MessageReplyPresentationPolicy.allowsReplyAction(for: message),
            let reply = actions?.reply
         {
             result.append(NSAccessibilityCustomAction(name: "Reply") {

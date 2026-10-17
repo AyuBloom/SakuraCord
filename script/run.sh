@@ -13,9 +13,9 @@ while [[ "$#" -gt 0 ]]; do
       shift 2
       ;;
     --build) BUILD=1; shift ;;
-    --offline|--offline-sign-in|--offline-server-rail-playground) LAUNCH_ARGS=(--args "$1"); shift ;;
+    --offline|--offline-sign-in) LAUNCH_ARGS=(--args "$1"); shift ;;
     *)
-      echo "usage: $0 [--checkout PATH] [--build] [--offline|--offline-sign-in|--offline-server-rail-playground]" >&2
+      echo "usage: $0 [--checkout PATH] [--build] [--offline|--offline-sign-in]" >&2
       exit 2
       ;;
   esac

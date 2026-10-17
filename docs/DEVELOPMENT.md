@@ -59,7 +59,6 @@ contacting Discord:
 | --- | --- |
 | `./script/build_and_run.sh --offline-sign-in` | Welcome animation and shared native sign-in flow |
 | `./script/build_and_run.sh --offline-long-server-list` | Extended server rail |
-| `./script/build_and_run.sh --offline-server-rail-playground` | Interactive production rail with local colorful icons; add/remove servers, folders and unread DMs, trigger batches, and drag to reorder |
 | `./script/build_and_run.sh --offline-forum-performance` | Large forum |
 | `./script/build_and_run.sh --offline-chat-performance` | Large native timeline |
 | `./script/build_and_run.sh --offline-chat-voice-performance` | Large native timeline where every fifth message is a voice message |

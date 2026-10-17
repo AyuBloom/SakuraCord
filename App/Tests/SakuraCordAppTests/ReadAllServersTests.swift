@@ -38,11 +38,17 @@ struct ReadAllServersTests {
         for thread in [active, archived, left, orphan] {
             readState.applyRemote(ChannelReadState(channelID: thread.id, lastAcknowledgedMessageID: MessageID(rawValue: 300)))
         }
-        #expect(readState.allServerAcknowledgements(in: [guildID, secondGuildID]) == [
+        #expect(readState.hasUnreadServerConversations(in: [guildID, secondGuildID]))
+        let targets = readState.allServerAcknowledgements(in: [guildID, secondGuildID])
+        #expect(targets == [
             BulkReadStateAcknowledgement(channelID: parentID, messageID: MessageID(rawValue: 400)),
             BulkReadStateAcknowledgement(channelID: ChannelID(rawValue: 201), messageID: MessageID(rawValue: 400)),
             BulkReadStateAcknowledgement(channelID: active.id, messageID: MessageID(rawValue: 400)),
         ])
+        for target in targets {
+            readState.markAcknowledgementPending(channelID: target.channelID, messageID: target.messageID)
+        }
+        #expect(!readState.hasUnreadServerConversations(in: [guildID, secondGuildID]))
     }
 
     @Test(arguments: [false, true])
@@ -53,6 +59,7 @@ struct ReadAllServersTests {
         model.markAllServersRead()
         #expect(await provider.bulkAcknowledgementRequests.isEmpty)
         model.featuresSettings.readAllButton = true
+        #expect(model.hasUnreadServers)
         if fails { await provider.failBulkAcknowledgement(afterAcceptedCount: 1) }
         model.markAllServersRead()
         let task = model.allServersReadTask
@@ -73,6 +80,7 @@ struct ReadAllServersTests {
         #expect(!model.isMarkingAllServersRead)
         if !fails {
             model.consumeImmediately(.readStateChanged(ChannelReadState(channelID: incoming.channelID, lastAcknowledgedMessageID: incoming.id)))
+            #expect(!model.hasUnreadServers)
             model.markAllServersRead()
             #expect(model.allServersReadTask == nil)
             #expect(await provider.bulkAcknowledgementRequests.count == 1)

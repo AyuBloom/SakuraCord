@@ -24,6 +24,7 @@ struct ServerRailContainer: View {
             joinServer: { invites.showsJoinDialog = true },
             showsReadAllButton: model.featuresSettings.readAllButton,
             isReadingAll: model.isMarkingAllServersRead,
+            hasUnreadServers: { model.hasUnreadServers },
             readAll: { readAllConfirmationSession = model.accountSession() },
             moveItems: model.moveServerRailItems,
             combineGuilds: model.combineServerRailGuild,
@@ -119,6 +120,7 @@ struct ServerRailView: View {
     var joinServer: () -> Void = {}
     var showsReadAllButton = false
     var isReadingAll = false
+    var hasUnreadServers: () -> Bool = { false }
     var readAll: () -> Void = {}
     var moveItems: ([GuildRailItem.RailIdentifier], GuildRailDestination) -> Void = { _, _ in }
     var combineGuilds: (GuildID, GuildID) -> Void = { _, _ in }
@@ -146,10 +148,10 @@ struct ServerRailView: View {
                     .transition(ServerRailAnimations.membershipTransition)
                 }
 
-                VStack(spacing: InterfaceScale.metric(showsReadAllButton ? 6 : 10)) {
+                VStack(spacing: InterfaceScale.metric(showsReadAllButton ? ReadAllServersButton.verticalPadding : 10)) {
                     Divider().padding(.horizontal, InterfaceScale.metric(12))
                     if showsReadAllButton {
-                        ReadAllServersButton(isReadingAll: isReadingAll, action: readAll)
+                        ReadAllServersButton(isReadingAll: isReadingAll, hasUnreadServers: hasUnreadServers, action: readAll)
                     }
                     if !items.isEmpty { serverItems }
                 }
@@ -310,22 +312,33 @@ struct ServerRailView: View {
 }
 
 private struct ReadAllServersButton: View {
+    static let verticalPadding: CGFloat = 3
+
     let isReadingAll: Bool
+    // Observe unread state here so incoming read updates do not rebuild the whole rail.
+    let hasUnreadServers: () -> Bool
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
+        let isEnabled = !isReadingAll && hasUnreadServers()
+        let showsHover = isEnabled && isHovering
         Button(action: action) {
             Text("Read All")
                 .font(.interfaceSystem(size: 12, weight: .medium))
-                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .foregroundStyle(isEnabled ? Color.primary.opacity(showsHover ? 1 : 0.8) : Color.secondary.opacity(0.5))
+                .padding(.vertical, InterfaceScale.metric(Self.verticalPadding))
                 .frame(width: ChatChromeMetrics.serverRailWidth)
+                .overlay(alignment: .leading) {
+                    ServerRailSelectionIndicator(isSelected: false, isHovering: showsHover, hasNotification: false)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isReadingAll)
+        .disabled(!isEnabled)
         .onModalHover { isHovering = $0 }
-        .help("Mark all servers as read")
         .accessibilityIdentifier("read-all-servers")
     }
 }

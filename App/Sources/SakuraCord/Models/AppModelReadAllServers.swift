@@ -3,6 +3,11 @@ import Foundation
 import SakuraCordModels
 
 extension AppModel {
+    var hasUnreadServers: Bool {
+        guard !accountTransitionIsActive, let snapshot else { return false }
+        return readState.hasUnreadServerConversations(in: Set(snapshot.guilds.filter { !$0.isUnavailable }.map(\.id)))
+    }
+
     func markAllServersRead() {
         guard featuresSettings.readAllButton, !runsChatPerformanceBenchmark,
               !isMarkingAllServersRead, !accountTransitionIsActive,

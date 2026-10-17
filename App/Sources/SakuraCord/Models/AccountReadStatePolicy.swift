@@ -80,20 +80,35 @@ extension AccountReadStateModel {
         return unreadPolicySource.defaultNotificationLevelByGuild[guildID] ?? .onlyMentions
     }
 
+    func hasUnreadServerConversations(in guildIDs: Set<GuildID>) -> Bool {
+        let source = unreadPresentationSource()
+        return entries.values.contains {
+            serverAcknowledgement(for: $0, guildIDs: guildIDs, source: source) != nil
+        }
+    }
+
     /// Match the server-list Read All scope: current server channels and
     /// active joined threads, including muted conversations, without DMs.
     func allServerAcknowledgements(in guildIDs: Set<GuildID>) -> [BulkReadStateAcknowledgement] {
         let source = unreadPresentationSource()
-        return entries.values.compactMap { entry in
-            guard let guildID = entry.guildID, guildIDs.contains(guildID),
-                  entry.isAccessible, entry.isUnread,
-                  source.isAggregateConversation(entry),
-                  !isGuildResourceChannel(entry),
-                  [.text, .announcement, .forum, .voice].contains(entry.kind),
-                  let messageID = entry.latestKnownMessageID
-            else { return nil }
-            return BulkReadStateAcknowledgement(channelID: entry.channelID, messageID: messageID)
+        return entries.values.compactMap {
+            serverAcknowledgement(for: $0, guildIDs: guildIDs, source: source)
         }.sorted { $0.channelID < $1.channelID }
+    }
+
+    private func serverAcknowledgement(
+        for entry: Entry,
+        guildIDs: Set<GuildID>,
+        source: UnreadPresentationSource
+    ) -> BulkReadStateAcknowledgement? {
+        guard let guildID = entry.guildID, guildIDs.contains(guildID),
+              entry.isAccessible, entry.isUnread,
+              source.isAggregateConversation(entry),
+              !isGuildResourceChannel(entry),
+              [.text, .announcement, .forum, .voice].contains(entry.kind),
+              let messageID = entry.latestKnownMessageID
+        else { return nil }
+        return BulkReadStateAcknowledgement(channelID: entry.channelID, messageID: messageID)
     }
 
     func bulkAcknowledgements(

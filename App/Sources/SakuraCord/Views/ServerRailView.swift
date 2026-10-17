@@ -9,6 +9,7 @@ struct ServerRailContainer: View {
     let model: AppModel
     let sidebarWidth: CGFloat
     @State private var folderSettings: GuildFolder?
+    @State private var readAllConfirmationSession: AppModelAccountSession?
 
     var body: some View {
         @Bindable var invites = model.serverInvites
@@ -21,6 +22,10 @@ struct ServerRailContainer: View {
             selectDirectMessage: { model.navigate(to: $0) },
             selectGuild: model.selectGuild,
             joinServer: { invites.showsJoinDialog = true },
+            showsReadAllButton: model.featuresSettings.readAllButton,
+            isReadingAll: model.isMarkingAllServersRead,
+            hasUnreadServers: { model.hasUnreadServers },
+            readAll: { readAllConfirmationSession = model.accountSession() },
             moveItems: model.moveServerRailItems,
             combineGuilds: model.combineServerRailGuild,
             contextMenuActions: ServerRailContextMenuActions(
@@ -70,6 +75,18 @@ struct ServerRailContainer: View {
             ServerInviteCreationView(model: model, presentation: $0)
         }
         .modifier(HumanCaptchaPresentation(store: invites.captcha))
+        .alert("Mark All Servers as Read?",
+               isPresented: Binding(get: { readAllConfirmationSession != nil },
+                                    set: { if !$0 { readAllConfirmationSession = nil } }),
+               presenting: readAllConfirmationSession) { session in
+            Button("Mark All as Read") {
+                guard model.isCurrentAccountSession(session) else { return }
+                model.markAllServersRead()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This will mark unread channels and joined threads in all servers as read, including muted channels.")
+        }
         .alert("Leave \(invites.leaveConfirmation?.name ?? "Server")?",
                isPresented: Binding(get: { invites.leaveConfirmation != nil },
                                     set: { if !$0 { invites.leaveConfirmation = nil } }),
@@ -101,6 +118,10 @@ struct ServerRailView: View {
     let selectDirectMessage: (ChannelID) -> Void
     let selectGuild: (GuildID?) -> Void
     var joinServer: () -> Void = {}
+    var showsReadAllButton = false
+    var isReadingAll = false
+    var hasUnreadServers: () -> Bool = { false }
+    var readAll: () -> Void = {}
     var moveItems: ([GuildRailItem.RailIdentifier], GuildRailDestination) -> Void = { _, _ in }
     var combineGuilds: (GuildID, GuildID) -> Void = { _, _ in }
     let contextMenuActions: ServerRailContextMenuActions
@@ -127,21 +148,12 @@ struct ServerRailView: View {
                     .transition(ServerRailAnimations.membershipTransition)
                 }
 
-                Divider().padding(.horizontal, InterfaceScale.metric(12))
-
-                ForEach(items) { item in
-                    ServerRailItemView(
-                        item: item,
-                        selectGuild: selectDraggableGuild,
-                        contextMenuActions: contextMenuActions,
-                        folderExpansionChanged: {
-                            folderLayoutRevision &+= 1
-                        }
-                    )
-                    // Keep native images and their clipping shapes together as
-                    // a preceding folder changes the row's position.
-                    .geometryGroup()
-                    .transition(ServerRailAnimations.membershipTransition)
+                VStack(spacing: InterfaceScale.metric(showsReadAllButton ? ReadAllServersButton.verticalPadding : 10)) {
+                    Divider().padding(.horizontal, InterfaceScale.metric(12))
+                    if showsReadAllButton {
+                        ReadAllServersButton(isReadingAll: isReadingAll, hasUnreadServers: hasUnreadServers, action: readAll)
+                    }
+                    if !items.isEmpty { serverItems }
                 }
                 Button(action: joinServer) {
                     Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
@@ -231,6 +243,25 @@ struct ServerRailView: View {
         }
     }
 
+    private var serverItems: some View {
+        VStack(spacing: InterfaceScale.metric(10)) {
+            ForEach(items) { item in
+                ServerRailItemView(
+                    item: item,
+                    selectGuild: selectDraggableGuild,
+                    contextMenuActions: contextMenuActions,
+                    folderExpansionChanged: {
+                        folderLayoutRevision &+= 1
+                    }
+                )
+                // Keep native images and their clipping shapes together as
+                // a preceding folder changes the row's position.
+                .geometryGroup()
+                .transition(ServerRailAnimations.membershipTransition)
+            }
+        }
+    }
+
     // Observe folder membership, without observing per-guild unread or selection updates.
     private var folderGuildIDs: [[GuildID]] {
         items.compactMap { item in
@@ -277,6 +308,38 @@ struct ServerRailView: View {
                 )
             }
         }
+    }
+}
+
+private struct ReadAllServersButton: View {
+    static let verticalPadding: CGFloat = 3
+
+    let isReadingAll: Bool
+    // Observe unread state here so incoming read updates do not rebuild the whole rail.
+    let hasUnreadServers: () -> Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        let isEnabled = !isReadingAll && hasUnreadServers()
+        let showsHover = isEnabled && isHovering
+        Button(action: action) {
+            Text("Read All")
+                .font(.interfaceSystem(size: 12, weight: .medium))
+                .foregroundStyle(isEnabled ? Color.primary.opacity(showsHover ? 1 : 0.8) : Color.secondary.opacity(0.5))
+                .padding(.vertical, InterfaceScale.metric(Self.verticalPadding))
+                .frame(width: ChatChromeMetrics.serverRailWidth)
+                .overlay(alignment: .leading) {
+                    ServerRailSelectionIndicator(isSelected: false, isHovering: showsHover, hasNotification: false)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onModalHover { isHovering = $0 }
+        .accessibilityIdentifier("read-all-servers")
     }
 }
 

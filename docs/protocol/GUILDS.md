@@ -126,6 +126,12 @@ mutes do not count as direct channel mutes for this filter; category collapse
 continues to control its rows separately. Expired timed mutes stop hiding a
 channel even without another Gateway event. Empty filtered groups disappear.
 Ordinary next/previous channel shortcuts traverse the same filtered rows.
+Browse Channels continues to list muted channels and preserves their channel
+selection independently of mute state. Its ordinary channel context menu offers
+Unmute Channel even while the sidebar hides the row. Previewing a muted channel
+there does not reveal it in the sidebar; opening it as the main conversation
+does. Quick Switcher and temporarily disabling Hide Muted Channels provide other
+ways to reach a hidden channel without changing its saved channel selection.
 
 Official Fresh host `0.0.411`, web build `641004`
 (`web.4d4b2f75fdea5470.js`), observed on 17 October 2026, confirmed the partial

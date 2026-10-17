@@ -64,6 +64,9 @@ extension AppModel {
 
     func resetAcknowledgementWork() {
         acknowledgementGeneration &+= 1
+        allServersReadTask?.cancel()
+        allServersReadTask = nil
+        isMarkingAllServersRead = false
         acknowledgementTasks.values.forEach { $0.cancel() }
         acknowledgementTasks.removeAll()
         acknowledgementProcessorTask?.cancel()

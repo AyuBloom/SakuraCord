@@ -9,6 +9,7 @@ struct ServerRailContainer: View {
     let model: AppModel
     let sidebarWidth: CGFloat
     @State private var folderSettings: GuildFolder?
+    @State private var readAllConfirmationSession: AppModelAccountSession?
 
     var body: some View {
         @Bindable var invites = model.serverInvites
@@ -21,6 +22,9 @@ struct ServerRailContainer: View {
             selectDirectMessage: { model.navigate(to: $0) },
             selectGuild: model.selectGuild,
             joinServer: { invites.showsJoinDialog = true },
+            showsReadAllButton: model.featuresSettings.readAllButton,
+            isReadingAll: model.isMarkingAllServersRead,
+            readAll: { readAllConfirmationSession = model.accountSession() },
             moveItems: model.moveServerRailItems,
             combineGuilds: model.combineServerRailGuild,
             contextMenuActions: ServerRailContextMenuActions(
@@ -70,6 +74,18 @@ struct ServerRailContainer: View {
             ServerInviteCreationView(model: model, presentation: $0)
         }
         .modifier(HumanCaptchaPresentation(store: invites.captcha))
+        .alert("Mark All Servers as Read?",
+               isPresented: Binding(get: { readAllConfirmationSession != nil },
+                                    set: { if !$0 { readAllConfirmationSession = nil } }),
+               presenting: readAllConfirmationSession) { session in
+            Button("Mark All as Read") {
+                guard model.isCurrentAccountSession(session) else { return }
+                model.markAllServersRead()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This will mark unread channels and joined threads in all servers as read, including muted channels.")
+        }
         .alert("Leave \(invites.leaveConfirmation?.name ?? "Server")?",
                isPresented: Binding(get: { invites.leaveConfirmation != nil },
                                     set: { if !$0 { invites.leaveConfirmation = nil } }),
@@ -101,6 +117,9 @@ struct ServerRailView: View {
     let selectDirectMessage: (ChannelID) -> Void
     let selectGuild: (GuildID?) -> Void
     var joinServer: () -> Void = {}
+    var showsReadAllButton = false
+    var isReadingAll = false
+    var readAll: () -> Void = {}
     var moveItems: ([GuildRailItem.RailIdentifier], GuildRailDestination) -> Void = { _, _ in }
     var combineGuilds: (GuildID, GuildID) -> Void = { _, _ in }
     let contextMenuActions: ServerRailContextMenuActions
@@ -128,6 +147,16 @@ struct ServerRailView: View {
                 }
 
                 Divider().padding(.horizontal, InterfaceScale.metric(12))
+
+                if showsReadAllButton {
+                    Button("Read All", action: readAll)
+                        .font(.interfaceSystem(size: 10, weight: .semibold))
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(isReadingAll)
+                        .help("Mark all servers as read")
+                        .accessibilityIdentifier("read-all-servers")
+                }
 
                 ForEach(items) { item in
                     ServerRailItemView(

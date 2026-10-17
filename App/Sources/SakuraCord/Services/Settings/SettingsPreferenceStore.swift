@@ -306,6 +306,10 @@ nonisolated struct SettingsPreferenceRegistry: Sendable {
             storage: .appWide(key: "settings.translation.draftLanguage"), defaultValue: .string("en")
         ),
         SettingsPreferenceRegistration(
+            id: .readAllButton, page: .features,
+            storage: .appWide(key: "settings.features.readAllButton"), defaultValue: .bool(false)
+        ),
+        SettingsPreferenceRegistration(
             id: .channelManagement, page: .features,
             storage: .appWide(key: "settings.features.channelManagement"), defaultValue: .bool(true)
         ),

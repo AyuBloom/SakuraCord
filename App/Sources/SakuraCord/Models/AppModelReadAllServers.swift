@@ -1,0 +1,59 @@
+import DiscordProtocol
+import Foundation
+import SakuraCordModels
+
+extension AppModel {
+    func markAllServersRead() {
+        guard featuresSettings.readAllButton, !runsChatPerformanceBenchmark,
+              !isMarkingAllServersRead, !accountTransitionIsActive,
+              let snapshot
+        else { return }
+        let targets = readState.allServerAcknowledgements(in: Set(snapshot.guilds.filter { !$0.isUnavailable }.map(\.id)))
+        guard !targets.isEmpty else { return }
+
+        for target in targets {
+            preserveUnreadDividerIfNeeded(channelID: target.channelID)
+            acknowledgementTasks[target.channelID]?.cancel()
+            acknowledgementTasks[target.channelID] = nil
+            queuedAcknowledgements[target.channelID] = nil
+            acknowledgementQueueOrder.removeAll { $0 == target.channelID }
+            readState.unblockAutomaticAcknowledgement(channelID: target.channelID)
+            readState.markAcknowledgementPending(channelID: target.channelID, messageID: target.messageID)
+        }
+        isMarkingAllServersRead = true
+        refreshUnreadPresentation()
+        reconcileInboxReadState()
+        let generation = acknowledgementGeneration
+        let session = accountSession()
+        allServersReadTask = Task { [weak self] in
+            // Account teardown may cancel this task before it reaches the provider.
+            guard !Task.isCancelled, self?.isCurrentAccountSession(session) == true,
+                  self?.acknowledgementGeneration == generation else { return }
+            do {
+                try await session.provider.acknowledgeBulk(targets)
+                guard let self, isCurrentAccountSession(session), generation == acknowledgementGeneration else { return }
+                for target in targets {
+                    readState.completeAcknowledgement(channelID: target.channelID, messageID: target.messageID, token: nil)
+                }
+            } catch let partial as PartialBulkReadAcknowledgementError {
+                guard let self, isCurrentAccountSession(session), generation == acknowledgementGeneration else { return }
+                resolvePartialBulkAcknowledgement(partial, targets: targets)
+                errorMessage = "Discord accepted part of the read-state update, but not the remaining updates."
+            } catch {
+                guard let self, isCurrentAccountSession(session), generation == acknowledgementGeneration else { return }
+                for target in targets {
+                    readState.failAcknowledgement(channelID: target.channelID, messageID: target.messageID)
+                }
+                errorMessage = "Discord did not accept the read-state update."
+            }
+            guard let self, isCurrentAccountSession(session), generation == acknowledgementGeneration else { return }
+            for target in targets where readState.entries[target.channelID]?.isUnread == false {
+                cancelNativeNotifications(channelID: target.channelID)
+            }
+            isMarkingAllServersRead = false
+            allServersReadTask = nil
+            refreshUnreadPresentation()
+            reconcileInboxReadState()
+        }
+    }
+}

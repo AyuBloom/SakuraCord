@@ -530,16 +530,20 @@ private struct ServerFolderMorphingIcon: View {
     @State private var isVisible = false
 
     var body: some View {
+        // Keep glyph layout stable and scale the letters with the icon’s background.
+        let referenceSize = InterfaceScale.metric(44)
         GuildIconView(
             name: guild.name,
             iconURL: guild.iconURL,
-            size: size,
-            cornerRadius: cornerRadius,
+            size: referenceSize,
+            cornerRadius: cornerRadius * referenceSize / max(size, 1),
             animates: animates && isVisible,
             isSelected: isSelected,
             loadsImage: isVisible,
             maximumPixelDimension: Int((InterfaceScale.metric(46) * 2).rounded(.up))
         )
+        .scaleEffect(size / referenceSize)
+        .frame(width: size, height: size)
         .onScrollVisibilityChange(threshold: 0.01) { isVisible = $0 }
     }
 }

@@ -89,6 +89,9 @@ extension NativeTimelineCanvasView {
             return result
         }
         if model?.canCreateReactions(on: message) == true { result.append(accessibilityReactionAction(for: message)) }
+        result.append(NSAccessibilityCustomAction(name: "View Reactions") { [weak self] in
+            self?.showMessageReactions(message) ?? false
+        })
         if model?.guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil,
            MessageReplyPresentationPolicy.allowsReplyAction(for: message),
            let reply = actions?.reply

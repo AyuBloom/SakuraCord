@@ -1026,7 +1026,7 @@ extension NativeTimelineRowPainter {
         shape.fill()
         if selected {
             NSColor.sakuraCordAccentColor.withAlphaComponent(0.95).setStroke()
-            shape.lineWidth = 1.5
+            shape.lineWidth = 1
             shape.stroke()
         } else if isHovered {
             NSColor.labelColor.withAlphaComponent(0.28).setStroke()
@@ -1071,15 +1071,9 @@ extension NativeTimelineRowPainter {
             let image = ComponentUnicodeEmojiRenderer.image(
                 for: reference.name
             )
-            let optical = region.emojiFrame.insetBy(
-                dx: region.emojiFrame.width
-                    * (1 - MessageReactionMetrics.nativeEmojiVisualScale) / 2,
-                dy: region.emojiFrame.height
-                    * (1 - MessageReactionMetrics.nativeEmojiVisualScale) / 2
-            )
             drawImage(
                 image,
-                in: optical,
+                in: region.emojiFrame,
                 cornerRadius: 0,
                 fillsFrame: false
             )
@@ -1098,31 +1092,26 @@ extension NativeTimelineRowPainter {
                 color: selected ? .sakuraCordAccentColor : .labelColor
             )
         }
-        for avatarRegion in region.avatarRegions {
-            avatar(
-                name: avatarRegion.reactor.displayName,
-                url: avatarRegion.reactor.avatarURL,
-                in: avatarRegion.frame
-            )
+        let avatars = region.avatarRegions.map {
+            (frame: $0.frame, name: $0.reactor.displayName, url: $0.reactor.avatarURL, isPlaceholder: false)
+        } + region.placeholderAvatarFrames.map {
+            (frame: $0, name: "", url: nil as URL?, isPlaceholder: true)
+        }
+        for avatar in avatars {
+            let isLoadingImage = avatar.url.map { mediaImage(for: .avatar($0)) == nil } ?? false
+            if avatar.isPlaceholder || isLoadingImage {
+                NSColor.quaternaryLabelColor.setFill()
+                NSBezierPath(ovalIn: avatar.frame).fill()
+            } else {
+                self.avatar(name: avatar.name, url: avatar.url, in: avatar.frame)
+            }
             NSColor.labelColor.withAlphaComponent(0.24).setStroke()
-            let border = NSBezierPath(ovalIn: avatarRegion.frame.insetBy(
+            let border = NSBezierPath(ovalIn: avatar.frame.insetBy(
                 dx: 0.5,
                 dy: 0.5
             ))
             border.lineWidth = 1
             border.stroke()
-        }
-        if let overflowFrame = region.overflowFrame {
-            let overflow = MessageReactionPresentation.previewPlan(
-                for: region.reaction
-            ).overflowCount
-            text(
-                "+\(overflow)",
-                in: overflowFrame,
-                font: NativeTimelineReactionFonts.overflow,
-                color: .secondaryLabelColor,
-                alignment: .center
-            )
         }
     }
 
@@ -1146,7 +1135,7 @@ extension NativeTimelineRowPainter {
         systemSymbol(
             SakuraCordSystemSymbol.emojiFaceGrinning,
             in: NativeTimelineReactionAddControlGeometry.iconFrame(in: frame),
-            color: .labelColor,
+            color: NSColor.labelColor.withAlphaComponent(0.8),
             inset: 0,
             weight: .medium
         )

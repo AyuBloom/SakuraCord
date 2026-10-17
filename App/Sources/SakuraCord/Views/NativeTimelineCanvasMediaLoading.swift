@@ -116,7 +116,8 @@ extension NativeTimelineCanvasView {
                 {
                     let key = ReactionPreviewLoadKey(
                         messageID: row.message.id,
-                        reactionID: reaction.id
+                        reactionID: reaction.id,
+                        count: reaction.count
                     )
                     desired[key] = (reaction, row.message)
                 }

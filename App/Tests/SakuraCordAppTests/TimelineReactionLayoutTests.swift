@@ -24,7 +24,7 @@ func `bubble reactions flow in one line beyond a short bubble`(isOutgoing: Bool)
         author: isOutgoing ? you : friend, content: "dsf"
     )
     message.reactions = ["👍", "😭", "💀"].map {
-        Reaction(emoji: $0, count: 1, reactors: [ReactionReactor(user: friend)])
+        Reaction(emoji: $0, count: 2, reactors: [ReactionReactor(user: friend), ReactionReactor(user: you)])
     }
     let item = NativeMessageTimelineItem.message(
         MessageRowPresentation(

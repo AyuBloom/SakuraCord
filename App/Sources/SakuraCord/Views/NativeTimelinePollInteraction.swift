@@ -181,19 +181,8 @@ extension NativeTimelineCanvasView {
     private func showPollVoters(_ hit: PollPointerHit, answerID: Int) {
         guard let model else { return }
         pollPopover?.close()
-        let popover = NSPopover()
-        popover.behavior = .transient
-        let controller = StablePopoverHostingController(rootView:
-            PollVotersView(model: model, message: hit.message, initialAnswerID: answerID), dismiss: { [weak popover] in popover?.close() })
-        popover.contentViewController = controller
-        popover.contentSize = PollVotersView.size
-        pollPopover = popover
-        popover.show(relativeTo: hit.frame, of: self, preferredEdge: .maxX)
-        controller.monitorEscapeKey(in: controller.view.window, presentingWindow: window)
-        Task { @MainActor [weak self, weak popover, weak controller] in
-            await Task.yield()
-            guard popover?.isShown == true, let controller else { return }
-            controller.monitorEscapeKey(in: controller.view.window, presentingWindow: self?.window)
+        pollPopover = presentMessagePeoplePopover(relativeTo: hit.frame) { popover in
+            PollVotersView(model: model, message: hit.message, initialAnswerID: answerID, dismiss: { [weak popover] in popover?.close() })
         }
     }
 }

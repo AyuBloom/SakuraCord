@@ -38,6 +38,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
     struct ReactionPreviewLoadKey: Hashable {
         let messageID: MessageID
         let reactionID: String
+        let count: Int
     }
 
     struct ActiveReactionCountAnimation {
@@ -184,6 +185,11 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
     var pressedPollTarget: NativeTimelinePollTarget?
     var hoveredPollTarget: NativeTimelinePollTarget?
     var pollPopover: NSPopover?
+    var reactionDetailsPopover: NSPopover?
+    var reactionDetailsMessageID: MessageID?
+    var reactionPickerMessageID: MessageID?
+    weak var reactionDetailsPopoverAnchor: NSView?
+    var reactionPopoverLayoutAnchors: [(view: NSView, frameInWindow: CGRect)] = []
     var pollClockTask: Task<Void, Never>?
     let pollAnimationTicker = NativeTimelineDisplayLinkTicker()
     // Intermediate resize widths are short-lived; paint them without replacing
@@ -430,6 +436,7 @@ final class NativeTimelineCanvasView: NSView, WindowModalInputParticipant {
             pollAnimationTicker.stop()
             clearDisclosure(redraws: false)
             pollPopover?.close()
+            reactionDetailsPopover?.close()
             mediaInvalidationTask?.cancel()
             visibleMediaRequestTask?.cancel()
             historySkeletonShimmerTask?.cancel()

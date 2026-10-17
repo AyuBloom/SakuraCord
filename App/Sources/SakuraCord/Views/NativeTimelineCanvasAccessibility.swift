@@ -969,14 +969,7 @@ extension NativeTimelineCanvasView {
                 parent: parent
             ) { [weak self] in
                 guard let self else { return false }
-                self.showReactionPicker(
-                    for: message,
-                    anchor: frame.offsetBy(
-                        dx: 0,
-                        dy: self.displayedRowOrigin(at: rowIndex)
-                    ),
-                    presentation: .inline
-                )
+                self.showReactionPicker(forMessageRow: message)
                 return true
             })
         }

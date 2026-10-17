@@ -541,8 +541,7 @@ extension AppModel {
         stickerUserSettings = StickerUserSettings()
         isLoadingStickerPicker = false
         stickerPickerErrorMessage = nil
-        loadingReactionReactors = []
-        failedReactionReactorLoads = [:]
+        resetReactionReactorLoads()
         resetForumLoadAndPresentationState()
         for outgoing in composer.outbox.draftsByNonce.values { discardVoiceMessageFile(for: outgoing) }
         await composer.reset()

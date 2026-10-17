@@ -575,8 +575,14 @@ private struct ReactionActionMenu: View {
             } label: {
                 SakuraCordSystemSymbol.emojiFaceGrinningImage
                     .symbolVariant(.none)
-                    .font(.interface(.callout).weight(.medium))
+                    .font(.system(
+                        size: InterfaceScale.fontSize(
+                            NSFont.preferredFont(forTextStyle: .callout).pointSize + 2
+                        ),
+                        weight: .medium
+                    ))
                     .foregroundStyle(.primary)
+                    .opacity(presentation == .inline ? 0.8 : 1)
                     .frame(width: width, height: height)
                     .contentShape(
                         ConcentricRectangle(cornerRadius: cornerRadius, style: .continuous)

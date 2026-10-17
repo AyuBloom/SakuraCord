@@ -1098,12 +1098,9 @@ extension NativeTimelineCanvasView {
         messageID: MessageID,
         reactionID: String
     ) -> Bool {
-        visibleReactionPreviewLoadKeys.contains(
-            ReactionPreviewLoadKey(
-                messageID: messageID,
-                reactionID: reactionID
-            )
-        )
+        visibleReactionPreviewLoadKeys.contains {
+            $0.messageID == messageID && $0.reactionID == reactionID
+        }
     }
 
     var spoilerOverlayFramesForTesting:

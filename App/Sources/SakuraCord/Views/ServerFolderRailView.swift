@@ -310,15 +310,15 @@ struct ServerFolderRailHeader: View {
 
     var body: some View {
         let hidesIndicator = isDragPreview || drag.draggedID == entry.id || drag.flight?.id == entry.id
-        HStack(spacing: InterfaceScale.metric(4)) {
-            ServerRailSelectionIndicator(
-                isSelected: !isExpanded && entry.containsSelectedGuild,
-                isHovering: isHovering && !isExpanded,
-                hasNotification: showsUnreadIndicators && entry.hasUnreadGuild
-            )
-            .opacity(hidesIndicator || (morphsInFolder && !reduceMotion) ? 0 : 1)
-            .animation(.easeOut(duration: 0.12), value: hidesIndicator)
-            Button(action: toggle) {
+        Button(action: toggle) {
+            HStack(spacing: InterfaceScale.metric(4)) {
+                ServerRailSelectionIndicator(
+                    isSelected: !isExpanded && entry.containsSelectedGuild,
+                    isHovering: isHovering && !isExpanded,
+                    hasNotification: showsUnreadIndicators && entry.hasUnreadGuild
+                )
+                .opacity(hidesIndicator || (morphsInFolder && !reduceMotion) ? 0 : 1)
+                .animation(.easeOut(duration: 0.12), value: hidesIndicator)
                 ServerRailBadgedIcon(
                     mentionCount: showsUnreadIndicators ? entry.mentionCount : 0,
                     badgeOffset: isExpanded ? 4 : 1
@@ -361,34 +361,34 @@ struct ServerFolderRailHeader: View {
                     )
                 }
                 .contentShape(Rectangle())
+                .frame(width: InterfaceScale.metric(ServerFolderRailMetrics.containerSize))
+                .offset(x: InterfaceScale.metric(-3))
             }
-            .buttonStyle(ServerRailButtonStyle())
-            .frame(width: InterfaceScale.metric(ServerFolderRailMetrics.containerSize))
-            .offset(x: InterfaceScale.metric(-3))
-            .overlay {
-                ServerFolderContextMenuBridge(
-                    isUnread: entry.hasUnreadGuild || entry.mentionCount > 0,
-                    markRead: { contextMenuActions.markFolderRead(entry.guildEntries.map(\.id)) },
-                    openSettings: { contextMenuActions.openFolderSettings(entry.folder) }
-                )
-            }
-            .accessibilityLabel(displayName)
-            .accessibilityValue(
-                "\(isExpanded ? "Expanded" : "Collapsed")"
-                    + (showsUnreadIndicators && entry.mentionCount > 0
-                        ? ", \(entry.mentionCount) unread mentions" : "")
-                    + (showsUnreadIndicators && entry.mentionCount == 0
-                        && entry.hasUnreadGuild ? ", Unread" : "")
+            .frame(
+                width: ChatChromeMetrics.serverRailWidth,
+                height: InterfaceScale.metric(isExpanded ? ServerFolderRailMetrics.guildRowHeight : ServerFolderRailMetrics.collapsedRowHeight),
+                alignment: .leading
             )
-            .accessibilityHint("Toggles the server folder")
-            .help(displayName)
+            .contentShape(Rectangle())
         }
-        .frame(
-            width: ChatChromeMetrics.serverRailWidth,
-            height: InterfaceScale.metric(isExpanded ? ServerFolderRailMetrics.guildRowHeight : ServerFolderRailMetrics.collapsedRowHeight),
-            alignment: .leading
+        .buttonStyle(ServerRailButtonStyle())
+        .overlay {
+            ServerFolderContextMenuBridge(
+                isUnread: entry.hasUnreadGuild || entry.mentionCount > 0,
+                markRead: { contextMenuActions.markFolderRead(entry.guildEntries.map(\.id)) },
+                openSettings: { contextMenuActions.openFolderSettings(entry.folder) }
+            )
+        }
+        .accessibilityLabel(displayName)
+        .accessibilityValue(
+            "\(isExpanded ? "Expanded" : "Collapsed")"
+                + (showsUnreadIndicators && entry.mentionCount > 0
+                    ? ", \(entry.mentionCount) unread mentions" : "")
+                + (showsUnreadIndicators && entry.mentionCount == 0
+                    && entry.hasUnreadGuild ? ", Unread" : "")
         )
-        .contentShape(Rectangle())
+        .accessibilityHint("Toggles the server folder")
+        .help(displayName)
         .anchorPreference(key: ServerRailHoverPreferenceKey.self, value: .bounds) { bounds in
             (isPointerOverHeader ?? isHovering) ? ServerRailHoverItem(name: displayName, bounds: bounds) : nil
         }

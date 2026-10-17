@@ -304,9 +304,12 @@ final class ServerContextMenuHitView: NSView {
     var menuProvider: (() -> NSMenu?)?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard bounds.contains(point) else { return nil }
-        let eventType = window?.currentEvent?.type ?? NSApp.currentEvent?.type
-        return eventType == .rightMouseDown ? self : nil
+        guard super.hitTest(point) != nil,
+              let event = window?.currentEvent ?? NSApp.currentEvent
+        else { return nil }
+        let isContextClick = event.type == .rightMouseDown
+            || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
+        return isContextClick ? self : nil
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

@@ -1264,6 +1264,7 @@ private struct ForumPostSummaryReactionPill: View {
                 loadReactors: loadDisplayedReactionReactors
             )
             .fixedSize()
+            .disabled(model.guildTimeoutUntil(in: post.id, guildID: post.thread.guildID) != nil)
         }
     }
 
@@ -1729,7 +1730,7 @@ private struct ForumPostComposer: View {
                 .buttonStyle(.borderedProminent)
                 .tint(SakuraCordAccentColor.color)
                 .keyboardShortcut(.defaultAction)
-                .disabled(!isValid || isSubmitting)
+                .disabled(!isValid || isSubmitting || model.guildTimeoutUntil(in: channel.id) != nil)
         }
         .controlSize(.large)
         .padding(.horizontal, InterfaceScale.metric(18))

@@ -209,6 +209,16 @@ extension NativeTimelineCanvasView {
             removeActionCapsule()
             return
         }
+        if let state = actionCapsuleState,
+           let model,
+           state.isGuildTimedOut != (model.guildTimeoutUntil(
+               in: state.message.channelID,
+               guildID: state.message.guildID
+           ) != nil) {
+            // Keep a presented picker across ordinary row updates, but dismiss
+            // it when a timeout changes which actions this capsule can offer.
+            removeActionCapsule()
+        }
         if actionCapsuleState?.isPresentationActive == true {
             guard editingMessageID == nil,
                   let messageID = actionCapsuleMessageID,
@@ -273,9 +283,8 @@ extension NativeTimelineCanvasView {
         let canEdit = row.message.author.id == model.snapshot?.currentUser.id
             && !row.message.hasPoll
             && !row.message.flags.contains(.voiceMessage)
-            && MessageReplyPresentationPolicy.allowsReplyAction(
-                for: row.message
-            )
+            && model.guildTimeoutUntil(in: row.message.channelID, guildID: row.message.guildID) == nil
+            && MessageReplyPresentationPolicy.allowsReplyAction(for: row.message)
         let canDelete = model.canDeleteMessage(row.message)
         let jumpToMessage = actions.openMessage.map { openMessage in
             { openMessage(row.message) }
@@ -290,9 +299,14 @@ extension NativeTimelineCanvasView {
         let retry = isFailed
             ? { actions.retry(row.message) }
             : nil
+        let isGuildTimedOut = model.guildTimeoutUntil(
+            in: row.message.channelID,
+            guildID: row.message.guildID
+        ) != nil
+        let canReact = model.canCreateReactions(on: row.message)
         let reply = MessageReplyPresentationPolicy.allowsReplyAction(
             for: row.message
-        ) ? actions.reply.map { reply in
+        ) && !isGuildTimedOut ? actions.reply.map { reply in
             { reply(row.message) }
         } : nil
         let forward = model.canForward(row.message)
@@ -306,13 +320,14 @@ extension NativeTimelineCanvasView {
         // Copy Message ID, Copy Link and Mark Unread, plus Pin when allowed.
         let shiftActionCount = offersShiftActions ? 3 + (togglePin == nil ? 0 : 1) : 0
         let controlCount = jumpToMessage == nil
-            ? 2 + (isFailed ? 0 : (reply == nil ? 0 : 1) + (forward == nil ? 0 : 1) + (canEdit ? 1 : 0))
+            ? (isFailed ? 2 : 1 + (canReact ? 1 : 0) + (reply == nil ? 0 : 1) + (forward == nil ? 0 : 1) + (canEdit ? 1 : 0))
             : 1 + (unpinMessage == nil ? 0 : 1) + (messageInteractionContext == .inboxMention ? 1 : 0)
         let state = NativeTimelineActionCapsuleState(
             message: row.message,
             controlCount: controlCount,
             shiftActionCount: shiftActionCount,
-            allowsQuickReactions: jumpToMessage == nil && model.canCreateReactions(on: row.message)
+            allowsQuickReactions: jumpToMessage == nil && canReact,
+            isGuildTimedOut: isGuildTimedOut
         )
         // A capsule that appears while Shift is already held starts in the
         // Shift variant without animating.
@@ -843,6 +858,7 @@ extension NativeTimelineCanvasView {
               items.indices.contains(index),
               items[index].messageID == row.id,
               let model,
+              model.guildTimeoutUntil(in: row.message.channelID, guildID: row.message.guildID) == nil,
               let actions
         else { return }
         removeActionCapsule()
@@ -1036,6 +1052,10 @@ extension NativeTimelineCanvasView {
             message = row.message
         } else {
             message = nil
+        }
+        if value != nil, let message,
+           model?.guildTimeoutUntil(in: message.channelID, guildID: message.guildID) != nil {
+            return
         }
         let delta: CGFloat
         if let index, let editingRowHeight {

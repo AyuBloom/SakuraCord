@@ -6,6 +6,39 @@ import Testing
 
 @MainActor
 struct GuildCustomizationTests {
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func `onboarding refresh preserves a timeout changed while configuration is loading`(removingTimeout: Bool) async throws {
+        let provider = try CustomizationProvider()
+        let model = AppModel(launchMode: .offlineTesting, provider: provider)
+        await model.start()
+        await model.memberLoadTask?.value
+        let guildID = await provider.configuration.guildID
+        let until = Date.now.addingTimeInterval(300)
+        var member = try await provider.refreshCurrentMember(in: guildID)
+        member.communicationDisabledUntil = removingTimeout ? until : nil
+        model.receiveOnboardingMember(member, guildID: guildID)
+        let gate = CustomizationGate()
+        var reads = provider.refreshedMembers.makeAsyncIterator()
+        // Discard the setup read before arming the delayed configuration.
+        _ = await reads.next()
+        var arrivals = gate.arrivals.makeAsyncIterator()
+        await provider.holdOnboardingRead(on: gate, memberTimeout: member.communicationDisabledUntil)
+
+        model.refreshOnboarding(in: guildID)
+        _ = await arrivals.next()
+        _ = await reads.next()
+        let pending = Array(model.accountChildTasks.values)
+        member.communicationDisabledUntil = removingTimeout ? nil : until
+        model.consumeMembersChanged(guildID: guildID, members: [member], groups: [])
+        await gate.release()
+        for task in pending { await task.value }
+
+        #expect(model.onboardingMember(in: guildID)?.communicationDisabledUntil == member.communicationDisabledUntil)
+        #expect((model.onboarding.timeoutExpiryTasks[guildID] != nil) == !removingTimeout)
+        #expect(model.onboarding.entries[guildID]?.isLoading == false)
+        model.onboarding.reset()
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func `returning to onboarding preserves the cached question and advancing cannot strand a refresh`() async throws {
         let provider = try CustomizationProvider()
@@ -285,14 +318,19 @@ private actor CustomizationProvider: ChatProvider {
         case notificationToggle(GuildNotificationToggle, Bool)
     }
     nonisolated let writes: AsyncStream<Write>
+    nonisolated let refreshedMembers: AsyncStream<Void>
     private let events: AsyncStream<Write>.Continuation
+    private let memberEvents: AsyncStream<Void>.Continuation
     private let base = MockChatProvider()
+    private var onboardingReadGate: CustomizationGate?
+    private var memberTimeout: Date?
     private var completion: CheckedContinuation<Bool, Never>?
     private(set) var writeCount = 0
     private(set) var readCount = 0
     private(set) var configuration: GuildOnboarding
     init() throws {
         (writes, events) = AsyncStream.makeStream()
+        (refreshedMembers, memberEvents) = AsyncStream.makeStream()
         configuration = try JSONDecoder().decode(GuildOnboarding.self, from: Data(#"""
         {"guild_id":"100","enabled":true,"default_channel_ids":[],"responses":["required"],"prompts":[
         {"id":"1","title":"Track","type":0,"single_select":true,"required":true,"in_onboarding":true,"options":[
@@ -307,12 +345,22 @@ private actor CustomizationProvider: ChatProvider {
         if !success { throw ChatProviderError.invalidRequest("Test request failed") }
     }
     func finish(success: Bool) { completion?.resume(returning: success); completion = nil }
-    func guildOnboarding(in guildID: GuildID) async throws -> GuildOnboarding { readCount += 1; return configuration }
+    func holdOnboardingRead(on gate: CustomizationGate, memberTimeout: Date?) {
+        onboardingReadGate = gate
+        self.memberTimeout = memberTimeout
+    }
+    func guildOnboarding(in guildID: GuildID) async throws -> GuildOnboarding {
+        readCount += 1
+        if let onboardingReadGate { await onboardingReadGate.wait() }
+        return configuration
+    }
     func refreshCurrentMember(in guildID: GuildID) async throws -> Member {
         let snapshot = try await base.bootstrap()
         var member = Member(user: snapshot.currentUser, roleName: "", isOnline: false)
         member.flags = 9
         member.joinedAt = Date(timeIntervalSince1970: 1_790_000_000)
+        member.communicationDisabledUntil = memberTimeout
+        memberEvents.yield(())
         return member
     }
     func saveGuildOnboarding(in guildID: GuildID, responses: Set<String>, initial: Bool) async throws -> GuildOnboarding {

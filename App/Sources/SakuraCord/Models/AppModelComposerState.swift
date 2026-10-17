@@ -49,6 +49,7 @@ extension AppModel {
     }
 
     func reply(to message: Message) {
+        guard guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil else { return }
         let destination: MessageComposerDestination
         if message.channelID == selectedChannelID {
             replyingTo = message
@@ -227,7 +228,8 @@ extension AppModel {
               generation == localTypingGeneration,
               localTypingChannelID == channelID,
               isActiveChannelDraft || isActiveThreadDraft,
-              connectionState == .ready
+              connectionState == .ready,
+              guildTimeoutUntil(in: channelID) == nil
         else { return }
         localTypingTask = nil
         localTypingChannelID = nil

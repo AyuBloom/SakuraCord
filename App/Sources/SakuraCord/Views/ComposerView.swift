@@ -464,20 +464,16 @@ struct ComposerView: View {
             model.refreshApplicationCommandAutocomplete(in: conversation)
             updateCommandMemberSearch(current)
         }
-        .onDisappear {
-            voiceMessage.discard(playback: model.voiceMessagePlayback)
-            composerDropInteraction?.clear(destination: conversation)
-            if let channelID = sendTransitionAnchor.channelID {
-                model.timelineSendTransitionStore.discard(channelID)
-            }
-        }
+        .onDisappear(perform: composerDidDisappear)
         .onChange(of: voiceMessage.errorMessage) { _, message in
             guard let message else { return }
             model.errorMessage = message
             voiceMessage.clearError()
         }
         .task(id: composerPresentationID) {
-            voiceMessage.discard(playback: model.voiceMessagePlayback)
+            if !voiceMessage.restoreAfterGuildTimeout(in: activeConversationID) {
+                voiceMessage.discard(playback: model.voiceMessagePlayback)
+            }
             sendTransitionAnchor.channelID = activeConversationID
             model.timelineSendTransitionStore.registerComposer(sendTransitionAnchor)
             draftSelection = nil
@@ -1299,6 +1295,20 @@ struct ComposerView: View {
 }
 
 extension ComposerView {
+    private func composerDidDisappear() {
+        if let channelID = sendTransitionAnchor.channelID,
+           channelID == activeConversationID,
+           model.guildTimeoutUntil(in: channelID) != nil {
+            voiceMessage.preserveForGuildTimeout(in: channelID, playback: model.voiceMessagePlayback)
+        } else {
+            voiceMessage.discard(playback: model.voiceMessagePlayback)
+        }
+        composerDropInteraction?.clear(destination: conversation)
+        if let channelID = sendTransitionAnchor.channelID {
+            model.timelineSendTransitionStore.discard(channelID)
+        }
+    }
+
     /// One button morphs between attaching, discarding a recording, and
     /// previewing it.
     func composerLeadingButton(appearance: ComposerBarAppearance) -> some View {

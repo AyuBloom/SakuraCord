@@ -443,7 +443,8 @@ extension NativeTimelineCanvasView {
     }
 
     func showReactionPicker(forMessageRow message: Message) {
-        guard let model, let anchor = messageReactionPopoverAnchor(for: message) else { return }
+        guard let model, model.canCreateReactions(on: message),
+              let anchor = messageReactionPopoverAnchor(for: message) else { return }
         reactionPickerMessageID = message.id
         reactionPickerSource.frame = anchor
         reactionPickerSource.followsScrolling = true
@@ -1195,6 +1196,7 @@ extension NativeTimelineCanvasView {
             row.message.author.id == model?.snapshot?.currentUser.id
                 && !row.message.hasPoll
                 && !row.message.flags.contains(.voiceMessage)
+                && model?.guildTimeoutUntil(in: row.message.channelID, guildID: row.message.guildID) == nil
                 && MessageReplyPresentationPolicy.allowsReplyAction(
                     for: row.message
                 )
@@ -1211,6 +1213,7 @@ extension NativeTimelineCanvasView {
             canDelete: canDelete,
             canRetry: row.message.outboxState == .failed,
             canReply: actions.reply != nil
+                && model?.guildTimeoutUntil(in: row.message.channelID, guildID: row.message.guildID) == nil
                 && MessageReplyPresentationPolicy.allowsReplyAction(
                     for: row.message
                 ),
@@ -1243,6 +1246,7 @@ extension NativeTimelineCanvasView {
                 }
                 continue
             }
+            if case .addReaction = action, model?.canCreateReactions(on: row.message) != true { continue }
             let handler = messageMenuHandler(
                 action: action,
                 row: row,

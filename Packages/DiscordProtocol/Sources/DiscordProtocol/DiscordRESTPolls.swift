@@ -3,6 +3,7 @@ import SakuraCordModels
 
 public extension DiscordRESTProvider {
     func setPollAnswers(_ answerIDs: [Int], messageID: MessageID, channelID: ChannelID) async throws {
+        if !answerIDs.isEmpty { try requireGuildCommunication(in: channelID) }
         guard answerIDs.count <= 10, Set(answerIDs).count == answerIDs.count, answerIDs.allSatisfy({ $0 > 0 }) else {
             throw ChatProviderError.invalidRequest("Choose valid poll answers.")
         }

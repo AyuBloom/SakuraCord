@@ -1,5 +1,6 @@
 import Foundation
 import SakuraCordModels
+import Synchronization
 import Testing
 @testable import DiscordProtocol
 
@@ -1766,12 +1767,14 @@ final class DirectMessageURLProtocol:
     /// Replies consumed in order by settings-proto/1 requests; when empty, a
     /// PATCH echoes its settings.
     nonisolated(unsafe) static var settingsReplies: [SettingsProtocolReply] = []
+    static let memberIdentityReplies = Mutex<[SettingsProtocolReply]>([])
 
     static func reset() {
         requests = []
         ringStatus = 204
         profileHasEffect = false
         settingsReplies = []
+        memberIdentityReplies.withLock { $0 = [] }
     }
 
     override static func canInit(with request: URLRequest) -> Bool {
@@ -1818,7 +1821,16 @@ final class DirectMessageURLProtocol:
         }
         var status: Int
         var responseGate: StatusRecoveryResponseGate?
-        if request.url?.path == "/api/v9/users/@me/settings-proto/1", !Self.settingsReplies.isEmpty {
+        let memberIdentityReply = request.url?.path.hasPrefix("/api/v9/guilds/") == true
+            && request.url?.path.contains("/members/") == true
+            && request.httpMethod == "PATCH" ? Self.memberIdentityReplies.withLock { replies in
+                replies.isEmpty ? nil : replies.removeFirst()
+            } : nil
+        if let reply = memberIdentityReply {
+            status = reply.status
+            body = reply.body
+            responseGate = reply.gate
+        } else if request.url?.path == "/api/v9/users/@me/settings-proto/1", !Self.settingsReplies.isEmpty {
             let reply = Self.settingsReplies.removeFirst()
             status = reply.status
             body = reply.body

@@ -8,6 +8,7 @@ extension DiscordRESTProvider {
         _ draft: SendMessageDraft,
         progress: @escaping @Sendable (MessageSendProgress) -> Void
     ) async throws -> Message {
+        try requireGuildCommunication(in: draft.channelID)
         if let poll = draft.poll {
             if let error = poll.validationError { throw ChatProviderError.invalidRequest(error) }
             guard draft.content.isEmpty, draft.attachments.isEmpty, draft.stickerIDs.isEmpty, draft.replyTo == nil else {
@@ -69,6 +70,7 @@ extension DiscordRESTProvider {
                 )
             )
         }
+        try requireGuildCommunication(in: draft.channelID)
         progress(.submitting)
         let path = "/channels/\(draft.channelID)/messages"
         // Like the first-party message queue, a rate-limited send waits out the

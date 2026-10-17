@@ -696,7 +696,8 @@ extension AppModel {
                 }
             }
             do {
-                let value = try await AppPerformanceSignposts.measure(
+                let timeoutRevision = guildID.map { onboarding.timeoutRevisions[$0, default: 0] }
+                var value = try await AppPerformanceSignposts.measure(
                     "MemberListInitialRequest"
                 ) {
                     try await requestProvider.members(in: guildID)
@@ -706,11 +707,25 @@ extension AppModel {
                       memberLoadGeneration == requestGeneration,
                       selectedGuildID == guildID
                 else { return }
+                if let guildID,
+                   onboarding.timeoutRevisions[guildID, default: 0] != timeoutRevision,
+                   let index = value.firstIndex(where: { $0.id == currentUser?.id }) {
+                    // A live membership update can overtake this snapshot.
+                    // Preserve its timeout in both the self and list stores.
+                    value[index].communicationDisabledUntil = onboarding.members[guildID]?.communicationDisabledUntil
+                }
                 AppPerformanceSignposts.measureSync(
                     "MemberListInitialPublication"
                 ) {
                     if let guildID {
                         memberListsByGuildID[guildID] = value
+                        if let loadedMember = value.first(where: { $0.id == currentUser?.id }) {
+                            // Initial list hydration supplies timeout evidence;
+                            // keep the existing onboarding/role state authoritative.
+                            var member = onboarding.members[guildID] ?? loadedMember
+                            member.communicationDisabledUntil = loadedMember.communicationDisabledUntil
+                            receiveOnboardingMember(member, guildID: guildID)
+                        }
                     }
                     members = value
                     // Keep the pre-subscription GuildMemberStore snapshot for

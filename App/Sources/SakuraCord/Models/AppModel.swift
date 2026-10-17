@@ -37,6 +37,7 @@ nonisolated struct ConversationPermissionBasis: Sendable {
     let overwritePrincipals: PermissionOverwritePrincipals
     let hasCurrentRoleIdentity: Bool
     let currentUserIsPending: Bool
+    var currentUserCommunicationDisabledUntil: Date?
     var currentUserRequiresOnboarding: Bool = false
     var currentUserOnboardingIsKnown: Bool = true
 }
@@ -611,7 +612,7 @@ final class AppModel {
             guild: guild,
             channel: channel,
             currentUserID: currentUserID,
-            currentMember: membersByID[currentUserID],
+            currentMember: onboardingMember(in: guildID),
             roles: guildRoles,
             currentRoleIDs: currentUserRoleIDsByGuild[guildID]
         )
@@ -635,9 +636,7 @@ final class AppModel {
         else {
             return nil
         }
-        let member =
-            membersByGuildID[guildID]?[currentUserID]
-            ?? (guildID == selectedGuildID ? membersByID[currentUserID] : nil)
+        let member = onboardingMember(in: guildID)
         let roles =
             guildRolesByGuildID[guildID]
             ?? (guildID == selectedGuildID ? guildRoles : [])
@@ -658,6 +657,7 @@ final class AppModel {
             ),
             hasCurrentRoleIdentity: storedRoleIDs != nil || member != nil,
             currentUserIsPending: onboardingMember(in: guildID)?.isPending == true,
+            currentUserCommunicationDisabledUntil: member?.communicationDisabledUntil,
             currentUserRequiresOnboarding: requiresOnboarding(in: guildID),
             currentUserOnboardingIsKnown: !guild.features.contains("GUILD_ONBOARDING") || onboardingMember(in: guildID)?.flags != nil
         )
@@ -672,7 +672,8 @@ final class AppModel {
             channel: channel,
             resolvedBasePermissions: basis.resolvedBasePermissions,
             overwritePrincipals: basis.overwritePrincipals,
-            hasCurrentRoleIdentity: basis.hasCurrentRoleIdentity
+            hasCurrentRoleIdentity: basis.hasCurrentRoleIdentity,
+            communicationDisabledUntil: basis.currentUserCommunicationDisabledUntil
         )
     }
 
@@ -704,9 +705,7 @@ final class AppModel {
               let currentUserID = currentUser?.id
         else { return false }
         guard !guild.features.contains("FORWARDING_DISABLED") else { return false }
-        let member =
-            membersByGuildID[guildID]?[currentUserID]
-            ?? (guildID == selectedGuildID ? membersByID[currentUserID] : nil)
+        let member = onboardingMember(in: guildID)
         let roles =
             guildRolesByGuildID[guildID]
             ?? (guildID == selectedGuildID ? guildRoles : [])
@@ -817,7 +816,8 @@ final class AppModel {
             channel: channel,
             resolvedBasePermissions: permissionBasis.resolvedBasePermissions,
             overwritePrincipals: permissionBasis.overwritePrincipals,
-            hasCurrentRoleIdentity: permissionBasis.hasCurrentRoleIdentity
+            hasCurrentRoleIdentity: permissionBasis.hasCurrentRoleIdentity,
+            communicationDisabledUntil: permissionBasis.currentUserCommunicationDisabledUntil
         )
     }
 
@@ -829,9 +829,7 @@ final class AppModel {
         guard let guild = serverRailGuildsByID[guildID],
               let currentUserID = currentUser?.id
         else { return "Destination permissions are unavailable." }
-        let member =
-            membersByGuildID[guildID]?[currentUserID]
-            ?? (guildID == selectedGuildID ? membersByID[currentUserID] : nil)
+        let member = onboardingMember(in: guildID)
         let roles =
             guildRolesByGuildID[guildID]
             ?? (guildID == selectedGuildID ? guildRoles : [])
@@ -887,6 +885,7 @@ final class AppModel {
     var selectedChannelID: ChannelID? {
         didSet {
             guard selectedChannelID != oldValue else { return }
+            channelVoiceMessageComposer.discard(playback: voiceMessagePlayback)
             // Only a conversation in Direct Messages replaces its Friends home.
             if selectedChannelID != nil, selectedGuildID == nil { friends.isPresented = false }
             if onboarding.previewChannelID != selectedChannelID {

@@ -269,7 +269,8 @@ nonisolated enum ConversationPermissionResolver {
                 currentUserID: currentUserID,
                 roleIDs: roleIDs
             ),
-            hasCurrentRoleIdentity: hasCurrentRoleIdentity
+            hasCurrentRoleIdentity: hasCurrentRoleIdentity,
+            communicationDisabledUntil: currentMember?.communicationDisabledUntil
         )
     }
 
@@ -299,21 +300,26 @@ nonisolated enum ConversationPermissionResolver {
         channel: Channel,
         resolvedBasePermissions: UInt64?,
         overwritePrincipals: PermissionOverwritePrincipals,
-        hasCurrentRoleIdentity: Bool
+        hasCurrentRoleIdentity: Bool,
+        communicationDisabledUntil: Date? = nil,
+        now: Date = .now
     ) -> UInt64? {
         if guild.isOwnedByCurrentUser == true { return .max }
         guard let permissions = resolvedBasePermissions else { return nil }
         if permissions & DiscordPermissionBits.administrator != 0 { return .max }
 
-        guard let overwrites = channel.permissionOverwrites, !overwrites.isEmpty else {
-            return permissions
+        var result = permissions
+        if let overwrites = channel.permissionOverwrites, !overwrites.isEmpty {
+            let mask = OverwriteMask(overwrites, principals: overwritePrincipals)
+            if !hasCurrentRoleIdentity, mask.hasRoleOverwrite { return nil }
+            result = mask.applied(to: result)
         }
-        let mask = OverwriteMask(
-            overwrites,
-            principals: overwritePrincipals
-        )
-        if !hasCurrentRoleIdentity, mask.hasRoleOverwrite { return nil }
-        return mask.applied(to: permissions)
+        // Timeout is applied after channel overwrites, which cannot restore
+        // communication permissions. Owners and administrators are exempt.
+        if communicationDisabledUntil.map({ $0 > now }) == true {
+            result &= DiscordPermissionBits.viewChannel | DiscordPermissionBits.readMessageHistory
+        }
+        return result
     }
 
     /// Buckets permission overwrites in one pass without intermediate arrays or

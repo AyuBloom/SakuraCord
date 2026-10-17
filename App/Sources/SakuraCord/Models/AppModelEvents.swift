@@ -906,9 +906,21 @@ extension AppModel {
         snapshot = value
         friends.replaceRelationships(value.relationships)
         ignoredUsers.replaceRelationships(value.relationships)
+        // A replacement READY also removes timeout evidence for omitted self
+        // members. Keep the other onboarding fields, and shadow retained member
+        // caches so their older timeout cannot become authoritative again.
+        let knownMemberGuildIDs = Set(onboarding.members.keys)
+            .union(membersByGuildID.keys)
+            .union(selectedGuildID.map { [$0] } ?? [])
+        for guildID in knownMemberGuildIDs where value.currentMembersByGuildID[guildID] == nil {
+            guard var member = onboardingMember(in: guildID), member.communicationDisabledUntil != nil else { continue }
+            member.communicationDisabledUntil = nil
+            receiveOnboardingMember(member, guildID: guildID)
+        }
         for (guildID, member) in value.currentMembersByGuildID {
             receiveOnboardingMember(member, guildID: guildID)
         }
+        reconcileGuildTimeoutExpiries()
         forwardSearchSourceRevision &+= 1
         // A replacement READY is authoritative even when its setting equals
         // the value from before an in-flight toggle started.
@@ -1013,6 +1025,11 @@ extension AppModel {
         forwardSearchSourceRevision &+= 1
         currentUserRoleIDsByGuild = currentUserRoleIDsByGuild.filter {
             retainedGuildIDs.contains($0.key)
+        }
+        for guildID in onboarding.members.keys where !retainedGuildIDs.contains(guildID) {
+            onboarding.members[guildID] = nil
+            onboarding.timeoutExpiryTasks.removeValue(forKey: guildID)?.cancel()
+            onboarding.timeoutRevisions[guildID] = nil
         }
         readState.retainGuilds(retainedGuildIDs)
         readState.merge(guilds: guilds)

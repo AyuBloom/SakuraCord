@@ -274,7 +274,9 @@ struct NativeTimelineEditingMessageContent: View {
             InlineMessageEditor(
                 model: model,
                 text: $editText,
+                canEdit: model.guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil,
                 save: {
+                    guard model.guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil else { return }
                     guard let value = MessageEditInputPolicy.submission(
                         from: editText
                     ) else {
@@ -299,17 +301,20 @@ struct NativeTimelineEditingMessageContent: View {
                         )
                     },
                     addReactionControl: {
-                    ReactionActionMenu(
-                        model: model,
-                        guildID: message.guildID,
-                        isPickerPresented:
-                            $isReactionPickerPresented,
-                        presentation: .inline,
-                        react: react
-                    )
-                    .id("reaction-picker-\(message.id)-inline")
+                        if model.canCreateReactions(on: message) {
+                            ReactionActionMenu(
+                                model: model,
+                                guildID: message.guildID,
+                                isPickerPresented:
+                                    $isReactionPickerPresented,
+                                presentation: .inline,
+                                react: react
+                            )
+                            .id("reaction-picker-\(message.id)-inline")
+                        }
                     }
                 )
+                .disabled(!model.canUpdateReactions(on: message))
             }
             if message.flags.contains(.ephemeral) {
                 HStack(spacing: InterfaceScale.metric(4)) {
@@ -378,6 +383,7 @@ struct MessageActionCapsule: View {
     let message: Message
     let canEdit: Bool
     let canDelete: Bool
+    let canReact: Bool
     let showsQuickReactions: Bool
     let showsShiftActions: Bool
     @Binding var isReactionPickerPresented: Bool
@@ -417,13 +423,15 @@ struct MessageActionCapsule: View {
             HoverActionPill(spacing: 0) {
                 leadingActions
                 HStack(spacing: HoverActionPillMetrics.spacing) {
-                    ReactionActionMenu(
-                        model: model,
-                        guildID: message.guildID,
-                        isPickerPresented: $isReactionPickerPresented,
-                        react: react
-                    )
-                    .id("reaction-picker-\(message.id)-toolbar")
+                    if canReact {
+                        ReactionActionMenu(
+                            model: model,
+                            guildID: message.guildID,
+                            isPickerPresented: $isReactionPickerPresented,
+                            react: react
+                        )
+                        .id("reaction-picker-\(message.id)-toolbar")
+                    }
                     if let reply {
                         HoverActionButton(systemImage: "arrowshape.turn.up.left", help: "Reply", action: reply)
                     }
@@ -846,6 +854,7 @@ struct InlineMessageEditorComposerActions {
 private struct InlineMessageEditor: View {
     let model: AppModel
     @Binding var text: String
+    let canEdit: Bool
     let save: () -> Void
     let cancel: () -> Void
     @State private var selection: NSRange?
@@ -883,6 +892,7 @@ private struct InlineMessageEditor: View {
                 selection: $selection,
                 isFocused: $isFocused
             )
+                .disabled(!canEdit)
                 .padding(InterfaceScale.metric(9))
                 .background(
                     Color.primary.opacity(0.065),
@@ -897,7 +907,7 @@ private struct InlineMessageEditor: View {
                 .accessibilityHint("Press Return to save, Shift-Return for a new line, or Escape to cancel.")
                 .onExitCommand(perform: cancel)
             InlineMessageEditFooter(
-                canSave: MessageEditInputPolicy.submission(from: text) != nil,
+                canSave: canEdit && MessageEditInputPolicy.submission(from: text) != nil,
                 save: save,
                 cancel: cancel
             )
@@ -913,7 +923,7 @@ private struct InlineMessageEditor: View {
     }
 
     private var context: ColonAutocompleteContext? {
-        isAutocompleteDismissed ? nil : ColonAutocompleteContext(text: text, selection: selection)
+        !canEdit || isAutocompleteDismissed ? nil : ColonAutocompleteContext(text: text, selection: selection)
     }
 
     private var suggestions: [ColonAutocompleteSuggestion] {

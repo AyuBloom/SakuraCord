@@ -35,7 +35,8 @@ extension NativeTimelineCanvasView {
                 frame: region.frame.offsetBy(dx: 0, dy: rowOrigin)
             )
         case .add:
-            guard let frame = layout.addReactionFrame else { return nil }
+            guard model?.canCreateReactions(on: row.message) == true,
+                  let frame = layout.addReactionFrame else { return nil }
             return ReactionPointerHit(
                 target: .add(messageID: row.id),
                 rowIndex: index,
@@ -70,7 +71,8 @@ extension NativeTimelineCanvasView {
                 frame: region.frame.offsetBy(dx: 0, dy: rowOrigin)
             )
         case .add:
-            guard let frame = layouts[index].addReactionFrame else {
+            guard model?.canCreateReactions(on: row.message) == true,
+                  let frame = layouts[index].addReactionFrame else {
                 return nil
             }
             return ReactionPointerHit(

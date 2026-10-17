@@ -740,14 +740,14 @@ extension NativeTimelineRowPainter {
             reaction(
                 region,
                 model: model,
-                isHovered: hoveredReactionID == region.reaction.id,
+                isHovered: model?.canUpdateReactions(on: message) != false && hoveredReactionID == region.reaction.id,
                 countTransition: reactionCountTransitions[
                     region.reaction.id
                 ],
                 hasAnimatedEmojiOverlay: input.animatedReactionIDs.contains(region.reaction.id)
             )
         }
-        if let frame = layout.addReactionFrame {
+        if let frame = layout.addReactionFrame, model?.canCreateReactions(on: message) != false {
             reactionAddControl(
                 in: frame,
                 isHovered: isAddReactionHovered

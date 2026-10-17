@@ -75,6 +75,13 @@ private struct ChatDetailFooter: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let until = model.guildTimeoutUntil(in: channel.id) {
+                DisabledComposerView(
+                    message: "You are timed out.",
+                    appearance: model.appearanceSettings.composerBarAppearance,
+                    timeoutUntil: until
+                )
+            } else {
             switch access {
             case .checking:
                 DisabledComposerView(
@@ -104,6 +111,7 @@ private struct ChatDetailFooter: View {
             case .hidden:
                 EmptyView()
             }
+            }
         }
     }
 }
@@ -111,6 +119,7 @@ private struct ChatDetailFooter: View {
 struct DisabledComposerView: View {
     let message: String
     let appearance: ComposerBarAppearance
+    var timeoutUntil: Date?
 
     var body: some View {
         let usesDefaultStyle = appearance == .defaultStyle
@@ -129,12 +138,24 @@ struct DisabledComposerView: View {
             ))
 
         HStack(spacing: 0) {
+            if timeoutUntil != nil {
+                Image(systemName: "clock")
+                    .foregroundStyle(.red)
+                    .padding(.trailing, InterfaceScale.metric(8))
+                    .accessibilityHidden(true)
+            }
             Text(message)
-                .font(.interfaceSystem(size: 15))
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if let until = timeoutUntil {
+                Text(timerInterval: min(Date.now, until) ... until, countsDown: true, showsHours: true)
+                    .monospacedDigit()
+                    .fixedSize()
+                    .help("Timeout ends \(until.formatted(date: .abbreviated, time: .standard))")
+            }
         }
-        .foregroundStyle(.tertiary)
+        .font(.interfaceSystem(size: 15))
+        .foregroundStyle(timeoutUntil == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.white))
         .padding(.horizontal, usesDefaultStyle ? InterfaceScale.metric(11) : InterfaceScale.metric(24))
         .frame(
             height: usesDefaultStyle

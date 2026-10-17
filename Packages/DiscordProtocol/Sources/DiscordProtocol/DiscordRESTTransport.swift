@@ -100,6 +100,7 @@ extension DiscordRESTProvider {
             )
         }
         var seen = Set<UserID>()
+        let previousMembers = cachedMemberIndex(guildID: guildID)
         return (cachedMemberListItems[guildID]?[memberListID] ?? []).enumerated().compactMap { index, item -> Member? in
             guard let memberDTO = item?.member,
                   let userID = UserID(memberDTO.user.id),
@@ -110,7 +111,8 @@ extension DiscordRESTProvider {
                       presence: item?.presence,
                       guildRoles: guildRoles,
                       guildRoleCatalog: guildRoleCatalog,
-                      guildID: guildID
+                      guildID: guildID,
+                      previousCommunicationDisabledUntil: previousMembers[userID]?.communicationDisabledUntil
                   ),
                   seen.insert(member.id).inserted
             else { return nil }
@@ -538,6 +540,7 @@ extension DiscordRESTProvider {
                 // Rate-limit reservation and authorization can suspend. Validate
                 // the immutable status payload immediately before transmission.
                 if let statusSave = context.statusSave { try validateStatusSettingsSave(statusSave) }
+                try requireGuildCommunicationForRequest(path: path, method: method, body: context.body)
                 let networkName: StaticString = isMessageHistoryRequest
                     ? "MessageHistoryNetworkAttempt"
                     : "RESTNetworkAttempt"

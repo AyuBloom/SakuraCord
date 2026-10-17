@@ -5,6 +5,7 @@ import SakuraCordModels
 /// The current user's poll selection while a vote request is pending.
 struct PollVoteMutationState {
     var channelID: ChannelID
+    var guildID: GuildID?
     var confirmed: Set<Int>
     var desired: Set<Int>
     var isSending: Bool
@@ -87,15 +88,21 @@ extension AppModel {
         return .enqueued(delivery: delivery)
     }
 
+    func canUpdatePollVote(on message: Message, removing: Bool = false) -> Bool {
+        removing || guildTimeoutUntil(in: message.channelID, guildID: message.guildID) == nil
+    }
+
     /// Shows the current user's selection immediately and coalesces requests.
     /// Gateway echoes of the current user's vote are idempotent.
     @discardableResult
     func vote(on message: Message, answerIDs: Set<Int>) -> Bool {
-        guard let poll = (retainedMessage(channelID: message.channelID, messageID: message.id) ?? message).poll,
+        guard canUpdatePollVote(on: message, removing: answerIDs.isEmpty),
+              let poll = (retainedMessage(channelID: message.channelID, messageID: message.id) ?? message).poll,
               !poll.isClosed(), poll.layoutType == 1, poll.allowsMultipleAnswers || answerIDs.count <= 1,
               answerIDs.allSatisfy({ id in poll.answers.contains { $0.id == id } }) else { return false }
         var state = pollVoteMutations[message.id] ?? PollVoteMutationState(
-            channelID: message.channelID, confirmed: poll.selectedAnswerIDs, desired: poll.selectedAnswerIDs, isSending: false
+            channelID: message.channelID, guildID: message.guildID,
+            confirmed: poll.selectedAnswerIDs, desired: poll.selectedAnswerIDs, isSending: false
         )
         state.desired = answerIDs
         pollVoteMutations[message.id] = state
@@ -110,12 +117,21 @@ extension AppModel {
             pollVoteMutations[messageID] = nil
             return
         }
+        guard state.desired.isEmpty || guildTimeoutUntil(in: state.channelID, guildID: state.guildID) == nil else {
+            applyCurrentUserPollSelection(state.confirmed, messageID: messageID, channelID: state.channelID)
+            pollVoteMutations[messageID] = nil
+            return
+        }
         let answerIDs = state.desired
         let channelID = state.channelID
+        let guildID = state.guildID
         state.isSending = true
         pollVoteMutations[messageID] = state
         startAccountChildTask(account: accountSession()) { model, session in
             do {
+                guard answerIDs.isEmpty || model.guildTimeoutUntil(in: channelID, guildID: guildID) == nil else {
+                    throw ChatProviderError.invalidRequest("You are timed out in this server.")
+                }
                 try await session.provider.setPollAnswers(answerIDs.sorted(), messageID: messageID, channelID: channelID)
             } catch {
                 guard model.isCurrentAccountSession(session),

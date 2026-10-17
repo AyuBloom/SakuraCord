@@ -80,6 +80,7 @@ extension AppModel {
         channelNotificationMutationGeneration &+= 1
         guildNotificationMutationTasks.values.forEach { $0.cancel() }
         guildNotificationMutationTasks.removeAll()
+        guildNotificationSettingsRevisions.removeAll()
         channelNotificationMutationTasks.values.forEach { $0.cancel() }
         channelNotificationMutationTasks.removeAll()
         categoryCollapseMutationTasks.values.forEach { $0.cancel() }
@@ -304,7 +305,7 @@ extension AppModel {
             }
             refreshUnreadPresentation()
         case .notificationSettingsChanged(let settings):
-            applyNotificationSettings(settings)
+            applyRemoteNotificationSettings(settings)
             synchronizeVisibleCustomization(guildID: settings.guildID)
             reconcileSelectedOnboardingChannel()
             refreshUnreadPresentation()
@@ -906,6 +907,11 @@ extension AppModel {
             receiveOnboardingMember(member, guildID: guildID)
         }
         forwardSearchSourceRevision &+= 1
+        // A replacement READY is authoritative even when its setting equals
+        // the value from before an in-flight toggle started.
+        for guildID in guildNotificationMutationTasks.keys {
+            guildNotificationSettingsRevisions[guildID, default: 0] &+= 1
+        }
         readState.replaceSnapshot(value)
         composer.slowmode.updateIntervals(for: value.channels, replacing: previousSnapshot?.channels ?? [])
         visibleChannels = value.channels.filter { $0.guildID == selectedGuildID }

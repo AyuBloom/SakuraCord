@@ -102,6 +102,54 @@ guilds with prompts expose Channels & Roles; those without use Browse Channels
 when local channel customization is enabled. Voice/Stage channels use the same
 selection policy, not an independent expansion state.
 
+### Hide muted channels
+
+The server context menu's Hide Muted Channels is the account's synchronized
+per-guild `hide_muted_channels` setting, independent of Show All Channels and the
+local channel-customization preference. Each user action sends one
+`PATCH /users/@me/guilds/settings` with
+`{"guilds":{"<guild_id>":{"hide_muted_channels":true}}}` (or `false`). It changes
+no notification levels, mute state, channel selections or flags. The ordinary
+single-attempt mutation budget applies; errors retain the previous setting.
+READY and `USER_GUILD_SETTINGS_UPDATE` supply the same field to every session;
+the Gateway update can precede the HTTP 200 response. Merge sparse settings
+updates without discarding unrelated overrides.
+The app's successful-request fallback must not overwrite authoritative settings
+received while that request was pending, including a newer change from another
+client or a replacement READY. Unrelated local override edits retain the fallback.
+
+When enabled, hide directly muted channels except the selected conversation,
+connected voice channel, selected thread's parent, channels with mentions, or
+parents with visible joined threads. Apply the existing thread relevance and
+muted-thread rules before deciding whether to keep a parent. Guild and category
+mutes do not count as direct channel mutes for this filter; category collapse
+continues to control its rows separately. Expired timed mutes stop hiding a
+channel even without another Gateway event. Empty filtered groups disappear.
+Ordinary next/previous channel shortcuts traverse the same filtered rows.
+Browse Channels continues to list muted channels and preserves their channel
+selection independently of mute state. Its ordinary channel context menu offers
+Unmute Channel even while the sidebar hides the row. Previewing a muted channel
+there does not reveal it in the sidebar; opening it as the main conversation
+does. Quick Switcher and temporarily disabling Hide Muted Channels provide other
+ways to reach a hidden channel without changing its saved channel selection.
+
+Official Fresh host `0.0.411`, web build `641004`
+(`web.4d4b2f75fdea5470.js`), observed on 17 October 2026, confirmed the partial
+toggle PATCH, HTTP 200 settings response, Gateway echo, and hide/reveal of a
+directly muted channel with Show All Channels enabled. Live changes in either
+Discord or SakuraCord updated the other session without a reload; temporary
+settings were restored. The selected muted channel remained visible until
+navigating away. The same build's channel list and guild-settings store establish
+the remaining focus, mention, joined-thread and direct-mute exceptions. Those
+exceptions are source evidence rather than a claim that every branch was
+exercised live.
+
+Pinned Paicord `5c76f3674e2cace7a6a4369497fcf482f3d9ebe3` hydrates its
+[guild-settings store](https://github.com/llsc12/Paicord/blob/5c76f3674e2cace7a6a4369497fcf482f3d9ebe3/Paicord/Stores/UserGuildSettingsStore.swift)
+from READY without consuming later guild-settings events there. Swiftcord v1
+`14465d927ebe1ba34b3befa00f9365fad7b56eb9` has no equivalent filter in its
+[channel list](https://github.com/SwiftcordApp/Swiftcord/blob/14465d927ebe1ba34b3befa00f9365fad7b56eb9/Swiftcord/Views/Server/ChannelList.swift).
+
 ## Server Guide
 
 Guide entry reads `new-member-welcome`, optional guild profile enrichment and

@@ -13,6 +13,7 @@ public func runSakuraCord() {
 struct SakuraCordApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
+    private let opensServerRailPlayground: Bool
     private let opensForumPerformanceFixture: Bool
     private let opensChatPerformanceFixture: Bool
     private let opensPinsPerformanceFixture: Bool
@@ -34,6 +35,7 @@ struct SakuraCordApp: App {
         SharedMediaDataLoader.removeAbandonedDownloadsAtStartup()
         DiagnosticsPreferences.restore()
         let configuration = AppLaunchConfiguration(arguments: ProcessInfo.processInfo.arguments)
+        opensServerRailPlayground = configuration.includesServerRailPlayground
         opensForumPerformanceFixture = configuration.includesForumPerformanceFixture
         opensChatPerformanceFixture = configuration.includesChatPerformanceFixture
         opensPinsPerformanceFixture = configuration.includesPinsPerformanceFixture
@@ -109,7 +111,13 @@ struct SakuraCordApp: App {
         // SakuraCord owns one account workspace. A WindowGroup would restore
         // every previously opened main window on the next launch.
         Window("SakuraCord", id: "main") {
-            RootView(model: model)
+            Group {
+                if opensServerRailPlayground {
+                    ServerRailPlaygroundView()
+                } else {
+                    RootView(model: model)
+                }
+            }
                 .modifier(TranslationTaskHost(coordinator: model.translation.coordinator))
                 .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in
                     model.resetAllTranslations()
@@ -125,6 +133,7 @@ struct SakuraCordApp: App {
                     AppPerformanceSignposts.reportRootViewAppeared()
                 }
                 .task {
+                    guard !opensServerRailPlayground else { return }
                     await appDelegate.startSession(for: model)
                     await model.applyConfiguredLocalStorageLimit()
 #if DEBUG
@@ -281,6 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func startSession(for model: AppModel) async {
         self.model = model
+        guard !AppLaunchConfiguration(arguments: ProcessInfo.processInfo.arguments).includesServerRailPlayground else { return }
         if sessionStartTask == nil {
             sessionStartTask = Task { await model.start() }
         }

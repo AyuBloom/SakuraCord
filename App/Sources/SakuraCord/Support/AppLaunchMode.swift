@@ -9,6 +9,7 @@ nonisolated struct AppLaunchConfiguration: Equatable, Sendable {
     let mode: AppLaunchMode
     let includesSignInFixture: Bool
     let includesLongServerList: Bool
+    let includesServerRailPlayground: Bool
     let includesForumPerformanceFixture: Bool
     let includesChatPerformanceFixture: Bool
     let includesChatMediaPerformanceFixture: Bool
@@ -65,6 +66,7 @@ nonisolated struct AppLaunchConfiguration: Equatable, Sendable {
         #endif
         includesSignInFixture = arguments.contains("--offline-sign-in")
         includesLongServerList = arguments.contains("--offline-long-server-list")
+        includesServerRailPlayground = arguments.contains("--offline-server-rail-playground")
         includesForumPerformanceFixture = arguments.contains("--offline-forum-performance")
         includesChatMediaPerformanceFixture =
             arguments.contains("--offline-chat-media-performance-autoscroll")
@@ -93,7 +95,7 @@ nonisolated struct AppLaunchConfiguration: Equatable, Sendable {
             || arguments.contains("--offline-chat-performance")
             || includesPinsPerformanceFixture
         let testingFlags: Set = [
-            "--offline", "--offline-sign-in", "--offline-long-server-list", "--offline-forum-performance",
+            "--offline", "--offline-sign-in", "--offline-long-server-list", "--offline-server-rail-playground", "--offline-forum-performance",
             "--offline-chat-performance", "--offline-chat-performance-autoscroll",
             "--offline-chat-performance-live-autoscroll",
             "--offline-chat-media-performance-autoscroll",

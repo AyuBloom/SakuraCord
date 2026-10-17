@@ -151,8 +151,19 @@ struct ServerRailView: View {
                     if showsReadAllButton {
                         ReadAllServersButton(isReadingAll: isReadingAll, action: readAll)
                     }
-                    serverItems
+                    if !items.isEmpty { serverItems }
                 }
+                Button(action: joinServer) {
+                    Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
+                        .frame(width: InterfaceScale.metric(44), height: InterfaceScale.metric(44))
+                        .foregroundStyle(.green)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(13)))
+                        .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
+                }
+                .buttonStyle(ServerRailButtonStyle())
+                .help("Add a Server")
+                .accessibilityLabel("Add a Server")
+                .accessibilityIdentifier("add-server")
             }
             .padding(.bottom, InterfaceScale.metric(12))
             .animation(reduceMotion ? nil : ServerRailAnimations.folderExpansion, value: folderLayoutRevision)
@@ -246,17 +257,6 @@ struct ServerRailView: View {
                 .geometryGroup()
                 .transition(ServerRailAnimations.membershipTransition)
             }
-            Button(action: joinServer) {
-                Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
-                    .frame(width: InterfaceScale.metric(44), height: InterfaceScale.metric(44))
-                    .foregroundStyle(.green)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(13)))
-                    .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
-            }
-            .buttonStyle(ServerRailButtonStyle())
-            .help("Add a Server")
-            .accessibilityLabel("Add a Server")
-            .accessibilityIdentifier("add-server")
         }
     }
 

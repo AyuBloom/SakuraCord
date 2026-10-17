@@ -100,6 +100,17 @@ extension AppModel {
         now: Date
     ) -> SidebarThreadPolicy.Layout {
         guard let guildID else { return .init() }
+        let settings = readState.notificationSettings(guildID: guildID)
+        var layout = SidebarThreadPolicy.Layout()
+        if settings?.hideMutedChannels == true {
+            // A timed channel mute can expire without another Gateway event.
+            // Reuse the sidebar's existing explicit refresh schedule.
+            layout.relevanceDeadlines = settings?.channelOverrides.compactMap {
+                guard $0.isMuted, let endTime = $0.muteConfiguration?.endTime,
+                      endTime > now else { return nil }
+                return endTime
+            }.sorted() ?? []
+        }
         let joined = (snapshot?.activeJoinedThreads ?? []).filter {
             $0.guildID == guildID && !$0.isArchived
         }
@@ -110,13 +121,12 @@ extension AppModel {
                 })
             return guildMatches ? thread : nil
         }
-        guard !joined.isEmpty || open != nil else { return .init() }
+        guard !joined.isEmpty || open != nil else { return layout }
 
         let candidatesByParentID = Dictionary(
             grouping: joined.map(sidebarThreadCandidate),
             by: { $0.thread.parentID }
         )
-        var layout = SidebarThreadPolicy.Layout()
         for group in channelGroups {
             let isCollapsed = group.categoryID.map {
                 isCategoryCollapsed(guildID: guildID, categoryID: $0)

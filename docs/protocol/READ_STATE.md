@@ -27,8 +27,11 @@ lower-bound `N+` count). Opening such a backlog directly at its newest message
 shows only its tail, so, as in Discord, that visit stays unread until the reader
 scrolls toward the newest message again or chooses Mark as Read. Opening above
 the newest message needs no extra gesture, and a fully visible unread run with
-a loaded divider acknowledges on open. Wheel or scrollbar movement toward newer
-messages releases the hold; resizing and app-owned positioning do not. A remote
+a loaded divider acknowledges on open. A conversation without a usable
+acknowledged boundary, including a READY `last_message_id` that is not a
+snowflake (such as the number `-11`), is not held: no scroll can reach its
+unread start. Wheel or scrollbar movement toward newer messages releases the
+hold; resizing and app-owned positioning do not. A remote
 ACK or failed Mark Unread rollback that releases the hold resumes ordinary
 viewing acknowledgements without requiring another geometry callback.
 
@@ -58,6 +61,22 @@ boundary; bulk operations capture targets before batching `/read-states/ack-bulk
 Do not recompute targets from a later rerender or restore obsolete mention counts
 on Undo. Fully loaded expanded empty groups may acknowledge and disappear without
 Undo; incomplete loads do not establish emptiness.
+
+The optional server-rail Read All action uses the same bulk route with type 0
+entries for accessible current server channels and active joined threads, including
+muted conversations. It excludes DMs, departed/archived threads, resource channels
+and scheduled events. Targets are captured only after native confirmation; new
+messages beyond those boundaries stay unread. Accepted batches remain read if a
+later batch fails; failed targets roll back without automatic replay.
+
+This scope follows Vencord’s
+[ReadAllNotificationsButton](https://github.com/Vendicated/Vencord/blob/32c90633ce6a95d7e56c95479efbb431bacf1eac/src/plugins/readAllNotificationsButton/index.tsx),
+which dispatches Discord’s `BULK_ACK` with channel IDs, last-message IDs and type 0.
+The [production web client](https://discord.com/assets/web.4d4b2f75fdea5470.js)
+(build 641004) maps that action to
+`POST /read-states/ack-bulk` with `read_states` containing `channel_id`,
+`message_id` and `read_state_type`, in batches of at most 100. SakuraCord retains
+its existing one-attempt mutation policy and partial-batch reconciliation.
 
 Restricted groups require the applicable account eligibility and local server
 consent before exposing their contents. Mentions also gate restricted accessories.

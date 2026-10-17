@@ -80,6 +80,26 @@ the [message author contract](https://docs.discord.com/developers/resources/mess
 and Swiftcord's webhook profile-fetch exclusion; pinned Paicord retains the
 raw author fields but has no equivalent dedicated profile path.
 
+### Embed media
+
+The provider normalizes wire media before presentation: `article` and `image`
+embeds promote `thumbnail` into `image`, with an explicit `image` taking
+precedence. They do not retain a side thumbnail. Other types, including `link`
+and `rich`, preserve the separate image and thumbnail slots. Keep the complete
+media metadata and proxy URL during normalization; do not fetch the linked page
+to infer its layout. REST history, Gateway updates and forwarded snapshots share
+`MessageEmbedDTO` and this rule.
+
+Discord's [embed schema](https://docs.discord.com/developers/resources/message#embed-object)
+defines the media slots; its [link-preview guide](https://docs.discord.com/developers/link-previews/overview#preview-layouts)
+distinguishes side thumbnails from large images below the text. The first-party
+normalization is visible in the [stable web client](https://discord.com/assets/web.c5b338cc7e610833.js)
+(`web.c5b338cc7e610833.js`, 16 October 2026):
+the article/image cases assign the wire thumbnail to the main image before an
+explicit image overrides it. Discord's in-memory message dump therefore differs
+from its wire payload. [RichMessageDecodingTests.swift](../../Packages/DiscordProtocol/Tests/DiscordProtocolTests/RichMessageDecodingTests.swift)
+protects promotion, explicit-image precedence and link-thumbnail preservation.
+
 ## Reactions, pins and forwarding
 
 Reaction intent is serialized per message/emoji with one coalesced follow-up.
@@ -402,6 +422,24 @@ reservation slot IDs and final attachment snowflakes. Discord later transforms
 them into bot-facing snowflake references and `resolved.attachments`; the client
 does not submit that resolved map. Removing a prepared file changes the local
 draft; no remote deletion was observed. Re-adding reserves a new upload.
+
+## Embedded video playback
+
+Video previews use the thumbnail as their large poster rather than a second
+side image. Image/video/GIFV cards omit descriptions, and provider metadata
+precedes the author and title, matching the first-party renderer. YouTube player
+URLs are web content, not AVFoundation media: an explicit preview activation
+opens the existing media viewer with a nonpersistent `WKWebView`. Only validated
+YouTube embed destinations enter that path; direct media retains native playback.
+The player sends the installed bundle identifier as its Referer, as required by
+[YouTube's WebView integration contract](https://developers.google.com/youtube/terms/required-minimum-functionality#referer-format).
+The [IFrame Player API](https://developers.google.com/youtube/iframe_api_reference)
+reports progress to an in-memory, video-keyed session store. Closing the viewer
+unloads the player; reopening resumes its position while SakuraCord remains open.
+Finished videos clear their resume point, and restarting the app clears all
+positions. No playback history is persisted. Hosted videos expose watch links rather
+than file downloads; scrolling only loads the supplied poster through the media
+cache and never instantiates a player.
 
 ## Attachments
 

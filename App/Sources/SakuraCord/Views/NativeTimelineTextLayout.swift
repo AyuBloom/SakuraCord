@@ -582,12 +582,33 @@ enum NativeTimelineEmbedLayout {
         let integratesWithBubble: Bool
         let drawsTopSeparator: Bool
 
+        private var mainMedia: MessageEmbedMedia? {
+            guard var media = embed.video ?? embed.image else { return nil }
+            if embed.video != nil {
+                media.width = media.width ?? embed.thumbnail?.width ?? embed.image?.width
+                media.height = media.height ?? embed.thumbnail?.height ?? embed.image?.height
+            }
+            return media
+        }
+
+        private var mediaPreviewURL: URL? {
+            guard embed.video != nil else { return nil }
+            if let preview = embed.thumbnail ?? embed.image,
+               let url = resolvedURL(preview, attachments: attachments) { return url }
+            return DiscordVideoPosterURL.url(
+                proxyURL: embed.video?.proxyURL, width: mainMedia?.width, height: mainMedia?.height,
+                maximumPixelDimension: 1_024
+            )
+        }
+
         var region: NativeTimelineRowLayout.EmbedRegion? {
+        let isYouTube = embed.video?.url.flatMap(YouTubeEmbedPlayback.init(url:)) != nil
+        let maximumWidth = min(self.maximumWidth, isYouTube ? InterfaceScale.metric(432) : self.maximumWidth)
         switch MessageEmbedPresentation.kind(for: embed) {
         case .hidden:
             return nil
         case .bareMedia:
-            guard let media = embed.image ?? embed.video,
+            guard let media = mainMedia,
                   let url = resolvedURL(media, attachments: attachments)
             else { return nil }
             let size = mediaSize(
@@ -604,6 +625,7 @@ enum NativeTimelineEmbedLayout {
                 imageRegions: [],
                 mediaFrame: frame,
                 mediaURL: url,
+                mediaPreviewURL: mediaPreviewURL,
                 mediaIsVideo: embed.video != nil,
                 mediaAutoplaysInline: embed.type?.lowercased() == "gifv",
                 accentColor: nil,
@@ -631,7 +653,7 @@ enum NativeTimelineEmbedLayout {
                     link: embed.url
                 )
             }
-            let description = embed.description.map {
+            let description = (["image", "video", "gifv"].contains(embed.type?.lowercased() ?? "") ? nil : embed.description).map {
                 resolvedTextBox(
                     prepared: RichMessageAttributedText.prepare(source: $0),
                     scope: "description",
@@ -665,7 +687,8 @@ enum NativeTimelineEmbedLayout {
                 plainTextBox(
                     $0,
                     font: .interfaceSystemFont(ofSize: 11),
-                    color: .secondaryLabelColor
+                    color: .secondaryLabelColor,
+                    link: embed.provider?.url
                 )
             }
             let footerText = footerText(
@@ -680,9 +703,10 @@ enum NativeTimelineEmbedLayout {
                 )
             }
 
-            let thumbnailURL = embed.thumbnail.flatMap {
+            let showsSideThumbnail = embed.video == nil && (embed.image == nil || embed.type?.lowercased() == "rich")
+            let thumbnailURL = showsSideThumbnail ? embed.thumbnail.flatMap {
                 resolvedURL($0, attachments: attachments)
-            }
+            } : nil
             let thumbnailSize: CGFloat = thumbnailURL == nil ? 0 : InterfaceScale.metric(80)
             // The legacy HStack contains text, a zero-minimum Spacer, and the
             // thumbnail. SwiftUI applies its 12-point spacing on both sides
@@ -702,7 +726,7 @@ enum NativeTimelineEmbedLayout {
                 provider: provider
             )
             let naturalTopWidth = naturalTextWidth + thumbnailAllowance
-            let mainMedia = embed.image ?? embed.video
+            let mainMedia = self.mainMedia
             let naturalMediaSize = mainMedia.map {
                 mediaSize(
                     $0,
@@ -763,6 +787,7 @@ enum NativeTimelineEmbedLayout {
                 hasTextSection = true
             }
 
+            appendText(provider)
             if let author {
                 if let iconURL = embed.author?.proxyIconURL
                     ?? embed.author?.iconURL
@@ -826,7 +851,6 @@ enum NativeTimelineEmbedLayout {
                 )
                 hasTextSection = true
             }
-            appendText(provider)
 
             let textHeight = hasTextSection
                 ? textY - (origin.y + cardPadding)
@@ -941,6 +965,7 @@ enum NativeTimelineEmbedLayout {
                 imageRegions: imageRegions,
                 mediaFrame: mediaFrame,
                 mediaURL: mediaURL,
+                mediaPreviewURL: mediaPreviewURL,
                 mediaIsVideo: embed.video != nil,
                 mediaAutoplaysInline: false,
                 accentColor: embed.color,

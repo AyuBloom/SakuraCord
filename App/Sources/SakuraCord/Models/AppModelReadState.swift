@@ -63,7 +63,11 @@ extension AppModel {
     /// True while a long backlog's first unread row is not loaded, so the
     /// timeline can show only its loaded tail.
     func hasUnresolvedUnreadBoundary(channelID: ChannelID) -> Bool {
-        guard let summary = presentedUnreadSummary(channelID: channelID),
+        // Without a usable acknowledged boundary (READY can carry a
+        // non-snowflake such as -11) no scroll reaches the unread start.
+        // Holding it would keep every visit unread, so nothing would ever ACK.
+        guard readState.entries[channelID]?.lastAcknowledgedMessageID != nil,
+              let summary = presentedUnreadSummary(channelID: channelID),
               summary.isLowerBound
         else { return false }
         guard let divider = unreadDividerMessageIDs[channelID] else { return true }
@@ -621,6 +625,7 @@ extension AppModel {
     ) {
         guard guildNotificationMutationTasks[guild.id] == nil else { return }
         let guildID = guild.id
+        let settingsRevision = guildNotificationSettingsRevisions[guildID, default: 0]
         let generation = channelNotificationMutationGeneration
         let session = accountSession()
         let activeProvider = session.provider
@@ -635,8 +640,12 @@ extension AppModel {
                       self.isCurrentAccountSession(session),
                       generation == self.channelNotificationMutationGeneration
                 else { return }
-                self.updateLocalGuildNotificationSettings(guild: guild) {
-                    $0.set(toggle, isEnabled: isEnabled)
+                // A Gateway echo and a newer change from another client may
+                // both arrive before HTTP completes. Keep that newer value.
+                if self.guildNotificationSettingsRevisions[guildID, default: 0] == settingsRevision {
+                    self.updateLocalGuildNotificationSettings(guild: guild) {
+                        $0.set(toggle, isEnabled: isEnabled)
+                    }
                 }
             } catch is CancellationError {
                 return
@@ -1058,6 +1067,13 @@ extension AppModel {
         applyNotificationSettings(settings)
         refreshServerRailPresentation(guildID: guild.id)
         refreshUnreadPresentation()
+    }
+
+    func applyRemoteNotificationSettings(_ settings: GuildNotificationSettings) {
+        if let guildID = settings.guildID {
+            guildNotificationSettingsRevisions[guildID, default: 0] &+= 1
+        }
+        applyNotificationSettings(settings)
     }
 
     func applyNotificationSettings(_ settings: GuildNotificationSettings) {

@@ -1103,6 +1103,8 @@ extension DiscordRESTProvider {
             ("mute_scheduled_events", .bool(isEnabled))
         case .mobilePush:
             ("mobile_push", .bool(isEnabled))
+        case .hideMutedChannels:
+            ("hide_muted_channels", .bool(isEnabled))
         }
         try await updateGuildNotificationSettings(
             guildID: guildID,

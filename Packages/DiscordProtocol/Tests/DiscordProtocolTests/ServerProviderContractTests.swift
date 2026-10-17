@@ -96,6 +96,8 @@ extension ProviderRequestContractTests {
             .init(.suppressHighlights, false, key: "notify_highlights", value: 0),
             .init(.muteScheduledEvents, true, key: "mute_scheduled_events", value: 1),
             .init(.mobilePush, false, key: "mobile_push", value: 0),
+            .init(.hideMutedChannels, true, key: "hide_muted_channels", value: 1),
+            .init(.hideMutedChannels, false, key: "hide_muted_channels", value: 0),
         ]
         for (index, expectation) in toggleExpectations.enumerated() {
             try await provider.updateGuildNotificationToggle(
@@ -117,7 +119,7 @@ extension ProviderRequestContractTests {
                 level: .nothing
             )
         }
-        #expect(RateLimitURLProtocol.guildNotificationRequestCount == 10)
+        #expect(RateLimitURLProtocol.guildNotificationRequestCount == 12)
     }
 
     private func makeProvider() -> DiscordRESTProvider {

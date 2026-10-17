@@ -2,8 +2,6 @@ import SakuraCordModels
 import SwiftUI
 
 struct PollVotersView: View {
-    static var size: CGSize { MessagePeoplePopoverLayout.size }
-
     let model: AppModel
     let message: Message
     let dismiss: () -> Void

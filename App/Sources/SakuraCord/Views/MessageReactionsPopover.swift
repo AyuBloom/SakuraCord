@@ -3,8 +3,6 @@ import SakuraCordModels
 import SwiftUI
 
 struct MessageReactionsPopover: View {
-    static var size: CGSize { MessagePeoplePopoverLayout.size }
-
     let model: AppModel
     let message: Message
     let dismiss: () -> Void
@@ -31,12 +29,7 @@ struct MessageReactionsPopover: View {
                                                         channelID: message.channelID, after: after, limit: 100)
             },
             header: {
-                HStack {
-                    Text("Reactions").font(.interface(.headline))
-                    Spacer()
-                    Button(action: dismiss) { Image(systemName: "xmark").foregroundStyle(.secondary) }
-                        .buttonStyle(.plain).accessibilityLabel("Close reactions")
-                }
+                Text("Reactions").font(.interface(.headline))
             },
             categories: {
                 ForEach(reactions) { reaction in
@@ -89,31 +82,22 @@ extension NativeTimelineCanvasView {
     @discardableResult
     func showMessageReactions(_ message: Message) -> Bool {
         guard let model, window != nil,
-              let index = items.firstIndex(where: { $0.messageID == message.id }) else { return false }
+              let index = items.firstIndex(where: { $0.messageID == message.id }),
+              layouts.indices.contains(index) else { return false }
         let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
         let rowAnchor = rowFrame(at: index).intersection(viewport)
+        let rowOrigin = displayedRowOrigin(at: index)
+        let reactionAnchor = layouts[index].reactionRegions.lazy.map {
+            $0.frame.offsetBy(dx: 0, dy: rowOrigin).intersection(viewport)
+        }.first { !$0.isNull && !$0.isEmpty }
         // Accessibility exposes offscreen rows too. Use the visible viewport
         // without scrolling, which could initiate additional history loads.
-        let anchor = rowAnchor.isNull || rowAnchor.isEmpty ? viewport : rowAnchor
+        let anchor = reactionAnchor ?? (rowAnchor.isNull || rowAnchor.isEmpty ? viewport : rowAnchor)
         guard !anchor.isNull, !anchor.isEmpty else { return false }
         reactionDetailsPopover?.close()
-        let popover = NSPopover()
-        popover.behavior = .transient
-        let dismiss: () -> Void = { [weak popover] in popover?.close() }
-        let controller = StablePopoverHostingController(
-            rootView: MessageReactionsPopover(model: model, message: message, dismiss: dismiss),
-            dismiss: dismiss
-        )
-        popover.contentViewController = controller
-        popover.contentSize = MessageReactionsPopover.size
-        reactionDetailsPopover = popover
-        popover.show(relativeTo: anchor, of: self, preferredEdge: .maxX)
-        controller.monitorEscapeKey(in: controller.view.window, presentingWindow: window)
-        Task { @MainActor [weak self, weak popover, weak controller] in
-            await Task.yield()
-            guard popover?.isShown == true, let controller else { return }
-            controller.monitorEscapeKey(in: controller.view.window, presentingWindow: self?.window)
+        reactionDetailsPopover = presentMessagePeoplePopover(relativeTo: anchor) { popover in
+            MessageReactionsPopover(model: model, message: message, dismiss: { [weak popover] in popover?.close() })
         }
-        return popover.isShown
+        return reactionDetailsPopover?.isShown == true
     }
 }

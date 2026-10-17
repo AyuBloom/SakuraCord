@@ -149,10 +149,13 @@ struct ServerRailView: View {
                 Divider().padding(.horizontal, InterfaceScale.metric(12))
 
                 if showsReadAllButton {
-                    Button("Read All", action: readAll)
-                        .font(.interfaceSystem(size: 10, weight: .semibold))
-                        .buttonStyle(.bordered)
-                        .controlSize(.mini)
+                    Button(action: readAll) {
+                        Text("Read All")
+                            .font(.interfaceSystem(size: 13, weight: .semibold))
+                            .frame(width: ChatChromeMetrics.serverRailWidth, height: InterfaceScale.metric(24))
+                            .contentShape(Rectangle())
+                    }
+                        .buttonStyle(.plain)
                         .disabled(isReadingAll)
                         .help("Mark all servers as read")
                         .accessibilityIdentifier("read-all-servers")

@@ -1153,6 +1153,7 @@ final class AppModel {
     @ObservationIgnored var categoryAcknowledgementTasks:
         [ChannelID: Task<Void, Never>] = [:]
     @ObservationIgnored var guildNotificationMutationTasks: [GuildID: Task<Void, Never>] = [:]
+    @ObservationIgnored var guildNotificationSettingsRevisions: [GuildID: UInt64] = [:]
     @ObservationIgnored var channelNotificationMutationTasks: [ChannelID: Task<Void, Never>] = [:]
     @ObservationIgnored var categoryCollapseMutationTasks: [ChannelID: Task<Void, Never>] = [:]
     @ObservationIgnored var categoryCollapseMutationStates:

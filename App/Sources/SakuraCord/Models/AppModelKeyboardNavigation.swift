@@ -101,15 +101,18 @@ extension AppModel {
                         && !checkingChannelIDs.contains(channel.id)
                 }
             }
-            if visibleChannelGroups.contains(where: { group in
+            let groups = selectedChannelGroups(visibleChannelGroups, guildID: selectedGuildID)
+            if groups.contains(where: { group in
                 group.channels.contains { channel in
                     channel.guildID == selectedGuildID && channel.id != selectedID
                         && !hiddenChannelIDs.contains(channel.id)
                         && !checkingChannelIDs.contains(channel.id)
                 }
             }) { return true }
-            return sidebarThreadLayout(guildID: selectedGuildID, channelGroups: visibleChannelGroups, now: .now)
-                .threadsByParentID.values.contains { rows in rows.contains { $0.id != selectedID } }
+            return sidebarThreadLayout(guildID: selectedGuildID, channelGroups: groups, now: .now)
+                .threadsByParentID.values.contains { rows in
+                    rows.contains { $0.id != selectedID && !hiddenChannelIDs.contains($0.id) && !checkingChannelIDs.contains($0.id) }
+                }
         }
         let guildIDs = serverRailPresentation.navigationGuildIDs
         let hiddenIDs = hiddenChannelIDs
@@ -162,8 +165,11 @@ extension AppModel {
         return candidateIndex != nil
     }
 
-    private func shortcutChannelsWithThreads(groups: [ChannelGroup], guildID: GuildID?) -> [Channel] {
+    private func shortcutChannelsWithThreads(groups: [ChannelGroup], guildID: GuildID?, filterSelection: Bool = false) -> [Channel] {
         let layout = sidebarThreadLayout(guildID: guildID, channelGroups: groups, now: .now)
+        let groups = filterSelection
+            ? selectedChannelGroups(groups, guildID: guildID, threadsByParentID: layout.threadsByParentID)
+            : groups
         return groups.flatMap(\.channels).filter { $0.guildID == guildID }.flatMap { channel in
             [channel] + (layout.threadsByParentID[channel.id] ?? []).map { threadNavigationChannel($0.thread) }
         }
@@ -174,7 +180,7 @@ extension AppModel {
             if selectedGuildID == nil {
                 return DirectMessageInboxPolicy.conversations(in: visibleChannels, pinnedChannelIDs: pinnedDirectMessageIDs)
             }
-            return shortcutChannelsWithThreads(groups: visibleChannelGroups, guildID: selectedGuildID)
+            return shortcutChannelsWithThreads(groups: visibleChannelGroups, guildID: selectedGuildID, filterSelection: true)
         }
         let channelsByGuild = Dictionary(grouping: snapshot?.channels ?? [], by: \.guildID)
         let scopes: [GuildID?] = [nil] + orderedNavigationGuildIDs.map { $0 }

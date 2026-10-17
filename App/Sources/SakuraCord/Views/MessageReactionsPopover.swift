@@ -82,18 +82,7 @@ extension NativeTimelineCanvasView {
     @discardableResult
     func showMessageReactions(_ message: Message) -> Bool {
         guard let model, window != nil,
-              let index = items.firstIndex(where: { $0.messageID == message.id }),
-              layouts.indices.contains(index) else { return false }
-        let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
-        let rowAnchor = rowFrame(at: index).intersection(viewport)
-        let rowOrigin = displayedRowOrigin(at: index)
-        let reactionAnchor = layouts[index].reactionRegions.lazy.map {
-            $0.frame.offsetBy(dx: 0, dy: rowOrigin).intersection(viewport)
-        }.first { !$0.isNull && !$0.isEmpty }
-        // Accessibility exposes offscreen rows too. Use the visible viewport
-        // without scrolling, which could initiate additional history loads.
-        let anchor = reactionAnchor ?? (rowAnchor.isNull || rowAnchor.isEmpty ? viewport : rowAnchor)
-        guard !anchor.isNull, !anchor.isEmpty else { return false }
+              let anchor = messageReactionPopoverAnchor(for: message) else { return false }
         reactionDetailsPopover?.close()
         reactionDetailsPopover = presentMessagePeoplePopover(relativeTo: anchor) { popover in
             MessageReactionsPopover(model: model, message: message, dismiss: { [weak popover] in popover?.close() })

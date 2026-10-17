@@ -394,59 +394,32 @@ extension NativeTimelineCanvasView {
         )
     }
 
-    /// Presents the reaction picker beside the message's visible bubble, on
-    /// the side facing the open timeline. Otherwise, such as for a non-bubble
-    /// row or a bubble scrolled away above its visible reactions, it opens
-    /// from the top-right of the row's visible part. The row is looked up
-    /// when the picker opens because the timeline may have changed while a
-    /// context menu was open.
-    func showReactionPicker(forMessageRow message: Message) {
-        guard let index = items.firstIndex(where: {
-            $0.messageID == message.id
-        }) else { return }
-        let visibleBounds = enclosingScrollView?.documentVisibleRect ?? visibleRect
-        let anchor: CGRect
-        let presentation: ReactionActionMenuPresentation
-        let preferredEdge: NSRectEdge?
-        if layouts.indices.contains(index),
-           let bubble = layouts[index].bubbleRegion,
-           case let visibleBubble = bubble.frame.offsetBy(
-               dx: 0,
-               dy: displayedRowOrigin(at: index)
-           ).intersection(visibleBounds),
-           !visibleBubble.isNull
-        {
-            anchor = visibleBubble
-            presentation = .inline
-            preferredEdge = bubble.isOutgoing ? .minX : .maxX
-        } else {
-            let rowFrame = rowFrame(at: index)
-            let visibleRow = rowFrame.intersection(visibleBounds)
-            let diameter = HoverActionPillMetrics.controlDiameter
-            anchor = CGRect(
-                x: rowFrame.maxX - diameter - InterfaceScale.metric(4),
-                y: visibleRow.isNull ? rowFrame.minY : visibleRow.minY,
-                width: diameter,
-                height: diameter
-            )
-            presentation = .toolbar
-            preferredEdge = nil
+    /// Both reaction popovers start at the inline add button. Resolve it at
+    /// presentation time, then freeze the anchor while reactions change.
+    func messageReactionPopoverAnchor(for message: Message) -> CGRect? {
+        guard let index = items.firstIndex(where: { $0.messageID == message.id }),
+              layouts.indices.contains(index) else { return nil }
+        let viewport = enclosingScrollView?.documentVisibleRect ?? visibleRect
+        if let frame = layouts[index].addReactionFrame {
+            let anchor = frame.offsetBy(dx: 0, dy: displayedRowOrigin(at: index)).intersection(viewport)
+            if !anchor.isNull, !anchor.isEmpty { return anchor }
         }
-        showReactionPicker(
-            for: message,
-            anchor: anchor,
-            presentation: presentation,
-            preferredEdge: preferredEdge
+        // Offscreen accessibility actions still need a visible anchor without
+        // scrolling the timeline or starting another history request.
+        let visibleRow = rowFrame(at: index).intersection(viewport)
+        let fallback = visibleRow.isNull || visibleRow.isEmpty ? viewport : visibleRow
+        guard !fallback.isNull, !fallback.isEmpty else { return nil }
+        let diameter = HoverActionPillMetrics.controlDiameter
+        return CGRect(
+            x: max(fallback.minX, fallback.maxX - diameter - InterfaceScale.metric(4)),
+            y: fallback.minY,
+            width: min(diameter, fallback.width),
+            height: min(diameter, fallback.height)
         )
     }
 
-    func showReactionPicker(
-        for message: Message,
-        anchor: CGRect,
-        presentation: ReactionActionMenuPresentation,
-        preferredEdge: NSRectEdge? = nil
-    ) {
-        guard let model else { return }
+    func showReactionPicker(forMessageRow message: Message) {
+        guard let model, let anchor = messageReactionPopoverAnchor(for: message) else { return }
         reactionPickerSource.frame = anchor
         let content = EmojiPickerView(
             model: model,
@@ -477,8 +450,8 @@ extension NativeTimelineCanvasView {
         reactionPickerCoordinator.update(
             sourceView: reactionPickerSource,
             isPresented: true,
-            preferredEdge: preferredEdge ?? presentation.popoverEdge,
-            accessibilityIdentifier: presentation.pickerAccessibilityIdentifier,
+            preferredEdge: .maxX,
+            accessibilityIdentifier: ReactionActionMenuPresentation.inline.pickerAccessibilityIdentifier,
             content: content,
             setPresented: { [weak self] isPresented in
                 if !isPresented {

@@ -7,15 +7,30 @@ extension NativeTimelineCanvasView {
         relativeTo anchor: CGRect,
         @ViewBuilder content: (NSPopover) -> Content
     ) -> NSPopover? {
-        guard window != nil, !anchor.isNull, !anchor.isEmpty else { return nil }
+        guard let window, !anchor.isNull, !anchor.isEmpty else { return nil }
+        // Keep the popover in window coordinates, just like the emoji picker.
+        // Updating a bottom-pinned reaction row can change the canvas origin.
+        let source = StableReactionPickerSourceView(frame: anchor)
+        addSubview(source)
+        let snapshotAnchor = source.installSnapshotAnchor(in: window)
+        source.removeFromSuperview()
         let popover = NSPopover()
         popover.behavior = .transient
         let controller = StablePopoverHostingController(
-            rootView: content(popover), dismiss: { [weak popover] in popover?.close() }
+            rootView: content(popover).onDisappear { snapshotAnchor.removeFromSuperview() },
+            dismiss: { [weak popover] in popover?.close() }
         )
         popover.contentViewController = controller
         popover.contentSize = MessagePeoplePopoverLayout.size
-        popover.show(relativeTo: anchor, of: self, preferredEdge: .maxX)
+        let sourceFrame = window.convertToScreen(snapshotAnchor.convert(snapshotAnchor.bounds, to: nil))
+        let placement = StablePopoverPlacementPolicy.placement(
+            sourceFrame: sourceFrame,
+            visibleFrame: window.screen?.visibleFrame ?? sourceFrame,
+            contentSize: popover.contentSize,
+            preferredEdge: .maxX
+        )
+        popover.show(relativeTo: snapshotAnchor.bounds, of: snapshotAnchor, preferredEdge: placement.edge)
+        if !popover.isShown { snapshotAnchor.removeFromSuperview() }
         controller.monitorEscapeKey(in: controller.view.window, presentingWindow: window)
         Task { @MainActor [weak self, weak popover, weak controller] in
             await Task.yield()

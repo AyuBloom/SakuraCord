@@ -104,25 +104,26 @@ nonisolated enum NativeTimelineThreadCard {
 }
 
 enum NativeTimelineReplyMetrics {
+    nonisolated static var lineHeight: CGFloat { InterfaceScale.metric(24) }
     static var horizontalSpacing: CGFloat { InterfaceScale.metric(5) }
 
     static var authorFont: NSFont {
         .interfaceSystemFont(
             ofSize: NSFont.preferredFont(
                 forTextStyle: .caption2
-            ).pointSize,
-            weight: .semibold
+            ).pointSize + 2,
+            weight: .medium
         )
     }
 
     static var summaryFont: NSFont {
-        .interfacePreferredFont(forTextStyle: .caption1)
+        .interfaceSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize + 2)
     }
 
-    static var avatarDiameter: CGFloat { InterfaceScale.metric(14) }
+    nonisolated static var avatarDiameter: CGFloat { InterfaceScale.metric(15) }
 
     /// The media symbol's width and its gap from the summary.
-    static var mediaSymbolReserve: CGFloat { InterfaceScale.metric(24) }
+    static var mediaSymbolReserve: CGFloat { InterfaceScale.metric(26) }
 
     static func summary(
         for preview: MessageReplyPreview,
@@ -182,7 +183,7 @@ enum NativeTimelineReplyMetrics {
         let summary = summary(for: preview, in: message, model: model).text
         return avatarDiameter
             + horizontalSpacing
-            + (showsIndicator ? InterfaceScale.metric(14) : 0)
+            + (showsIndicator ? InterfaceScale.metric(16) : 0)
             + textWidth(authorDisplayName(author, in: message), font: authorFont)
             + horizontalSpacing
             + textWidth(summary, font: summaryFont)

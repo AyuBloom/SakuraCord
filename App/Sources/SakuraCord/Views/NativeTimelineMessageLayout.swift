@@ -211,16 +211,16 @@ extension NativeTimelineRowLayout {
                     x: horizontalInset,
                     y: verticalOffset,
                     width: width - horizontalInset * 2,
-                    height: InterfaceScale.metric(20)
+                    height: NativeTimelineReplyMetrics.lineHeight
                 )
                 result.replyFrame = frame
                 result.replyContentFrame = CGRect(
                     x: contentX,
-                    y: frame.minY,
+                    y: frame.minY - InterfaceScale.metric(1),
                     width: max(0, frame.maxX - contentX),
                     height: frame.height
                 )
-                verticalOffset += InterfaceScale.metric(20)
+                verticalOffset += NativeTimelineReplyMetrics.lineHeight
             }
 
             if !usesBubbleReference, message.type == .chatInputCommand {
@@ -295,7 +295,7 @@ extension NativeTimelineRowLayout {
         private mutating func appendBubbleReference() {
             guard usesBubbleReference else { return }
             let isReply = row.replyMessageID != nil && message.type != .pollResult
-            let height = InterfaceScale.metric(20)
+            let height = isReply ? NativeTimelineReplyMetrics.lineHeight : InterfaceScale.metric(20)
             let padding = NativeTimelineBubbleLayout.horizontalPadding
             // The stem lands where the bubble's top corner has flattened out.
             let stemInset = InterfaceScale.metric(14)
@@ -326,7 +326,7 @@ extension NativeTimelineRowLayout {
                     width: previewWidth,
                     height: height
                 )
-                result.replyContentFrame = previewFrame
+                result.replyContentFrame = previewFrame.offsetBy(dx: 0, dy: -InterfaceScale.metric(1))
                 result.replyFrame = previewFrame.union(CGRect(
                     x: min(stemX, connectorEndX),
                     y: verticalOffset,
@@ -361,7 +361,7 @@ extension NativeTimelineRowLayout {
             let authorFont = ProfileNameFontLoader.shared.resolvedFont(for: author, fallback: metrics.authorFont)
             let showsRoleIndicator = model?.accessibilitySettings.roleColorDisplay == .nextToNames
                 && presentation?.roleColorHex != nil
-            let indicatorWidth: CGFloat = showsRoleIndicator ? InterfaceScale.metric(14) : 0
+            let indicatorWidth: CGFloat = showsRoleIndicator ? InterfaceScale.metric(15) : 0
             let availableWidth = max(0, ordinaryContentWidth - indicatorWidth)
             let timestamp = NativeTimelineTimestamp.headerText(
                 for: message.timestamp, settings: model?.interfaceSettings ?? .defaults
@@ -370,7 +370,10 @@ extension NativeTimelineRowLayout {
             // Keep the adjacent controls visible while long decorative names
             // truncate. At narrow widths the tag is omitted before the name.
             let timestampReserve = min(timestampWidth, availableWidth / 3) + 7
-            let naturalBotWidth = author.isBot ? NativeAppBadgePresentation.width : 0
+            let botText = author.isBot ? NativeIdentityTextPresentation(
+                "APP", font: .interfaceSystemFont(ofSize: ServerTagAppearance.fontSize + 1, weight: .bold)
+            ) : nil
+            let naturalBotWidth = botText.map { $0.width + ServerTagAppearance.horizontalPadding * 2 } ?? 0
             let botWidth = availableWidth >= naturalBotWidth + 7 + 12 ? naturalBotWidth : 0
             let botReserve = botWidth > 0 ? botWidth + 7 : 0
             let tag = author.primaryGuild.flatMap { NativeServerTagPresentation(identity: $0) }?
@@ -380,8 +383,13 @@ extension NativeTimelineRowLayout {
                 author.displayName, font: authorFont,
                 maximumWidth: max(0, availableWidth - botReserve - tagReserve - timestampReserve)
             )
-            let headerHeight = tag == nil && botWidth == 0
-                ? MessageRowLayoutMetrics.authorLineHeight : ServerTagAppearance.height
+            let badgeHeight = ServerTagAppearance.height + InterfaceScale.metric(1)
+            let botBaseline = botText?.baselineOffset(inHeight: badgeHeight) ?? 0
+            let headerHeight = ceil(max(
+                authorFont.ascender - authorFont.descender,
+                tag == nil && botWidth == 0 ? MessageRowLayoutMetrics.authorLineHeight : badgeHeight
+            ))
+            let baselineY = verticalOffset + authorText.baselineOffset(inHeight: headerHeight)
             result.authorText = authorText
             result.authorFrame = CGRect(
                 x: contentX + indicatorWidth, y: verticalOffset,
@@ -390,16 +398,20 @@ extension NativeTimelineRowLayout {
             var headerX = contentX + indicatorWidth + authorText.width
             if botWidth > 0 {
                 headerX += InterfaceScale.metric(7)
+                result.botBadgeText = botText
                 result.botBadgeFrame = CGRect(
-                    x: headerX, y: verticalOffset,
-                    width: botWidth, height: ServerTagAppearance.height
+                    x: headerX, y: baselineY - botBaseline,
+                    width: botWidth, height: badgeHeight
                 )
                 headerX += botWidth
             }
             if let tag {
                 headerX += InterfaceScale.metric(7)
                 result.serverTagRegion = .init(
-                    frame: CGRect(x: headerX, y: verticalOffset, width: tag.width, height: headerHeight),
+                    frame: CGRect(
+                        x: headerX, y: baselineY - tag.textBaselineOffset - InterfaceScale.metric(1),
+                        width: tag.width, height: ServerTagAppearance.height
+                    ),
                     presentation: tag
                 )
                 headerX += tag.width
@@ -411,7 +423,8 @@ extension NativeTimelineRowLayout {
             )
             result.timestampText = timestampText
             result.timestampFrame = CGRect(
-                x: headerX, y: verticalOffset, width: timestampText.width, height: headerHeight
+                x: headerX, y: baselineY - timestampText.baselineOffset(inHeight: headerHeight),
+                width: timestampText.width, height: headerHeight
             )
             headerX += timestampText.width
             if message.editedTimestamp != nil {
@@ -422,7 +435,8 @@ extension NativeTimelineRowLayout {
                 )
                 result.editedText = editedText
                 result.editedFrame = CGRect(
-                    x: headerX, y: verticalOffset, width: editedText.width, height: headerHeight
+                    x: headerX, y: baselineY - editedText.baselineOffset(inHeight: headerHeight),
+                    width: editedText.width, height: headerHeight
                 )
             }
         }

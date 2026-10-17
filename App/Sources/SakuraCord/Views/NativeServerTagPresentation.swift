@@ -20,7 +20,7 @@ nonisolated enum NativeAppBadgePresentation {
     static var width: CGFloat { text.width + ServerTagAppearance.horizontalPadding * 2 }
 
     @MainActor
-    static func draw(in frame: CGRect, color: NSColor, context: CGContext) {
+    static func draw(in frame: CGRect, color: NSColor, context: CGContext, text: NativeIdentityTextPresentation? = nil) {
         context.saveGState()
         context.setFillColor(color.cgColor)
         context.addPath(CGPath(
@@ -28,7 +28,7 @@ nonisolated enum NativeAppBadgePresentation {
             cornerHeight: ServerTagAppearance.cornerRadius, transform: nil
         ))
         context.fillPath()
-        text.draw(
+        (text ?? Self.text).draw(
             in: frame.insetBy(dx: ServerTagAppearance.horizontalPadding, dy: 0),
             color: .white, context: context
         )
@@ -68,6 +68,11 @@ nonisolated struct NativeIdentityTextPresentation: @unchecked Sendable {
         }
     }
 
+    /// Distance from the top of a vertically centered glyph run to its baseline.
+    func baselineOffset(inHeight height: CGFloat) -> CGFloat {
+        height / 2 + glyphBounds.midY
+    }
+
     @MainActor
     func draw(in frame: CGRect, color: NSColor, context: CGContext, isUnderlined: Bool = false) {
         guard frame.width > 0, frame.height > 0 else { return }
@@ -102,7 +107,7 @@ nonisolated struct NativeServerTagPresentation: @unchecked Sendable {
     private var badgeInset: CGFloat { identity.badgeURL == nil ? 0 : ServerTagAppearance.badgeSize + ServerTagAppearance.spacing }
     private var textInset: CGFloat { ServerTagAppearance.horizontalPadding + badgeInset }
 
-    init?(identity: PrimaryGuildIdentity, font: NSFont = .interfaceSystemFont(ofSize: ServerTagAppearance.fontSize)) {
+    init?(identity: PrimaryGuildIdentity, font: NSFont = .interfaceSystemFont(ofSize: ServerTagAppearance.fontSize, weight: .medium)) {
         guard let tag = identity.tag, !tag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         self.identity = identity
         self.font = font
@@ -123,6 +128,10 @@ nonisolated struct NativeServerTagPresentation: @unchecked Sendable {
         return maximumWidth >= width ? self : Self(identity: identity, font: font, maximumWidth: maximumWidth)
     }
 
+    var textBaselineOffset: CGFloat {
+        text.baselineOffset(inHeight: Self.height)
+    }
+
     func badgeFrame(in frame: CGRect) -> CGRect? {
         guard identity.badgeURL != nil else { return nil }
         return CGRect(
@@ -138,10 +147,6 @@ nonisolated struct NativeServerTagPresentation: @unchecked Sendable {
         context.setFillColor(NSColor.labelColor.withAlphaComponent(isHighlighted ? ServerTagAppearance.highlightedBackgroundOpacity : ServerTagAppearance.backgroundOpacity).cgColor)
         context.addPath(shape)
         context.fillPath()
-        context.setStrokeColor(NSColor.labelColor.withAlphaComponent(ServerTagAppearance.outlineOpacity).cgColor)
-        context.setLineWidth(1)
-        context.addPath(CGPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), cornerWidth: ServerTagAppearance.cornerRadius - 0.5, cornerHeight: ServerTagAppearance.cornerRadius - 0.5, transform: nil))
-        context.strokePath()
         if let badgeImage, let badgeFrame = badgeFrame(in: frame) {
             let scale = min(badgeFrame.width / CGFloat(badgeImage.width), badgeFrame.height / CGFloat(badgeImage.height))
             let size = CGSize(width: CGFloat(badgeImage.width) * scale, height: CGFloat(badgeImage.height) * scale)

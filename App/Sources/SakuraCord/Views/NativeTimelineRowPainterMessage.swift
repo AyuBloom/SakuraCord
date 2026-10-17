@@ -157,10 +157,10 @@ extension NativeTimelineRowPainter {
                let color = roleColor(author?.roleColorHex) {
                 color.setFill()
                 NSBezierPath(ovalIn: CGRect(
-                    x: frame.minX - InterfaceScale.metric(14),
-                    y: frame.midY - InterfaceScale.metric(4),
-                    width: InterfaceScale.metric(8),
-                    height: InterfaceScale.metric(8)
+                    x: frame.minX - InterfaceScale.metric(15),
+                    y: frame.midY - InterfaceScale.metric(4.5),
+                    width: InterfaceScale.metric(9),
+                    height: InterfaceScale.metric(9)
                 )).fill()
             }
         }
@@ -172,7 +172,7 @@ extension NativeTimelineRowPainter {
     ) {
         if let frame = input.layout.botBadgeFrame,
            let context = NSGraphicsContext.current?.cgContext {
-            NativeAppBadgePresentation.draw(in: frame, color: .sakuraCordAccentColor, context: context)
+            NativeAppBadgePresentation.draw(in: frame, color: .sakuraCordAccentColor, context: context, text: input.layout.botBadgeText)
         }
         if let region = input.layout.serverTagRegion,
            let context = NSGraphicsContext.current?.cgContext {
@@ -892,7 +892,9 @@ extension NativeTimelineRowPainter {
         // A bubble's preview is laid out at its natural width.
         replyPreviewLine(
             preview,
-            frame: bubbleConnector == nil ? frame : contentFrame,
+            frame: bubbleConnector == nil
+                ? CGRect(x: frame.minX, y: contentFrame.minY, width: frame.width, height: frame.height)
+                : contentFrame,
             avatarFrame: NativeTimelineAvatarPresentation.replyAvatarFrame(in: contentFrame),
             trailingInset: bubbleConnector == nil ? 48 : 0,
             reservesSummary: bubbleConnector != nil,
@@ -923,7 +925,7 @@ extension NativeTimelineRowPainter {
                 contentFrame.minX - frame.minX
                     - NativeTimelineReplyMetrics.horizontalSpacing
             ),
-            height: InterfaceScale.metric(20)
+            height: NativeTimelineReplyMetrics.lineHeight
         ))
     }
 
@@ -973,7 +975,7 @@ extension NativeTimelineRowPainter {
             0,
             min(
                 NativeTimelineReplyMetrics.textWidth(summary, font: NativeTimelineReplyMetrics.summaryFont),
-                // A media symbol takes 24 points, from the trailing inset when there is one.
+                // A media symbol takes 26 points, from the trailing inset when there is one.
                 frame.maxX - summaryX - (mediaSymbol == nil ? trailingInset : max(mediaReserve, trailingInset - mediaReserve))
             )
         )
@@ -983,15 +985,16 @@ extension NativeTimelineRowPainter {
                 x: summaryX,
                 y: frame.minY,
                 width: summaryWidth,
-                height: InterfaceScale.metric(20)
+                height: NativeTimelineReplyMetrics.lineHeight
             ),
             font: NativeTimelineReplyMetrics.summaryFont,
             color: foregroundColor?.withAlphaComponent(0.72) ?? .secondaryLabelColor,
             concealedSpoilerRanges: replySummary.spoilerRanges
         )
         let mediaSymbolFrame = CGRect(
-            x: summaryX + summaryWidth + InterfaceScale.metric(4), y: frame.minY + 1,
-            width: InterfaceScale.metric(18), height: InterfaceScale.metric(18)
+            x: summaryX + summaryWidth + InterfaceScale.metric(4),
+            y: frame.minY + (NativeTimelineReplyMetrics.lineHeight - InterfaceScale.metric(20)) / 2,
+            width: InterfaceScale.metric(20), height: InterfaceScale.metric(20)
         )
         if let mediaSymbol, !reservesSummary || mediaSymbolFrame.maxX <= frame.maxX + 1 {
             systemSymbol(
@@ -1013,9 +1016,9 @@ extension NativeTimelineRowPainter {
             NativeTimelineReplyMetrics.unavailableText,
             in: CGRect(
                 x: contentFrame.minX,
-                y: frame.minY,
+                y: contentFrame.minY,
                 width: contentFrame.width,
-                height: InterfaceScale.metric(20)
+                height: NativeTimelineReplyMetrics.lineHeight
             ),
             font: NativeTimelineReplyMetrics.unavailableFont,
             color: .secondaryLabelColor
@@ -1048,7 +1051,7 @@ extension NativeTimelineRowPainter {
         )
         let roleColor = roleColor(presentation?.roleColorHex)
         let showsIndicator = model?.accessibilitySettings.roleColorDisplay == .nextToNames && roleColor != nil
-        let indicatorWidth: CGFloat = showsIndicator ? InterfaceScale.metric(14) : 0
+        let indicatorWidth: CGFloat = showsIndicator ? InterfaceScale.metric(16) : 0
         let authorFrame = CGRect(
             x: avatarFrame.maxX
                 + NativeTimelineReplyMetrics.horizontalSpacing + indicatorWidth,
@@ -1061,7 +1064,7 @@ extension NativeTimelineRowPainter {
                         - NativeTimelineReplyMetrics.horizontalSpacing - indicatorWidth
                 )
             ),
-            height: InterfaceScale.metric(20)
+            height: NativeTimelineReplyMetrics.lineHeight
         )
         text(
             displayName,
@@ -1073,7 +1076,12 @@ extension NativeTimelineRowPainter {
         )
         if showsIndicator, let roleColor {
             roleColor.setFill()
-            NSBezierPath(ovalIn: CGRect(x: authorFrame.minX - indicatorWidth, y: authorFrame.midY - InterfaceScale.metric(4), width: InterfaceScale.metric(8), height: InterfaceScale.metric(8))).fill()
+            NSBezierPath(ovalIn: CGRect(
+                x: authorFrame.minX - indicatorWidth,
+                y: authorFrame.midY - InterfaceScale.metric(5),
+                width: InterfaceScale.metric(10),
+                height: InterfaceScale.metric(10)
+            )).fill()
         }
         return CGRect(x: authorFrame.minX - indicatorWidth, y: authorFrame.minY, width: authorFrame.width + indicatorWidth, height: authorFrame.height)
     }

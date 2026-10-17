@@ -982,7 +982,7 @@ extension NativeTimelineRowPainter {
         replyPreviewLine(
             MessageReplyPreview(message: preview),
             frame: bodyFrame,
-            avatarFrame: CGRect(x: bodyFrame.minX, y: bodyFrame.minY + InterfaceScale.metric(3), width: InterfaceScale.metric(14), height: InterfaceScale.metric(14)),
+            avatarFrame: NativeTimelineAvatarPresentation.replyAvatarFrame(in: bodyFrame),
             trailingInset: 0,
             showsReplyMention: false,
             message: message,

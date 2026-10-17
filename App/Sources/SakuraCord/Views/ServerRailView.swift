@@ -104,6 +104,7 @@ struct ServerRailView: View {
     var moveItems: ([GuildRailItem.RailIdentifier], GuildRailDestination) -> Void = { _, _ in }
     var combineGuilds: (GuildID, GuildID) -> Void = { _, _ in }
     let contextMenuActions: ServerRailContextMenuActions
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var folderLayoutRevision = 0
     @State private var drag = ServerRailDragController()
 
@@ -122,6 +123,8 @@ struct ServerRailView: View {
                     DirectMessageRailButton(entry: entry) {
                         selectDirectMessage(entry.id)
                     }
+                    .geometryGroup()
+                    .transition(ServerRailAnimations.membershipTransition)
                 }
 
                 Divider().padding(.horizontal, InterfaceScale.metric(12))
@@ -138,6 +141,7 @@ struct ServerRailView: View {
                     // Keep native images and their clipping shapes together as
                     // a preceding folder changes the row's position.
                     .geometryGroup()
+                    .transition(ServerRailAnimations.membershipTransition)
                 }
                 Button(action: joinServer) {
                     Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
@@ -152,7 +156,10 @@ struct ServerRailView: View {
                 .accessibilityIdentifier("add-server")
             }
             .padding(.bottom, InterfaceScale.metric(12))
-            .animation(ServerRailAnimations.folderExpansion, value: folderLayoutRevision)
+            .animation(reduceMotion ? nil : ServerRailAnimations.folderExpansion, value: folderLayoutRevision)
+            .animation(reduceMotion ? nil : ServerRailAnimations.reorder, value: directMessages.map(\.id))
+            .animation(reduceMotion ? nil : ServerRailAnimations.reorder, value: items.map(\.id))
+            .animation(reduceMotion ? nil : ServerRailAnimations.reorder, value: folderGuildIDs)
         }
         // Unlike .hidden, .never overrides macOS's always-visible scrollbar preference.
         .scrollIndicators(.never)
@@ -204,6 +211,12 @@ struct ServerRailView: View {
         }
         .zIndex(200)
         .environment(drag)
+        .transaction { transaction in
+            if reduceMotion {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
         .onAppear {
             drag.perform = { id, target in
                 switch target {
@@ -215,6 +228,13 @@ struct ServerRailView: View {
                     if case .guild(let source) = id { combineGuilds(source, target) }
                 }
             }
+        }
+    }
+
+    // Observe folder membership, without observing per-guild unread or selection updates.
+    private var folderGuildIDs: [[GuildID]] {
+        items.compactMap { item in
+            if case .folder(let entry) = item { entry.guildEntries.map(\.id) } else { nil }
         }
     }
 
@@ -424,6 +444,7 @@ struct ServerRailGuildItemView: View {
 enum ServerRailAnimations {
     static let folderExpansion = Animation.spring(duration: 0.38, bounce: 0)
     static let reorder = Animation.snappy(duration: 0.28)
+    static let membershipTransition = AnyTransition.scale(scale: 0.7).combined(with: .opacity)
 }
 
 struct GuildRailButton: View {

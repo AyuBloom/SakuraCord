@@ -165,6 +165,7 @@ struct ServerFolderRailView: View {
                 .modifier(ServerFolderIndicatorMotion(
                     centerY: isExpanded ? rowBounds.midY : InterfaceScale.metric(ServerFolderRailMetrics.collapsedRowHeight) / 2
                 ))
+                .transition(.opacity)
                 .animation(reduceMotion ? nil : ServerRailAnimations.folderExpansion, value: isExpanded)
             }
         }
@@ -248,6 +249,7 @@ struct ServerFolderRailView: View {
                     .frame(width: bounds.width, height: bounds.height)
                     .position(x: bounds.midX, y: bounds.midY)
                     .opacity(drag.flight?.id == .guild(guild.id) ? 0 : drag.draggedID == .guild(guild.id) ? 0.3 : 1)
+                    .transition(ServerRailAnimations.membershipTransition)
                 }
             }
 
@@ -452,6 +454,7 @@ private struct ExpandedFolderGuilds: View {
     let morphsInFolder: Bool
     let previewIDs: Set<GuildID>
     let isExpanded: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var extraRowsHeight: CGFloat = 0
 
     var body: some View {
@@ -470,7 +473,11 @@ private struct ExpandedFolderGuilds: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { extraRowsHeight = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                withAnimation(reduceMotion ? nil : ServerRailAnimations.reorder) {
+                    extraRowsHeight = height
+                }
+            }
             .frame(height: isExpanded ? extraRowsHeight : 0, alignment: .bottom)
             .opacity(isExpanded ? 1 : 0)
             .mask {
@@ -502,6 +509,8 @@ private struct ExpandedFolderGuilds: View {
             morphsInFolder: previewIDs.contains(entry.id) && morphsInFolder
         )
         .modifier(ServerRailDraggableRow(id: .guild(entry.id), folderID: folderID))
+        .geometryGroup()
+        .transition(ServerRailAnimations.membershipTransition)
     }
 }
 

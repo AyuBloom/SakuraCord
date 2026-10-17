@@ -146,38 +146,13 @@ struct ServerRailView: View {
                     .transition(ServerRailAnimations.membershipTransition)
                 }
 
-                VStack(spacing: InterfaceScale.metric(4)) {
+                VStack(spacing: InterfaceScale.metric(showsReadAllButton ? 6 : 10)) {
                     Divider().padding(.horizontal, InterfaceScale.metric(12))
                     if showsReadAllButton {
                         ReadAllServersButton(isReadingAll: isReadingAll, action: readAll)
                     }
+                    serverItems
                 }
-
-                ForEach(items) { item in
-                    ServerRailItemView(
-                        item: item,
-                        selectGuild: selectDraggableGuild,
-                        contextMenuActions: contextMenuActions,
-                        folderExpansionChanged: {
-                            folderLayoutRevision &+= 1
-                        }
-                    )
-                    // Keep native images and their clipping shapes together as
-                    // a preceding folder changes the row's position.
-                    .geometryGroup()
-                    .transition(ServerRailAnimations.membershipTransition)
-                }
-                Button(action: joinServer) {
-                    Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
-                        .frame(width: InterfaceScale.metric(44), height: InterfaceScale.metric(44))
-                        .foregroundStyle(.green)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(13)))
-                        .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
-                }
-                .buttonStyle(ServerRailButtonStyle())
-                .help("Add a Server")
-                .accessibilityLabel("Add a Server")
-                .accessibilityIdentifier("add-server")
             }
             .padding(.bottom, InterfaceScale.metric(12))
             .animation(reduceMotion ? nil : ServerRailAnimations.folderExpansion, value: folderLayoutRevision)
@@ -252,6 +227,36 @@ struct ServerRailView: View {
                     if case .guild(let source) = id { combineGuilds(source, target) }
                 }
             }
+        }
+    }
+
+    private var serverItems: some View {
+        VStack(spacing: InterfaceScale.metric(10)) {
+            ForEach(items) { item in
+                ServerRailItemView(
+                    item: item,
+                    selectGuild: selectDraggableGuild,
+                    contextMenuActions: contextMenuActions,
+                    folderExpansionChanged: {
+                        folderLayoutRevision &+= 1
+                    }
+                )
+                // Keep native images and their clipping shapes together as
+                // a preceding folder changes the row's position.
+                .geometryGroup()
+                .transition(ServerRailAnimations.membershipTransition)
+            }
+            Button(action: joinServer) {
+                Image(systemName: "plus").font(.interfaceSystem(size: 22, weight: .medium))
+                    .frame(width: InterfaceScale.metric(44), height: InterfaceScale.metric(44))
+                    .foregroundStyle(.green)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: InterfaceScale.metric(13)))
+                    .frame(width: InterfaceScale.metric(46), height: InterfaceScale.metric(46))
+            }
+            .buttonStyle(ServerRailButtonStyle())
+            .help("Add a Server")
+            .accessibilityLabel("Add a Server")
+            .accessibilityIdentifier("add-server")
         }
     }
 

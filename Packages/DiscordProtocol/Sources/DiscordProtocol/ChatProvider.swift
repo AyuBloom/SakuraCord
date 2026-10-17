@@ -1079,6 +1079,7 @@ public enum ChatProviderError: LocalizedError, Equatable, Sendable {
     case slowmode(retryAfter: TimeInterval)
     case messageNotFound
     case invalidRequest(String)
+    case rateLimited(retryAfter: TimeInterval, requestID: String?)
     case transport(status: Int, requestID: String?)
     case capabilityDisabled(ChatCapability)
 
@@ -1089,6 +1090,8 @@ public enum ChatProviderError: LocalizedError, Equatable, Sendable {
         case .channelNotFound: "The selected channel is unavailable."
         case .messageNotFound: "The message no longer exists."
         case let .invalidRequest(message): message
+        case let .rateLimited(_, requestID):
+            ChatProviderError.transport(status: 429, requestID: requestID).errorDescription
         case let .transport(status, requestID):
             requestID.map { "Discord returned HTTP \(status) (request \($0))." }
                 ?? "Discord returned HTTP \(status)."

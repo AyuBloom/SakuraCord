@@ -3,6 +3,13 @@ import Foundation
 import SakuraCordModels
 
 extension AppModel {
+    struct ReactionMutationTiming: Sendable {
+        var debounce: Duration = .milliseconds(160)
+        var sleepForRateLimit: @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
+    }
+
     func edit(_ message: Message, content: String) async {
         guard !message.hasPoll, !message.flags.contains(.voiceMessage) else { return }
         let session = accountSession()
@@ -143,7 +150,32 @@ extension AppModel {
             )
         } catch {
             guard isCurrentAccountSession(session) else { return }
-            guard let latest = reactionMutations[key] else { return }
+            guard var latest = reactionMutations[key] else { return }
+            if case let ChatProviderError.rateLimited(retryAfter, _) = error,
+               !latest.hasRetriedRateLimit
+            {
+                latest.hasRetriedRateLimit = true
+                reactionMutations[key] = latest
+                let sleep = reactionMutationTiming.sleepForRateLimit
+                // Keep this key in flight while waiting so clicks update only
+                // the desired state, without restarting or bypassing cooldown.
+                reactionMutationTasks[key] = Task { @MainActor [weak self] in
+                    do {
+                        try await sleep(.seconds(retryAfter))
+                    } catch {
+                        return
+                    }
+                    guard !Task.isCancelled,
+                          let self,
+                          self.isCurrentAccountSession(session),
+                          var pending = self.reactionMutations[key]
+                    else { return }
+                    pending.isSending = false
+                    self.reactionMutations[key] = pending
+                    await self.sendReactionMutation(for: key, generation: pending.generation)
+                }
+                return
+            }
             applyCurrentUserReactionState(
                 latest.confirmedReacted,
                 for: key,
@@ -159,6 +191,7 @@ extension AppModel {
         guard var latest = reactionMutations[key] else { return }
         latest.confirmedReacted = sentState
         latest.isSending = false
+        latest.hasRetriedRateLimit = false
         applyCurrentUserReactionState(
             latest.desiredReacted,
             for: key,
@@ -224,11 +257,18 @@ extension AppModel {
         applyReactionUpdate(update, persistsResult: false)
     }
 
-    func loadReactionReactors(_ reaction: Reaction, on message: Message) async {
+    func loadReactionReactors(_ requestedReaction: Reaction, on message: Message) async {
+        guard requestedReaction.count > 0, await waitForTimelineScrollingToEnd() else { return }
+        let reaction: Reaction
+        if let current = retainedMessage(channelID: message.channelID, messageID: message.id) {
+            guard let latest = current.reactions.first(where: { $0.id == requestedReaction.id }) else { return }
+            reaction = latest
+        } else {
+            reaction = requestedReaction
+        }
         guard reaction.count > 0,
               Set(reaction.reactors.map(\.id)).count < min(reaction.count, 5)
         else { return }
-        guard await waitForTimelineScrollingToEnd() else { return }
         let session = accountSession()
         let key = ReactionReactorLoadKey(
             channelID: message.channelID,
@@ -252,10 +292,13 @@ extension AppModel {
         {
             return
         }
+        let loadID = UUID()
+        reactionReactorLoadIDs[key] = loadID
         let task = Task { @MainActor [self] in
             defer {
-                if isCurrentAccountSession(session) {
+                if isCurrentAccountSession(session), reactionReactorLoadIDs[key] == loadID {
                     reactionReactorLoadTasks[key] = nil
+                    reactionReactorLoadIDs[key] = nil
                 }
             }
             do {
@@ -268,21 +311,22 @@ extension AppModel {
                     )
                 }
                 guard await waitForTimelineScrollingToEnd(),
-                      isCurrentAccountSession(session)
+                      !Task.isCancelled,
+                      isCurrentAccountSession(session),
+                      reactionReactorLoadIDs[key] == loadID
                 else { return }
-                failedReactionReactorLoads[key] = nil
-                if loadedReactionReactorPreviews[key] == nil, loadedReactionReactorPreviews.count >= 256,
-                   let evictedKey = loadedReactionReactorPreviews.keys.first {
-                    loadedReactionReactorPreviews[evictedKey] = nil
+                if let current = retainedMessage(channelID: message.channelID, messageID: message.id),
+                   current.reactions.first(where: { $0.id == reaction.id })?.count != reaction.count {
+                    return
                 }
-                var seen: Set<UserID> = []
-                let previews = Array(reactors.filter { seen.insert($0.id).inserted }.prefix(5))
-                loadedReactionReactorPreviews[key] = (reaction.count, previews)
-                applyReactionReactors(previews, for: key)
+                failedReactionReactorLoads[key] = nil
+                storeReactionReactorPreview(reactors, count: reaction.count, for: key)
             } catch is CancellationError {
                 return
             } catch {
-                guard isCurrentAccountSession(session) else { return }
+                guard !Task.isCancelled, isCurrentAccountSession(session),
+                      reactionReactorLoadIDs[key] == loadID
+                else { return }
                 if failedReactionReactorLoads.count >= 256,
                    let oldest = failedReactionReactorLoads.min(by: { $0.value < $1.value })?.key
                 {
@@ -293,6 +337,17 @@ extension AppModel {
         }
         reactionReactorLoadTasks[key] = task
         await task.value
+    }
+
+    private func storeReactionReactorPreview(_ reactors: [ReactionReactor], count: Int, for key: ReactionReactorLoadKey) {
+        if loadedReactionReactorPreviews[key] == nil, loadedReactionReactorPreviews.count >= 256,
+           let evictedKey = loadedReactionReactorPreviews.keys.first {
+            loadedReactionReactorPreviews[evictedKey] = nil
+        }
+        var seen: Set<UserID> = []
+        let previews = Array(reactors.filter { seen.insert($0.id).inserted }.prefix(5))
+        loadedReactionReactorPreviews[key] = (count, previews)
+        applyReactionReactors(previews, for: key)
     }
 
     /// Returns only identities already held locally; never starts a load.
@@ -376,6 +431,7 @@ extension AppModel {
     func resetReactionReactorLoads() {
         for task in reactionReactorLoadTasks.values { task.cancel() }
         reactionReactorLoadTasks = [:]
+        reactionReactorLoadIDs = [:]
         loadedReactionReactorPreviews = [:]
         failedReactionReactorLoads = [:]
     }
@@ -384,6 +440,10 @@ extension AppModel {
         channelID: ChannelID,
         messageID: MessageID
     ) {
+        invalidateReactionReactorPreviews(channelID: channelID, messageID: messageID)
+    }
+
+    private func invalidateReactionReactorPreviews(channelID: ChannelID, messageID: MessageID) {
         for key in reactionReactorLoadTasks.keys
         where key.channelID == channelID && key.messageID == messageID {
             reactionReactorLoadTasks[key]?.cancel()
@@ -427,9 +487,7 @@ extension AppModel {
     ) {
         // A count can return to an earlier value after removals and additions.
         // Its previous short response no longer describes the current users.
-        loadedReactionReactorPreviews = loadedReactionReactorPreviews.filter {
-            $0.key.channelID != update.channelID || $0.key.messageID != update.messageID
-        }
+        invalidateReactionReactorPreviews(channelID: update.channelID, messageID: update.messageID)
         let currentUserID = snapshot?.currentUser.id
         let reactor: ReactionReactor? =
             switch update {

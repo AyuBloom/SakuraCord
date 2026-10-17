@@ -5,7 +5,6 @@ import SwiftUI
 nonisolated enum MessageReactionMetrics {
     static var pillHeight: CGFloat { InterfaceScale.metric(28) }
     static var emojiSize: CGFloat { InterfaceScale.metric(18) }
-    static let countOpacity: CGFloat = 0.6
     static var avatarSize: CGFloat { InterfaceScale.metric(16) }
     static let maximumAvatarCount = 4
     static var horizontalPadding: CGFloat { InterfaceScale.metric(6) }
@@ -254,13 +253,12 @@ struct MessageReactionPill: View {
                     url: emojiURL,
                     size: MessageReactionMetrics.emojiSize
                 )
-                if reaction.count > 1 {
+                if reaction.count > 0 {
                     Text(String(reaction.count))
                         .font(Font(NativeTimelineReactionFonts.count))
                         .foregroundStyle(
                             reaction.didCurrentUserReact ? SakuraCordAccentColor.color : .primary
                         )
-                        .opacity(reaction.didCurrentUserReact ? 0.95 : MessageReactionMetrics.countOpacity)
                         .contentTransition(.numericText(value: Double(reaction.count)))
                         .animation(
                             reduceMotion ? nil : .smooth(duration: 0.24),

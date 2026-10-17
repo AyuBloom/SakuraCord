@@ -1089,9 +1089,7 @@ extension NativeTimelineRowPainter {
             reactionCount(
                 region.reaction.count,
                 in: countFrame,
-                color: selected
-                    ? NSColor.sakuraCordAccentColor.withAlphaComponent(0.95)
-                    : NSColor.labelColor.withAlphaComponent(MessageReactionMetrics.countOpacity)
+                color: selected ? .sakuraCordAccentColor : .labelColor
             )
         }
         let avatars = region.avatarRegions.map {

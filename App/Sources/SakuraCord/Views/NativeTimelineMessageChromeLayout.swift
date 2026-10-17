@@ -218,7 +218,7 @@ extension NativeTimelineRowLayout {
     static func reactionSize(_ reaction: Reaction) -> CGSize {
         let plan = MessageReactionPresentation.previewPlan(for: reaction)
         var width = MessageReactionMetrics.horizontalPadding * 2 + MessageReactionMetrics.emojiSize
-        if reaction.count > 1 {
+        if reaction.count > 0 {
             width += MessageReactionMetrics.horizontalPadding + measuredTextWidth(
                 String(reaction.count),
                 font: NativeTimelineReactionFonts.count
@@ -256,7 +256,7 @@ extension NativeTimelineRowLayout {
         horizontalOffset = emojiFrame.maxX
 
         var countFrame: CGRect?
-        if reaction.count > 1 {
+        if reaction.count > 0 {
             horizontalOffset += MessageReactionMetrics.horizontalPadding
             let countWidth = measuredTextWidth(
                 String(reaction.count),

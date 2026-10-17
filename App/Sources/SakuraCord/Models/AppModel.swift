@@ -90,6 +90,7 @@ final class AppModel {
         var desiredReacted: Bool
         var generation: UInt64
         var isSending: Bool
+        var hasRetriedRateLimit = false
     }
 
     static let unreadDiagnosticsLogger = Logger(
@@ -116,10 +117,6 @@ final class AppModel {
     struct LocalTypingTiming: Sendable {
         var debounce: Duration = .seconds(1.5)
         var throttle: Duration = .seconds(8)
-    }
-
-    struct ReactionMutationTiming: Sendable {
-        var debounce: Duration = .milliseconds(160)
     }
 
     struct ReadAcknowledgementTiming: Sendable {
@@ -1073,6 +1070,7 @@ final class AppModel {
     @ObservationIgnored var pendingInteractions: [String: PendingInteractionRecord] = [:]
     @ObservationIgnored var pendingInteractionOrder: [String] = []
     @ObservationIgnored var reactionReactorLoadTasks: [ReactionReactorLoadKey: Task<Void, Never>] = [:]
+    @ObservationIgnored var reactionReactorLoadIDs: [ReactionReactorLoadKey: UUID] = [:]
     @ObservationIgnored var loadedReactionReactorPreviews:
         [ReactionReactorLoadKey: (count: Int, reactors: [ReactionReactor])] = [:]
     @ObservationIgnored var failedReactionReactorLoads: [ReactionReactorLoadKey: Date] = [:]

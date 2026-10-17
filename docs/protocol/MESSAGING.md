@@ -107,6 +107,38 @@ If the target is absent from the working set, read `around={message}&limit=1`
 before deciding whether PUT/DELETE is needed. Missing/failed reads prevent the
 mutation; an already satisfied intent sends nothing.
 
+Reaction changes invalidate saved previews and pending reads in both the model
+and provider. A response started before a change must not save or apply its
+identities, even when removals and additions return the count to its earlier
+value. Shared-load waiters recheck the retained reaction before loading again.
+
+Reaction coalescing reduces requests but does not prevent server rate limits.
+A definite reaction `429` records the transport cooldown and returns a typed
+rate-limit error to the model. The model retains optimistic state and permits
+one retry after that cooldown, using the latest desired state; returning to the
+confirmed state cancels the request. Clicks remain interactive throughout the
+wait and in-flight retry. A rejected retry or another error rolls back and uses
+the existing error presentation. Account teardown or message deletion cancels
+pending cooldown work. Each provider invocation still makes only one attempt;
+timeouts and ambiguous failures are never replayed automatically.
+
+The [official stable client](https://discord.com/assets/web.4d4b2f75fdea5470.js)
+(build 641004, inspected and observed 17 October 2026) likewise keeps its first
+rate-limit failure invisible. Its reaction actions retain the optimistic state
+on the first `429` and schedule one retry using the
+integer `Retry-After` header; rejection of that retry rolls back. Its shared HTTP
+helper queues subsequent requests for a rate-limited URL and drains them after
+the cooldown with backoff. Rapid same-emoji toggles can still produce overlapping
+requests, shared-resource `429`s and delayed queued changes without a rate-limit
+dialog. The observed `429`s supplied `Retry-After` and `retry_after` without
+bucket/remaining headers; do not infer a fixed reaction quota from successful
+requests or treat the debounce interval as a rate-limit budget.
+
+[Pinned Paicord](https://github.com/llsc12/Paicord/blob/694761c1938b73bb60bd58942674dfe73aab1135/PaicordLib/Sources/DiscordHTTP/ClientConfiguration.swift)
+corroborates header-driven bounded `429` recovery through its generic HTTP retry
+policy. [Pinned Swiftcord v1](https://github.com/SwiftcordApp/Swiftcord/blob/14465d927ebe1ba34b3befa00f9365fad7b56eb9/Swiftcord/Views/Message/MessageRenderViews/MessageView.swift)
+has only a stub add-reaction action, with no equivalent retry contract.
+
 Pin/unpin uses the dedicated `PIN_MESSAGES` permission and the message-pins
 route. One mutation per message runs at a time. Definite rejection rolls back;
 ambiguous failure is reconciled without automatic replay. Pin pages and Gateway

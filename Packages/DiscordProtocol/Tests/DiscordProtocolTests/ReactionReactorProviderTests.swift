@@ -77,6 +77,60 @@ struct ReactionReactorProviderTests {
         #expect(reactors.isEmpty)
         #expect(ReactionReactorURLProtocol.requestCount == 0)
     }
+
+    @Test func `reaction changes invalidate pending and same-count cached previews`() async throws {
+        ReactionReactorURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReactionReactorURLProtocol.self]
+        let provider = DiscordRESTProvider(
+            credentials: ReactionReactorCredentialStore(), handle: CredentialHandle(accountID: "1"),
+            session: URLSession(configuration: configuration)
+        )
+        let received = AsyncStream<Void>.makeStream()
+        let release = AsyncStream<Void>.makeStream()
+        defer {
+            received.continuation.finish()
+            release.continuation.finish()
+        }
+        await provider.setReactorResponseGate {
+            received.continuation.yield(())
+            var iterator = release.stream.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+        let first = Task {
+            try await provider.reactionReactors(
+                for: "👍", messageID: MessageID(rawValue: 300), channelID: ChannelID(rawValue: 200), reactionCount: 2
+            )
+        }
+        var iterator = received.stream.makeAsyncIterator()
+        _ = await iterator.next()
+        let removed = MessageReactionUpdate.remove(
+            channelID: ChannelID(rawValue: 200), messageID: MessageID(rawValue: 300),
+            userID: UserID(rawValue: 1), emoji: "👍", kind: .normal
+        )
+        await provider.receiveGatewayReactionForTesting(removed)
+        release.continuation.finish()
+        await #expect(throws: CancellationError.self) { try await first.value }
+        #expect(await provider.cachedReactionReactors.isEmpty)
+        #expect(await provider.reactionReactorTasks.isEmpty)
+
+        _ = try await provider.reactionReactors(
+            for: "👍", messageID: MessageID(rawValue: 300), channelID: ChannelID(rawValue: 200), reactionCount: 2
+        )
+        #expect(ReactionReactorURLProtocol.requestCount == 2)
+        await provider.receiveGatewayReactionForTesting(removed)
+        _ = try await provider.reactionReactors(
+            for: "👍", messageID: MessageID(rawValue: 300), channelID: ChannelID(rawValue: 200), reactionCount: 2
+        )
+        #expect(ReactionReactorURLProtocol.requestCount == 3)
+        await provider.disconnect()
+    }
+}
+
+private extension DiscordRESTProvider {
+    func setReactorResponseGate(_ callback: @escaping @Sendable () async -> Void) {
+        reactorResponseReceivedForTesting = callback
+    }
 }
 
 private actor ReactionReactorCredentialStore: CredentialStore {

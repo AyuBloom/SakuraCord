@@ -865,6 +865,7 @@ extension DiscordRESTProvider {
     }
 
     func applyGatewayReactionUpdate(_ update: MessageReactionUpdate) {
+        invalidateReactionReactors(channelID: update.channelID, messageID: update.messageID)
         if var message = cachedMessages[update.messageID] {
             if message.applyReactionUpdate(update, currentUserID: currentUser?.id) {
                 cachedMessages[message.id] = message
